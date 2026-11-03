@@ -1,5 +1,5 @@
-# AreaDeck is an additive Core layer in the native DSH plugin flow.
+# DSH Bay is an additive Core layer in the native DSH plugin flow.
 # DSH remains the owner of official surfaces and plugin lifecycle.
 - insert:
-    - id: areadeck-workbench-layout
+    - id: dsh-bay-workbench-layout
       name: '@dsh-workbench/core'

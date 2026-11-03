@@ -1,6 +1,6 @@
 # Alpha.17 validation record
 
-Candidate: `areadeck-0.2.2-alpha.17-dsh-0.2.1-rc.5`
+Candidate: `dsh-bay-0.2.2-alpha.17-dsh-0.2.1-rc.5`
 
 Recorded: 2026-11-04
 

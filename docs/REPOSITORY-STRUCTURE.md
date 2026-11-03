@@ -1,4 +1,4 @@
-# AreaDeck private repository structure
+# DSH Bay private repository structure
 
 This repository follows the useful conventions seen in active DSH plugin
 repositories: a bilingual README, a small root package manifest, a single
@@ -23,7 +23,7 @@ the client Area projection.
 The Sidebar/Workspace source index records the DSH rc5 commit and source digest.
 The private repository provenance file records that this checkout was derived
 from the merged Workbench candidate. It is not a claim that every future
-AreaDeck feature has already been validated in a clean rc5 desktop.
+DSH Bay feature has already been validated in a clean rc5 desktop.
 
 ## Product layers
 

@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "owner": "AreaDeck",
-  "candidateId": "areadeck-0.2.2-alpha.17-dsh-0.2.1-rc.5",
-  "productLine": "AreaDeck 0.2.2-alpha.17",
+  "owner": "DSH Bay",
+  "candidateId": "dsh-bay-0.2.2-alpha.17-dsh-0.2.1-rc.5",
+  "productLine": "DSH Bay 0.2.2-alpha.17",
   "upstream": {
     "generation": "0.2.1-rc.5",
     "commit": "b830ec950faba0a46dda564be3e2d854afed94f1",

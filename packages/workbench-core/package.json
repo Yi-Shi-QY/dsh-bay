@@ -91,8 +91,8 @@
       "coreCompatibility": "0.2.2-alpha.17",
       "activation": "restart-only",
       "dshGeneration": "0.2.1-rc.5",
-      "candidateId": "areadeck-0.2.2-alpha.17-dsh-0.2.1-rc.5",
-      "productLine": "AreaDeck 0.2.2-alpha.17",
+      "candidateId": "dsh-bay-0.2.2-alpha.17-dsh-0.2.1-rc.5",
+      "productLine": "DSH Bay 0.2.2-alpha.17",
       "upstreamCommit": "b830ec950faba0a46dda564be3e2d854afed94f1",
       "morePolicy": "deferred-official-only",
       "defaultInstall": [

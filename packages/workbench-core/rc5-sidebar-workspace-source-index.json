@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "product": "AreaDeck 0.2.2-alpha.17",
+  "product": "DSH Bay 0.2.2-alpha.17",
   "generation": "0.2.1-rc.5",
   "upstreamCommit": "b830ec950faba0a46dda564be3e2d854afed94f1",
   "sourceRoot": "packages/client",
@@ -206,14 +206,14 @@
         "destinations": [
           "packages/workbench-core/src/foundation/workbench-sidebar/generated/upstream"
         ],
-        "reason": "AreaDeck Core keeps the reviewed Area/session browser path while rc5 source uses ui-workspace/rows/WorkspaceBrowser.module.css"
+        "reason": "DSH Bay Core keeps the reviewed Area/session browser path while rc5 source uses ui-workspace/rows/WorkspaceBrowser.module.css"
       },
       {
         "path": "ui-workspace/WorkspaceBrowser.tsx",
         "destinations": [
           "packages/workbench-core/src/foundation/workbench-sidebar/generated/upstream"
         ],
-        "reason": "AreaDeck Area/session browser preserves explicit Area-local routing and does not consume the rc5 global current Session"
+        "reason": "DSH Bay Area/session browser preserves explicit Area-local routing and does not consume the rc5 global current Session"
       },
       {
         "path": "ui-workspace/subagent-lineage.ts",

@@ -1,22 +1,22 @@
 {
-  "name": "areadeck-private-staging",
-  "description": "Private staging repository for AreaDeck (随想域) on DSH",
+  "name": "dsh-bay-private-staging",
+  "description": "Private staging repository for DSH Bay (湾域) on DSH",
   "private": true,
   "version": "0.2.2-alpha.17",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Yi-Shi-QY/areadeck.git"
+    "url": "git+https://github.com/Yi-Shi-QY/dsh-bay.git"
   },
-  "homepage": "https://github.com/Yi-Shi-QY/areadeck",
+  "homepage": "https://github.com/Yi-Shi-QY/dsh-bay",
   "bugs": {
-    "url": "https://github.com/Yi-Shi-QY/areadeck/issues"
+    "url": "https://github.com/Yi-Shi-QY/dsh-bay/issues"
   },
   "keywords": [
     "deepseek-harness",
     "dsh",
     "dsh-plugin",
     "workbench",
-    "areadeck"
+    "dsh-bay"
   ],
   "type": "module",
   "packageManager": "pnpm@11.28.5",

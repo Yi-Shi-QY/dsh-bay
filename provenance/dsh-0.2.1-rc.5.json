@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "candidateId": "areadeck-0.2.2-alpha.17-dsh-0.2.1-rc.5",
-  "product": "AreaDeck / 随想域",
+  "candidateId": "dsh-bay-0.2.2-alpha.17-dsh-0.2.1-rc.5",
+  "product": "DSH Bay / 湾域",
   "workbenchVersion": "0.2.2-alpha.17",
   "dshGeneration": "0.2.1-rc.5",
   "upstream": {

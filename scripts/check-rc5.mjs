@@ -12,7 +12,7 @@ const root = readJson('package.json')
 const core = readJson('packages/workbench-core/package.json')
 const sourceIndex = readJson('packages/workbench-core/rc5-sidebar-workspace-source-index.json')
 const provenance = readJson('provenance/dsh-0.2.1-rc.5.json')
-const identity = { candidateId: 'areadeck-0.2.2-alpha.17-dsh-0.2.1-rc.5', version: WORKBENCH_CORE_VERSION, generation: WORKBENCH_DSH_GENERATION, commit: WORKBENCH_UPSTREAM_COMMIT }
+const identity = { candidateId: 'dsh-bay-0.2.2-alpha.17-dsh-0.2.1-rc.5', version: WORKBENCH_CORE_VERSION, generation: WORKBENCH_DSH_GENERATION, commit: WORKBENCH_UPSTREAM_COMMIT }
 
 assert.equal(root.version, WORKBENCH_CORE_VERSION)
 assert.equal(root.devDependencies['@deepseek-ai/dsh'], WORKBENCH_DSH_GENERATION)

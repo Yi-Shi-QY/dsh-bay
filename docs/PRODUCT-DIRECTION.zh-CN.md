@@ -1,6 +1,6 @@
-# 随想域产品方向
+# 湾域产品方向
 
-随想域的长期方向是让 DSH 插件形成一个轻量闭环：
+湾域的长期方向是让 DSH 插件形成一个轻量闭环：
 
 ```text
 开发 → 验证 → 组合 → 分享
@@ -18,7 +18,7 @@ Session、Files、Terminal、Browser 和其他原生内页。
 
 ## 验证
 
-随想域应逐步把 manifest、版本、依赖、权限、artifact digest、source
+湾域应逐步把 manifest、版本、依赖、权限、artifact digest、source
 provenance、Slot contract 和真实运行结果聚合成清晰的验证报告。
 
 ## 组合
@@ -36,7 +36,7 @@ LAN Share 可以成为不同分享方式，但共享 Session、凭据、绝对�
 ## 产品表达
 
 ```text
-AreaDeck｜随想域
+DSH Bay｜湾域
 面向 DSH 的多区域插件工作台
 从一个想法，做成一个可运行的 DSH 插件。
 ```

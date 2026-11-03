@@ -1,6 +1,6 @@
-# Contributing to AreaDeck
+# Contributing to DSH Bay
 
-This repository is private staging for the AreaDeck Core candidate. Before a
+This repository is private staging for the DSH Bay Core candidate. Before a
 public contribution workflow is opened, changes must preserve the Core-only
 delivery boundary and the DSH `0.2.1-rc.5` contract.
 

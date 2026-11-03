@@ -23,8 +23,8 @@ const bytes = readFileSync(path.join(output, tarball))
 const manifest = JSON.parse(readFileSync(path.join(core, 'package.json'), 'utf8'))
 const candidate = {
   status: 'private-staging',
-  candidateId: 'areadeck-0.2.2-alpha.17-dsh-0.2.1-rc.5',
-  product: 'AreaDeck / 随想域',
+  candidateId: 'dsh-bay-0.2.2-alpha.17-dsh-0.2.1-rc.5',
+  product: 'DSH Bay / 湾域',
   packageName: manifest.name,
   version: manifest.version,
   dshGeneration: manifest.dsh.workbench.dshGeneration,
