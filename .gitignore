@@ -1,0 +1,11 @@
+node_modules/
+lib/
+.tmp-*/
+.turbo/
+*.tsbuildinfo
+*.tgz
+releases/validation/
+packages/workbench-core/pnpm-lock.yaml
+*.log
+.env
+.env.*

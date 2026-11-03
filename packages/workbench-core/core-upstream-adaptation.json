@@ -1,0 +1,164 @@
+{
+  "schemaVersion": 2,
+  "migration": "dsh-0.2.1-rc.5-to-workbench-0.2.2-alpha.17",
+  "candidate": "areadeck-0.2.2-alpha.17-dsh-0.2.1-rc.5",
+  "upstream": {
+    "repository": "https://github.com/deepseek-ai/deepseek-harness.git",
+    "tag": "dsh-v0.2.1-rc.5",
+    "commit": "b830ec950faba0a46dda564be3e2d854afed94f1",
+    "generation": "0.2.1-rc.5",
+    "acquisition": {
+      "status": "git-checkout-and-npm-verified",
+      "checkout": "detached-local-checkout@b830ec950faba0a46dda564be3e2d854afed94f1",
+      "sourceOfTypes": "@deepseek-ai/dsh-client-ui-* npm packages at 0.2.1-rc.5",
+      "sourceModification": "none",
+      "sourceEvidence": "packages/workbench-core/rc5-sidebar-workspace-source-index.json; provenance/dsh-0.2.1-rc.5.json",
+      "cleanCheckout": true
+    }
+  },
+  "delivery": {
+    "workbenchVersion": "0.2.2-alpha.17",
+    "productLine": "AreaDeck 0.2.2-alpha.17",
+    "mode": "core-only",
+    "defaultInstall": [
+      "@dsh-workbench/core"
+    ],
+    "excluded": [
+      "@dsh-workbench/conversation-suite",
+      "@dsh-workbench/svgdeepseek-pet"
+    ],
+    "more": "deferred-workbench-official-only",
+    "pluginManager": "native-dsh-settings-entry"
+  },
+  "compatibilityPatches": [
+    {
+      "id": "session-placement-agent-preset",
+      "status": "verified-adapted-runtime",
+      "owner": "packages/workbench/src/client/workbench-session-placement.ts",
+      "reason": "rc.5 retains agentPreset on connect/create"
+    },
+    {
+      "id": "session-placement-draft-keep",
+      "status": "clean",
+      "owner": "generated-workspace-startSession",
+      "reason": "rc.5 retains whenDraftExists keep/replace/append"
+    },
+    {
+      "id": "current-session-isolation",
+      "status": "clean",
+      "owner": "packages/workbench/src/client/workbench-session-placement.ts",
+      "reason": "explicit sessions.create sibling remains required"
+    },
+    {
+      "id": "conversation-view-actions",
+      "status": "verified",
+      "owner": "packages/workbench-core/src/client/native-area-slot-renderer.tsx",
+      "reason": "rc.5 public slot contract is forwarded Area-locally"
+    },
+    {
+      "id": "sidebar-guide-actions",
+      "status": "verified",
+      "owner": "packages/workbench-core/src/client/native-area-slot-renderer.tsx",
+      "reason": "rc.5 public guide actions contract is forwarded without global tab mutation"
+    },
+    {
+      "id": "entry-customization-filter",
+      "status": "verified",
+      "owner": "packages/workbench-core/src/client/native-area-slot-renderer.tsx",
+      "reason": "only the official entry-customization registration is hidden at the Workbench projection boundary"
+    },
+    {
+      "id": "expanded-area-minimum-footprint",
+      "status": "reverted-to-15.1-baseline",
+      "owner": "Workbench 15.1 baseline: packages/workbench-core/src/foundation/collapse-projection.ts; packages/workbench-core/src/foundation/WorkbenchFrame.tsx",
+      "reason": "Container inner-page split projection intentionally remains on the Workbench 15.1 geometry algorithm; DSH 0.2.1-rc.5 adaptation does not change Area minimum-track semantics."
+    },
+    {
+      "id": "official-inner-page-contracts",
+      "status": "verified",
+      "owner": "packages/workbench-core/src/client/official-area-editors.tsx",
+      "reason": "native entries retain Area-local Session and fallback seams"
+    },
+    {
+      "id": "generated-source-materialization",
+      "status": "clean",
+      "owner": "Sidebar/Workspace controlled rebase",
+      "reason": "All 34 rc5 source files are present in the snapshot, three exact mirrors, and all three runtime destinations; 13 explicit source paths retain reviewed Workbench adaptations and three historical runtime extras are registered, with source, patch, typecheck, targeted renderer tests, and native registration scan verified"
+    },
+    {
+      "id": "conversation-generated-source",
+      "status": "deferred",
+      "owner": "packages/workbench/src/client/workbench-conversation/copy-manifest.json",
+      "reason": "Conversation/Trajectory generated copies remain historical rc.3 evidence and are excluded from Core-only"
+    },
+    {
+      "id": "creator-preset-override",
+      "status": "obsolete",
+      "owner": "packages/workbench-core/presets/workbench-creator",
+      "reason": "global dsh-skill provider remains the public path; no Workbench Creator draft adapter"
+    }
+  ],
+  "newUiSlots": {
+    "conversation.session.header.views.actions": {
+      "kind": "list",
+      "scope": "root",
+      "contract": "ConversationViewActionsOwnerProps",
+      "areaIsolation": "native-renderer-session-area",
+      "rc5": "verified"
+    },
+    "sidebar.right.tab.guide.actions": {
+      "kind": "list",
+      "scope": "root",
+      "contract": "SidebarRightGuideActionsOwnerProps",
+      "areaIsolation": "NativeSidebarAreaEditor.openNativeTab",
+      "rc5": "verified"
+    }
+  },
+  "innerPages": {
+    "dynamicNativeProjection": [
+      "workspace-files",
+      "terminal",
+      "document-preview",
+      "changes-review",
+      "plan",
+      "schedule-task",
+      "guide",
+      "subagent-chat",
+      "browser-native-entry"
+    ],
+    "wrapperOwned": [
+      "area-editor-declaration",
+      "area-session-binding",
+      "layout-persistence",
+      "fallback-pages",
+      "browser-iframe-sandbox",
+      "native-store-lifecycle"
+    ],
+    "verification": "registration-scan-passed; targeted native projection tests passed; desktop smoke remains a release gate"
+  },
+  "generated": {
+    "api": "consumed from rc.5 package declarations",
+    "catalog": "rc.5 metadata recorded in candidate provenance",
+    "graph": "pnpm lock regenerated against rc.5",
+    "copyManifests": [
+      "packages/workbench-core/core-foundation-copy-manifest.json",
+      "packages/workbench-core/src/foundation/workbench-sidebar.copy-manifest.json"
+    ],
+    "sourceDigest": "28b18fcb45e98bb5a5b4451bb65e4f4f87a4ea6ba727aa9be81cb977c76f78ee",
+    "patchDigest": "f8f5e33595034f7cae9a82a4525e58525520c47917fc3ac197d6ff10c07c100e",
+    "lockfileDigest": "f8ccc800d6fe1a70a985f8e1dab7878b2c18926023c5cf63434ab3b624fb5fca",
+    "sourceMaterialization": {
+      "mode": "exact-rc5-source-mirror-and-verified-adapted-destination",
+      "sourceFiles": 34,
+      "runtimeDestinations": 1,
+      "adaptedSourceFiles": 13,
+      "runtimeExtras": 3,
+      "verification": "all non-adapted runtime files hash-match rc5 source; adapted paths and historical extras are explicitly registered"
+    }
+  },
+  "rollback": {
+    "historicalEvidence": "retained-in-source-repository",
+    "independentCandidate": true,
+    "derivedFrom": "workbench-15.2-rc5-core-only-20261102"
+  }
+}

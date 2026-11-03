@@ -1,0 +1,530 @@
+import { createServer, request as httpRequest, type IncomingMessage, type ServerResponse } from 'node:http'
+import { networkInterfaces } from 'node:os'
+import { connect as connectNet } from 'node:net'
+import type { Duplex } from 'node:stream'
+import { createHash } from 'node:crypto'
+import { URL } from 'node:url'
+import type { WorkbenchShareSessionManagerV1, WorkbenchShareSessionV1, WorkbenchShareViewLeaseV1 } from './host-workbench-share-session.ts'
+
+const SHARE_COOKIE = 'dsh-workbench-share'
+const MAX_PROXY_BODY = 300 * 1024 * 1024
+const MAX_PROXY_IN_FLIGHT = 64
+const MAX_PROXY_QUEUE = 128
+
+interface NativeViewV1 {
+  readonly schemaVersion: 1
+  readonly windowId: string
+  readonly workbenchId: string
+  readonly mode: 'browser-workbench'
+  readonly closeToken: string
+}
+interface PreparedViewV1 {
+  readonly windowId: string
+  readonly url: string
+  readonly expiresAt: number
+}
+
+export interface WorkbenchShareGatewayOptionsV1 {
+  readonly upstreamOrigin: string
+  readonly manager: WorkbenchShareSessionManagerV1
+  readonly prepareView: (workbenchId: string) => Promise<PreparedViewV1>
+  readonly redeemView: (ticket: string) => Promise<NativeViewV1>
+  readonly closeView: (closeToken: string) => Promise<void>
+  readonly networkInterfaces?: NodeJS.Dict<readonly { readonly family?: string | number; readonly address: string; readonly internal?: boolean }[] | undefined>
+}
+
+export interface WorkbenchShareGatewayMetricsV1 {
+  readonly httpRequests: number
+  readonly httpErrors: number
+  readonly httpInFlight: number
+  readonly queueDepth: number
+  readonly websocketConnections: number
+  readonly websocketReconnects: number
+  readonly lastErrorAt?: number
+}
+
+export interface WorkbenchShareGatewayV1 {
+  readonly host: string
+  readonly port: number
+  readonly origin: string
+  startShare(workbenchId: string): Promise<{ readonly url: string; readonly status: 'started' | 'already-active' }>
+  stopShare(workbenchId: string): Promise<void>
+  kickGuest(workbenchId: string, leaseId: string): Promise<boolean>
+  getMetrics(workbenchId: string): WorkbenchShareGatewayMetricsV1
+  close(): Promise<void>
+}
+
+function digest(value: string): string { return createHash('sha256').update(value).digest('hex') }
+
+function loopbackHost(hostname: string): boolean {
+  const normalized = hostname.toLowerCase().replace(/^\[|\]$/gu, '')
+  if (normalized === 'localhost' || normalized === '::1') return true
+  const parts = normalized.split('.').map(Number)
+  return parts.length === 4 && parts[0] === 127 && parts.every(part => Number.isInteger(part) && part >= 0 && part <= 255)
+}
+
+function privateIPv4(address: string): boolean {
+  const parts = address.split('.').map(Number)
+  if (parts.length !== 4 || parts.some(part => !Number.isInteger(part) || part < 0 || part > 255)) return false
+  const first = parts[0] ?? -1
+  const second = parts[1] ?? -1
+  return first === 10 || (first === 172 && second >= 16 && second <= 31)
+    || (first === 192 && second === 168)
+}
+
+export function selectPrivateIPv4(interfaces: WorkbenchShareGatewayOptionsV1['networkInterfaces'] = networkInterfaces()): string | undefined {
+  for (const rows of Object.values(interfaces)) {
+    for (const row of rows ?? []) {
+      const family = typeof row.family === 'number' ? row.family === 4 : row.family === 'IPv4'
+      if (family && row.internal !== true && privateIPv4(row.address)) return row.address
+    }
+  }
+  return undefined
+}
+
+function cookieValue(request: IncomingMessage): string | undefined {
+  const raw = request.headers.cookie
+  if (typeof raw !== 'string') return undefined
+  for (const part of raw.split(';')) {
+    const [name, ...rest] = part.trim().split('=')
+    if (name === SHARE_COOKIE) return rest.join('=') || undefined
+  }
+  return undefined
+}
+
+function normalizeRemoteAddress(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined
+  const normalized = value.replace(/^::ffff:/iu, '')
+  return normalized === '::1' ? '127.0.0.1' : normalized
+}
+
+function deviceFromUserAgent(value: string | undefined): string | undefined {
+  if (value === undefined || value.trim() === '') return undefined
+  const browser = /edg\//iu.test(value) ? 'Edge'
+    : /chrome\//iu.test(value) ? 'Chrome'
+      : /firefox\//iu.test(value) ? 'Firefox'
+        : /safari\//iu.test(value) ? 'Safari' : 'Browser'
+  const os = /windows/iu.test(value) ? 'Windows'
+    : /mac os/iu.test(value) ? 'macOS'
+      : /android/iu.test(value) ? 'Android'
+        : /iphone|ipad/iu.test(value) ? 'iOS'
+          : /linux/iu.test(value) ? 'Linux' : 'Unknown OS'
+  return `${browser} / ${os}`
+}
+
+function validNickname(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length >= 1 && value.trim().length <= 32
+    && !/[\u0000-\u001f\u007f]/u.test(value)
+}
+
+function cleanHeaders(headers: IncomingMessage['headers'], upstream: URL, cookie: string): Record<string, string | undefined> {
+  const output: Record<string, string | undefined> = {}
+  for (const [name, value] of Object.entries(headers)) {
+    if (value === undefined || ['host', 'origin', 'cookie', 'connection', 'content-length'].includes(name)) continue
+    output[name] = Array.isArray(value) ? value.join(', ') : value
+  }
+  output.host = upstream.host
+  output.origin = upstream.origin
+  output.cookie = cookie
+  return output
+}
+
+function writeSecurityHeaders(response: ServerResponse, extra: Record<string, string> = {}): void {
+  response.setHeader('cache-control', 'no-store')
+  response.setHeader('referrer-policy', 'no-referrer')
+  for (const [name, value] of Object.entries(extra)) response.setHeader(name, value)
+}
+
+async function readResponseBody(response: IncomingMessage, limit = MAX_PROXY_BODY): Promise<Buffer> {
+  const chunks: Buffer[] = []; let size = 0
+  for await (const chunk of response) {
+    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+    size += bytes.byteLength
+    if (size > limit) throw new Error('workbench-share-upstream-response-too-large')
+    chunks.push(bytes)
+  }
+  return Buffer.concat(chunks, size)
+}
+
+function requestUpstream(upstream: URL, request: IncomingMessage, cookie: string, body?: Buffer): Promise<{ response: IncomingMessage; body: Buffer }> {
+  return new Promise((resolve, reject) => {
+    const target = httpRequest({ hostname: upstream.hostname, port: upstream.port, path: `${upstream.pathname}${upstream.search}`, method: request.method, headers: cleanHeaders(request.headers, upstream, cookie) }, response => {
+      void readResponseBody(response).then(bytes => resolve({ response, body: bytes }), reject)
+    })
+    target.once('error', reject)
+    if (body !== undefined) target.end(body)
+    else request.pipe(target)
+  })
+}
+
+function responseHeaders(response: IncomingMessage, upstream: URL, gatewayOrigin: string): Record<string, string | string[]> {
+  const output: Record<string, string | string[]> = {}
+  for (const [name, value] of Object.entries(response.headers)) {
+    if (value === undefined || name === 'set-cookie' || name === 'connection' || name === 'transfer-encoding') continue
+    if (name === 'location' && typeof value === 'string') {
+      try {
+        const location = new URL(value, upstream)
+        if (location.origin === upstream.origin) {
+          // DSH auth and native browser-view redirects can carry credentials
+          // or one-time tickets in the query. They are Host-only state and
+          // must never become a guest-visible URL.
+          location.searchParams.delete('token')
+          location.searchParams.delete('workbench')
+          output[name] = `${gatewayOrigin}${location.pathname}${location.search}${location.hash}`
+        } else output[name] = value
+      } catch { output[name] = value }
+    } else output[name] = value
+  }
+  return output
+}
+
+function injectView(html: string, view: NativeViewV1): string {
+  const marker = `<script>globalThis.__WORKBENCH_WINDOW_VIEW__=${JSON.stringify(view)};</script>`
+    + '<script>globalThis.__WORKBENCH_SHARE_GUEST__=true;</script>'
+    + '<script>history.replaceState(null,"","/workbench");</script>'
+  return html.replace(/<\/head>/iu, `${marker}</head>`)
+}
+
+function leaseNativeView(lease: WorkbenchShareViewLeaseV1): NativeViewV1 | undefined {
+  return lease.nativeView === undefined ? undefined : {
+    schemaVersion: 1, windowId: lease.nativeView.windowId, workbenchId: lease.workbenchId,
+    mode: 'browser-workbench', closeToken: lease.nativeView.closeToken,
+  }
+}
+/**
+ * A small reverse proxy bound to one private IPv4. The proxy is intentionally
+ * dumb about Workbench state: it only authenticates the bearer link, leases a
+ * native view, and forwards the existing DSH document/API/WebSocket carriers.
+ */
+export async function createWorkbenchShareGateway(options: WorkbenchShareGatewayOptionsV1): Promise<WorkbenchShareGatewayV1> {
+  const host = selectPrivateIPv4(options.networkInterfaces)
+  if (host === undefined) throw new Error('workbench-share-no-private-ipv4')
+  const upstream = new URL(options.upstreamOrigin)
+  if (upstream.protocol !== 'http:' || !loopbackHost(upstream.hostname)) throw new Error('workbench-share-upstream-must-be-loopback')
+  const server = createServer((request, response) => { void handleHttp(request, response).catch(() => { if (!response.headersSent) { writeSecurityHeaders(response); response.writeHead(502); response.end('upstream unavailable') } else response.destroy() }) })
+  const gateway = await new Promise<{ port: number }>((resolve, reject) => {
+    server.once('error', reject)
+    server.listen(0, host, () => { server.off('error', reject); const address = server.address(); if (address === null || typeof address === 'string') { reject(new Error('workbench-share-bind-failed')); return } resolve({ port: address.port }) })
+  })
+  const sessions = options.manager
+  const guestSockets = new Map<string, Set<Duplex>>()
+  const metrics = new Map<string, {
+    httpRequests: number
+    httpErrors: number
+    httpInFlight: number
+    queueDepth: number
+    websocketConnections: number
+    websocketReconnects: number
+    lastErrorAt?: number
+  }>()
+  const metricsFor = (workbenchId: string) => {
+    let value = metrics.get(workbenchId)
+    if (value === undefined) {
+      value = { httpRequests: 0, httpErrors: 0, httpInFlight: 0, queueDepth: 0, websocketConnections: 0, websocketReconnects: 0 }
+      metrics.set(workbenchId, value)
+    }
+    return value
+  }
+  const recordRequestError = (workbenchId: string): void => {
+    const value = metricsFor(workbenchId)
+    value.httpErrors += 1
+    value.lastErrorAt = Date.now()
+  }
+  let proxyInFlight = 0
+  let gatewayClosed = false
+  const proxyQueue: { readonly workbenchId: string; readonly resolve: (accepted: boolean) => void }[] = []
+  const queueDepthFor = (workbenchId: string): number => proxyQueue.reduce((count, item) => count + (item.workbenchId === workbenchId ? 1 : 0), 0)
+  const acquireProxySlot = (workbenchId: string): Promise<boolean> => {
+    if (gatewayClosed) return Promise.resolve(false)
+    if (proxyInFlight < MAX_PROXY_IN_FLIGHT) {
+      proxyInFlight += 1
+      return Promise.resolve(true)
+    }
+    if (proxyQueue.length >= MAX_PROXY_QUEUE) return Promise.resolve(false)
+    return new Promise(resolve => { proxyQueue.push({ workbenchId, resolve }) })
+  }
+  const releaseProxySlot = (): void => {
+    proxyInFlight = Math.max(0, proxyInFlight - 1)
+    const next = proxyQueue.shift()
+    if (next === undefined) return
+    proxyInFlight += 1
+    next.resolve(true)
+  }
+  const leaseInitializations = new Map<string, Promise<{ lease: WorkbenchShareViewLeaseV1; view: NativeViewV1; ownerCookie: string; documentHtml: string } | { error: string }>>()
+
+  async function beginLease(session: WorkbenchShareSessionV1, existing?: WorkbenchShareViewLeaseV1): Promise<{ lease: WorkbenchShareViewLeaseV1; view: NativeViewV1; ownerCookie: string; documentHtml: string } | { error: string }> {
+    const ownsLease = existing === undefined
+    const created = existing === undefined ? sessions.createLease(session) : { lease: existing, cookie: undefined }
+    if ('error' in created) return created
+    try {
+      const prepared = await options.prepareView(session.workbenchId)
+      const preparedUrl = new URL(prepared.url)
+      const document = await requestUpstream(preparedUrl, { method: 'GET', headers: {} } as IncomingMessage, '', Buffer.alloc(0))
+      const setCookie = document.response.headers['set-cookie']
+      const ownerCookie = Array.isArray(setCookie) ? setCookie.map(value => value.split(';', 1)[0]).join('; ') : ''
+      if (ownerCookie === '') throw new Error('workbench-share-upstream-auth-cookie-missing')
+      const ticket = preparedUrl.searchParams.get('workbench')
+      if (ticket === null) throw new Error('workbench-share-native-ticket-missing')
+      const redeemed = await options.redeemView(ticket)
+      if (redeemed.schemaVersion !== 1 || typeof redeemed.windowId !== 'string'
+        || typeof redeemed.workbenchId !== 'string' || redeemed.mode !== 'browser-workbench'
+        || typeof redeemed.closeToken !== 'string') throw new Error('workbench-share-native-redeem-failed')
+      if (!session.leases.has(created.lease.leaseId)) {
+        await options.closeView(redeemed.closeToken).catch(() => {})
+        throw new Error('workbench-share-session-stopped')
+      }
+      created.lease.nativeView = { windowId: redeemed.windowId, closeToken: redeemed.closeToken }
+      created.lease.ownerCookie = ownerCookie
+      return { lease: created.lease, view: redeemed, ownerCookie, documentHtml: document.body.toString('utf8') }
+    } catch (error) {
+      if (ownsLease) sessions.removeLease(created.lease)
+      throw error
+    }
+  }
+
+  async function handleHttp(request: IncomingMessage, response: ServerResponse): Promise<void> {
+    if (request.method !== 'GET' && request.method !== 'HEAD' && request.method !== 'POST') { writeSecurityHeaders(response); response.writeHead(405); response.end(); return }
+    const url = new URL(request.url ?? '/', `http://${host}:${String(gateway.port)}`)
+    if (url.pathname === '/api/workbench-share/lifecycle') {
+      if (request.method !== 'GET' && request.method !== 'HEAD') { writeSecurityHeaders(response); response.writeHead(405); response.end(); return }
+      const rawCookie = cookieValue(request)
+      const state = rawCookie === undefined ? undefined : sessions.findCookieState(rawCookie)
+      if (state?.status === 'active') {
+        const payload = JSON.stringify({ state: 'active', workbenchId: state.session.workbenchId })
+        writeSecurityHeaders(response, { 'content-type': 'application/json; charset=utf-8', 'content-length': String(Buffer.byteLength(payload)) })
+        response.writeHead(200); response.end(request.method === 'HEAD' ? undefined : payload); return
+      }
+      if (state?.status === 'stopped' || state?.status === 'kicked') {
+        const payload = JSON.stringify({ code: `workbench-share-${state.status}`, state: state.status })
+        writeSecurityHeaders(response, { 'content-type': 'application/json; charset=utf-8', 'x-dsh-share-state': state.status, 'content-length': String(Buffer.byteLength(payload)) })
+        response.writeHead(410); response.end(request.method === 'HEAD' ? undefined : payload); return
+      }
+      writeSecurityHeaders(response); response.writeHead(401); response.end('workbench share authorization required'); return
+    }
+    if (url.pathname === '/workbench' && url.searchParams.has('share')) {
+      if (request.method !== 'GET' || url.searchParams.getAll('share').length !== 1 || [...url.searchParams.keys()].some(key => key !== 'share')) { writeSecurityHeaders(response); response.writeHead(400); response.end(); return }
+      const session = sessions.findByToken(url.searchParams.get('share')!)
+      if (session === undefined) { writeSecurityHeaders(response); response.writeHead(410); response.end('share link expired'); return }
+      const remoteAddress = normalizeRemoteAddress(request.socket.remoteAddress)
+      const device = deviceFromUserAgent(request.headers['user-agent'] as string | undefined)
+      const lease = sessions.createLease(session, {
+        ...(remoteAddress === undefined ? {} : { ip: remoteAddress }),
+        ...(device === undefined ? {} : { userAgent: device }),
+      })
+      if ('error' in lease) { writeSecurityHeaders(response); response.writeHead(429); response.end(lease.error); return }
+      const cookie = lease.cookie
+      writeSecurityHeaders(response, { location: '/workbench', 'set-cookie': `${SHARE_COOKIE}=${cookie}; Path=/; HttpOnly; SameSite=Strict` })
+      response.writeHead(303); response.end(); return
+    }
+    const rawCookie = cookieValue(request)
+    const found = rawCookie === undefined ? undefined : sessions.findLease(rawCookie)
+    if (found === undefined) { writeSecurityHeaders(response); response.writeHead(401); response.end('workbench share authorization required'); return }
+    const { session, lease } = found
+    if (!await acquireProxySlot(session.workbenchId)) {
+      recordRequestError(session.workbenchId)
+      writeSecurityHeaders(response, { 'retry-after': '1', 'x-dsh-share-state': 'overloaded' })
+      response.writeHead(503)
+      response.end('workbench share gateway is busy')
+      return
+    }
+    const sessionMetrics = metricsFor(session.workbenchId)
+    sessionMetrics.httpRequests += 1
+    sessionMetrics.httpInFlight += 1
+    const remoteAddress = normalizeRemoteAddress(request.socket.remoteAddress)
+    const device = deviceFromUserAgent(request.headers['user-agent'] as string | undefined)
+    sessions.updateGuest(lease, {
+      ...(remoteAddress === undefined ? {} : { ip: remoteAddress }),
+      ...(device === undefined ? {} : { device }),
+      lastSeenAt: Date.now(),
+    })
+    let requestFinished = false
+    const finishRequest = () => {
+      if (requestFinished) return
+      requestFinished = true
+      sessionMetrics.httpInFlight = Math.max(0, sessionMetrics.httpInFlight - 1)
+      releaseProxySlot()
+    }
+    response.once('finish', finishRequest)
+    response.once('close', finishRequest)
+    const ownerCookie = lease.ownerCookie
+    if (url.pathname === '/api/workbench-share/guest-profile' && request.method === 'GET') {
+      const payload = JSON.stringify({ nickname: lease.nickname })
+      writeSecurityHeaders(response, { 'content-type': 'application/json; charset=utf-8', 'content-length': String(Buffer.byteLength(payload)) })
+      response.writeHead(200); response.end(payload); finishRequest(); return
+    }
+    if (url.pathname === '/api/workbench-share/guest-profile' && request.method === 'POST') {
+      try {
+        const body = JSON.parse((await readResponseBody(request, 8 * 1024)).toString('utf8')) as { nickname?: unknown }
+        if (!validNickname(body.nickname)) { recordRequestError(session.workbenchId); writeSecurityHeaders(response); response.writeHead(400); response.end('invalid nickname'); finishRequest(); return }
+        sessions.setNickname(session.workbenchId, lease.leaseId, body.nickname.trim())
+        const payload = JSON.stringify({ nickname: lease.nickname })
+        writeSecurityHeaders(response, { 'content-type': 'application/json; charset=utf-8', 'content-length': String(Buffer.byteLength(payload)) })
+        response.writeHead(200); response.end(payload); finishRequest(); return
+      } catch {
+        recordRequestError(session.workbenchId); writeSecurityHeaders(response); response.writeHead(400); response.end('invalid guest profile'); finishRequest(); return
+      }
+    }
+    if (url.pathname === '/api/workbench-share/heartbeat' && request.method === 'POST') {
+      try {
+        const body = JSON.parse((await readResponseBody(request, 4 * 1024)).toString('utf8')) as { rttMs?: unknown }
+        if (typeof body.rttMs !== 'number' || !Number.isFinite(body.rttMs) || body.rttMs < 0 || body.rttMs > 60_000) {
+          recordRequestError(session.workbenchId); writeSecurityHeaders(response); response.writeHead(400); response.end('invalid heartbeat'); finishRequest(); return
+        }
+        sessions.updateGuest(lease, { rttMs: Math.round(body.rttMs), lastSeenAt: Date.now() })
+        writeSecurityHeaders(response, { 'content-type': 'application/json; charset=utf-8' })
+        response.writeHead(204); response.end(); finishRequest(); return
+      } catch {
+        recordRequestError(session.workbenchId); writeSecurityHeaders(response); response.writeHead(400); response.end('invalid heartbeat'); finishRequest(); return
+      }
+    }
+    if (url.pathname === '/workbench' && (url.search === '' || url.search === '?')) {
+      let native = leaseNativeView(lease)
+      let documentHtml: string | undefined
+      if (native === undefined || ownerCookie === undefined) {
+        let initialization = leaseInitializations.get(lease.leaseId)
+        if (initialization === undefined) {
+          initialization = beginLease(session, lease)
+          leaseInitializations.set(lease.leaseId, initialization)
+          void initialization.then(() => leaseInitializations.delete(lease.leaseId), () => leaseInitializations.delete(lease.leaseId))
+        }
+        const prepared = await initialization
+        if ('error' in prepared) { writeSecurityHeaders(response); response.writeHead(429); response.end(prepared.error); return }
+        native = prepared.view
+        documentHtml = prepared.documentHtml
+      }
+      if (documentHtml === undefined) {
+        const upstreamResponse = await requestUpstream(new URL('/workbench', upstream), request, ownerCookie ?? '')
+        documentHtml = upstreamResponse.body.toString('utf8')
+      }
+      const html = injectView(documentHtml, native!)
+      writeSecurityHeaders(response, { 'content-type': 'text/html; charset=utf-8', 'content-length': String(Buffer.byteLength(html)) })
+      response.writeHead(200); response.end(request.method === 'HEAD' ? undefined : html); finishRequest(); return
+    }
+    if (url.pathname === '/api/workbench-window-close' && request.method === 'POST') {
+      const body = await readResponseBody(request, 64 * 1024)
+      try {
+        const parsed = JSON.parse(body.toString('utf8')) as { closeToken?: unknown }
+        if (typeof parsed.closeToken === 'string' && lease.nativeView?.closeToken === parsed.closeToken) {
+          await options.closeView(parsed.closeToken)
+          delete lease.nativeView
+          delete lease.ownerCookie
+        }
+      } catch { /* malformed beacon is treated like a closed view */ }
+      writeSecurityHeaders(response); response.writeHead(204); response.end(); finishRequest(); return
+    }
+    if (url.pathname.startsWith('/api/workbench-share/')) {
+      writeSecurityHeaders(response); response.writeHead(403); response.end('share management is host-only'); return
+    }
+    const upstreamUrl = new URL(`${url.pathname}${url.search}`, upstream)
+    const result = await requestUpstream(upstreamUrl, request, ownerCookie ?? '')
+    const headers = responseHeaders(result.response, upstream, `http://${host}:${String(gateway.port)}`)
+    for (const [name, value] of Object.entries(headers)) response.setHeader(name, value)
+    writeSecurityHeaders(response)
+    response.writeHead(result.response.statusCode ?? 502)
+    response.end(result.body)
+    finishRequest()
+  }
+
+  server.on('upgrade', (request, clientSocket, head) => {
+    const requestUrl = new URL(request.url ?? '/', `http://${host}:${String(gateway.port)}`)
+    if (requestUrl.pathname !== '/api/remote.mux' || request.headers.upgrade?.toLowerCase() !== 'websocket') {
+      clientSocket.end('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n')
+      return
+    }
+    const rawCookie = cookieValue(request)
+    const found = rawCookie === undefined ? undefined : sessions.findLease(rawCookie)
+    if (found === undefined) { clientSocket.end('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n'); return }
+    const socketMetrics = metricsFor(found.session.workbenchId)
+    const wasConnected = found.lease.websocketState === 'connected'
+    if (!wasConnected) {
+      if (found.lease.websocketReconnects > 0 || found.lease.lastSeenAt > found.lease.createdAt) socketMetrics.websocketReconnects += 1
+      sessions.updateGuest(found.lease, { websocketReconnects: found.lease.websocketReconnects + (found.lease.lastSeenAt > found.lease.createdAt ? 1 : 0), websocketState: 'connected', lastSeenAt: Date.now() })
+    }
+    socketMetrics.websocketConnections += 1
+    const sockets = guestSockets.get(found.lease.leaseId) ?? new Set<Duplex>()
+    sockets.add(clientSocket)
+    guestSockets.set(found.lease.leaseId, sockets)
+    const target = connectNet(Number(upstream.port), upstream.hostname)
+    const headers = cleanHeaders(request.headers, upstream, found.lease.ownerCookie ?? '')
+    headers.connection = 'Upgrade'
+    headers.upgrade = 'websocket'
+    target.once('connect', () => {
+      const path = request.url ?? '/'
+      const lines = [`GET ${path} HTTP/1.1`, ...Object.entries(headers).filter(([, value]) => value !== undefined).map(([name, value]) => `${name}: ${value}`), '', '']
+      target.write(lines.join('\r\n'))
+      if (head.length > 0) target.write(head)
+      clientSocket.pipe(target); target.pipe(clientSocket)
+    })
+    const close = () => {
+      clientSocket.destroy(); target.destroy()
+      sockets.delete(clientSocket)
+      socketMetrics.websocketConnections = Math.max(0, socketMetrics.websocketConnections - 1)
+      sessions.updateGuest(found.lease, { websocketState: 'disconnected', lastSeenAt: Date.now() })
+      if (sockets.size === 0) guestSockets.delete(found.lease.leaseId)
+    }
+    target.once('error', close); clientSocket.once('error', close); clientSocket.once('close', () => target.destroy()); target.once('close', () => clientSocket.destroy())
+  })
+
+  const shareUrls = new Map<string, string>()
+  let closePromise: Promise<void> | undefined
+  const stopShare = async (workbenchId: string): Promise<void> => {
+    const session = sessions.getSession(workbenchId)
+    if (session === undefined) return
+    for (const lease of session.leases.values()) {
+      for (const socket of guestSockets.get(lease.leaseId) ?? []) socket.destroy()
+      guestSockets.delete(lease.leaseId)
+      if (lease.nativeView !== undefined) await options.closeView(lease.nativeView.closeToken).catch(() => {})
+    }
+    sessions.stop(workbenchId)
+    shareUrls.delete(workbenchId)
+    metrics.delete(workbenchId)
+  }
+  return {
+    host, port: gateway.port, origin: `http://${host}:${String(gateway.port)}`,
+    async startShare(workbenchId) {
+      const existing = sessions.getSession(workbenchId)
+      if (existing !== undefined) {
+        const current = shareUrls.get(workbenchId)
+        if (current !== undefined) return { status: 'already-active', url: current }
+      }
+      const started = sessions.start(workbenchId, host, gateway.port, '')
+      if (!started.ok || started.token === undefined) throw new Error(started.error ?? 'workbench-share-start-failed')
+      const url = `http://${host}:${String(gateway.port)}/workbench?share=${encodeURIComponent(started.token)}`
+      shareUrls.set(workbenchId, url)
+      return { status: 'started', url }
+    },
+    stopShare,
+    async kickGuest(workbenchId, leaseId) {
+      const session = sessions.getSession(workbenchId)
+      const lease = sessions.revokeLease(workbenchId, leaseId, 'kicked')
+      if (session === undefined || lease === undefined) return false
+      for (const socket of guestSockets.get(lease.leaseId) ?? []) socket.destroy()
+      guestSockets.delete(lease.leaseId)
+      if (lease.nativeView !== undefined) await options.closeView(lease.nativeView.closeToken).catch(() => {})
+      return true
+    },
+    getMetrics(workbenchId) {
+      const value = metrics.get(workbenchId)
+      return {
+        httpRequests: value?.httpRequests ?? 0,
+        httpErrors: value?.httpErrors ?? 0,
+        httpInFlight: value?.httpInFlight ?? 0,
+        queueDepth: queueDepthFor(workbenchId),
+        websocketConnections: value?.websocketConnections ?? 0,
+        websocketReconnects: value?.websocketReconnects ?? 0,
+        ...(value?.lastErrorAt === undefined ? {} : { lastErrorAt: value.lastErrorAt }),
+      }
+    },
+    close() {
+      if (closePromise !== undefined) return closePromise
+      closePromise = (async () => {
+        gatewayClosed = true
+        while (proxyQueue.length > 0) proxyQueue.shift()!.resolve(false)
+        for (const session of sessions.getSnapshot()) await stopShare(session.workbenchId)
+        sessions.dispose(); metrics.clear()
+        await new Promise<void>(resolve => server.close(() => resolve()))
+      })()
+      return closePromise
+    },
+  }
+}

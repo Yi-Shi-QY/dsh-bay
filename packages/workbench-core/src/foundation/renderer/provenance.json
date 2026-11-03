@@ -1,0 +1,21 @@
+{
+  "upstreamCommit": "477b4f420553e8a52c2fbccc464d7561b239c443",
+  "adaptation": "unmodified-private-renderer",
+  "files": [
+    {
+      "source": "packages/client/ui-renderer/src/client/scoped-slots.tsx",
+      "output": "scoped-slots.tsx",
+      "sha256": "2e06b3f92df68e882ea7f8f266298df929d9a7cfc0870fdd72b1fbde71d7cbbb"
+    },
+    {
+      "source": "packages/client/ui-renderer/src/client/bindings.tsx",
+      "output": "bindings.tsx",
+      "sha256": "c67c5f09eba2eaf84ff377d69f68b9c0896cfe467910e35d32ba889205b7c468"
+    },
+    {
+      "source": "packages/client/ui-renderer/src/client/bind.ts",
+      "output": "bind.ts",
+      "sha256": "bc1ced1819b2496f139299b789bc13cb3295a47397ea2e0d65b5bb4000e8d389"
+    }
+  ]
+}

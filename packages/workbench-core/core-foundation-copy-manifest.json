@@ -1,0 +1,119 @@
+{
+  "schemaVersion": 1,
+  "kind": "workbench-core-foundation-copy",
+  "policy": "exact-upstream-copy-plus-minimal-core-adapter",
+  "sourceTrack": "legacy-single-plugin",
+  "sourceCommit": "3db554e9412f3c7c131c37da5696fbd59edaaeed",
+  "sourceRoot": "tracks/legacy-single-plugin/source/packages/workbench",
+  "destinationRoot": "packages/workbench-core/src/foundation",
+  "supplementalMigrationSources": [
+    {
+      "source": "packages/workbench-shell/src/client/workbench-entry-action.tsx",
+      "destination": "src/foundation/WorkbenchCoreEntryAction.tsx",
+      "role": "single-plugin-workbench-entry-glyph-and-label",
+      "provenance": "current-modular-facade-not-frozen-snapshot"
+    },
+    {
+      "source": "packages/workbench/src/client/workbench-inner-page.module.css",
+      "destination": "src/foundation/WorkbenchSidebarActions.module.css",
+      "role": "single-plugin-mode-actions-aligned-with-official-sidebar-settings-row",
+      "provenance": "current-modular-facade-not-frozen-snapshot"
+    },
+    {
+      "source": "packages/workbench/src/client/WorkbenchFrame.tsx",
+      "destination": "src/foundation/WorkbenchFrame.tsx",
+      "role": "sidebar-start-editor-routing-and-complete-settings-projection",
+      "provenance": "current-modular-facade-not-frozen-snapshot"
+    },
+    {
+      "source": "packages/workbench/src/client/index.ts",
+      "destination": "src/foundation/apply-core.ts",
+      "role": "official-settings-section-directory-and-observable-injection",
+      "provenance": "current-modular-facade-not-frozen-snapshot"
+    },
+    {
+      "source": "packages/workbench/src/workbench-settings.ts",
+      "destination": "src/host-layout-settings.ts",
+      "role": "official-host-settings-namespace-with-empty-core-default",
+      "provenance": "current-modular-facade-not-frozen-snapshot"
+    },
+    {
+      "source": "packages/workbench/src/client/workbench-slot-contracts.ts",
+      "destination": "src/foundation/workbench-slot-contracts.ts",
+      "role": "core-owned-slot-metadata-contract",
+      "provenance": "current-modular-facade-not-frozen-snapshot"
+    }
+  ],
+  "ownership": {
+    "core": [
+      "mode-controller",
+      "surface-controller",
+      "frame",
+      "sidebar-host",
+      "settings-entry",
+      "module-market-entry",
+      "area-placement",
+      "persistence",
+      "contribution-lifecycle"
+    ],
+    "innerPageModules": [
+      "conversation-suite",
+      "creator",
+      "third-party-modules"
+    ]
+  },
+  "entries": [
+    {
+      "source": "src/client/WorkbenchFrame.tsx",
+      "destination": "src/foundation/WorkbenchFrame.tsx",
+      "role": "core-frame",
+      "copyMode": "exact-then-adapt-imports"
+    },
+    {
+      "source": "src/client/WorkbenchFrame.module.css",
+      "destination": "src/foundation/WorkbenchFrame.module.css",
+      "role": "core-frame-style",
+      "copyMode": "exact"
+    },
+    {
+      "source": "src/client/WorkbenchBrand.tsx",
+      "destination": "src/foundation/WorkbenchBrand.tsx",
+      "role": "core-brand",
+      "copyMode": "exact"
+    },
+    {
+      "source": "src/client/frame-settings-adapter.ts",
+      "destination": "src/foundation/frame-settings-adapter.ts",
+      "role": "core-settings-seam",
+      "copyMode": "exact-then-adapt-imports"
+    },
+    {
+      "source": "src/client/workbench-package-service.ts",
+      "destination": "src/foundation/workbench-package-service.ts",
+      "role": "core-market-transaction-seam",
+      "copyMode": "exact-then-adapt-imports"
+    },
+    {
+      "source": "src/client/workbench-inventory.ts",
+      "destination": "src/foundation/workbench-inventory.ts",
+      "role": "core-editor-host-and-area-layout-support",
+      "copyMode": "exact-then-adapt-module-editor-seams"
+    }
+  ],
+  "forbidden": [
+    "Do not create a second simplified Frame or settings implementation.",
+    "Do not copy Conversation UI into Core; Conversation remains a separate inner-page module.",
+    "Do not register official root, layout.frame, sidebar, conversation or details owners.",
+    "Do not change the frozen source tree; all adaptations belong in the modular destination."
+  ],
+  "verification": {
+    "sourceDigest": "e2f352c7f29666de94f77af3601a2fc8a7cfed7b2a76871f31c78e0bb7d0c603",
+    "requiredEvidence": [
+      "upstream source path and commit",
+      "destination file",
+      "patch digest",
+      "Core contract test",
+      "clean-profile browser click test"
+    ]
+  }
+}

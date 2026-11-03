@@ -1,0 +1,5 @@
+# Additive Core layer for the native DSH plugin flow.
+# Core owns only its Workbench runtime row; official DSH owners remain intact.
+- insert:
+    - id: workbench-layout
+      name: '@dsh-workbench/core'

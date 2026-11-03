@@ -1,0 +1,20 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "paths": {},
+    "rootDir": "src",
+    "outDir": "lib/types",
+    "tsBuildInfoFile": "lib/tsconfig.host.tsbuildinfo",
+    "disableSourceOfProjectReferenceRedirect": true
+  },
+  "include": [
+    "src/*.ts",
+    "src/foundation/model.ts",
+    "src/foundation/document-v3.ts",
+    "src/foundation/persistence.ts"
+  ],
+  "exclude": [
+    "src/client/**",
+    "src/offline-package-service.ts"
+  ]
+}

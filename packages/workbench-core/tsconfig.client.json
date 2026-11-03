@@ -1,0 +1,34 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "paths": {},
+    "rootDir": "src",
+    "outDir": "lib/types",
+    "tsBuildInfoFile": "lib/tsconfig.client.tsbuildinfo"
+  },
+  "include": [
+    "src"
+  ],
+  "exclude": [
+    "src/creator-host.ts",
+    "src/foundation/workbench-sidebar/generated/upstream/ui-sidebar/index.ts",
+    "src/foundation/workbench-sidebar/generated/upstream/ui-workspace/index.ts",
+    "src/host-artifact-files.ts",
+    "src/host-offline-import.ts",
+    "src/host-offline-settings.ts",
+    "src/host-offline-import-store.ts",
+    "src/host-offline-import-route.ts",
+    "src/host-layout-settings.ts",
+    "src/index.ts",
+    "src/host-module-install-route.ts",
+    "src/host-module-identity-route.ts",
+    "src/host-module-center-route.ts",
+    "src/host-catalog-store.ts",
+    "src/host-profile-services.ts",
+    "src/host-direct-source-install-route.ts",
+    "src/host-direct-source-service.ts",
+    "src/host-source-resolver.ts",
+    "src/dsh-native-plugin-manager.ts",
+    "src/host-native-offline-bundle-route.ts"
+  ]
+}
