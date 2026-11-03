@@ -7,7 +7,9 @@ manifest. The repository deliberately keeps the runtime package small and
 does not include the launcher or a second plugin marketplace.
 
 The ecosystem choices behind this shape are recorded in
-[ECOSYSTEM-REFERENCE.md](ECOSYSTEM-REFERENCE.md). The repository is private
+[ECOSYSTEM-REFERENCE.md](ECOSYSTEM-REFERENCE.md). The repository identity change
+from the original private candidate is recorded in
+[REPOSITORY-RENAME.md](REPOSITORY-RENAME.md). The repository is private
 staging for now, but its identity, install boundary and validation record are
 already explicit enough to support a later catalog submission.
 
