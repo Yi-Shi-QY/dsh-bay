@@ -2,6 +2,7 @@
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react'
 import { useSyncExternalStore } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { WorkbenchHomeCenter } from '../src/foundation/WorkbenchHomeCenter.tsx'
 import { WorkbenchCoreSettingsSection } from '../src/foundation/WorkbenchCoreSettingsSection.tsx'
 import type { WorkbenchCoreSettingsSectionProps } from '../src/foundation/WorkbenchCoreSettingsSection.tsx'
 import { createProjectNeutralFrameSettings } from '../src/foundation/frame-settings-adapter.ts'
@@ -11,7 +12,7 @@ import type { WorkbenchEditorCatalogRow } from '../src/foundation/catalog.ts'
 
 beforeEach(() => { const memory = settingsViewMemory(DESKTOP_SETTINGS_CONTEXT); memory.section = 'workbenches'; memory.filters = {}; memory.searches = {}; delete memory.selectedId })
 afterEach(cleanup)
-function setup(overrides: Partial<WorkbenchCoreSettingsSectionProps> = {}) {
+function setup(overrides: Partial<WorkbenchCoreSettingsSectionProps> = {}, home = false) {
   const f = mutableSettings()
   const directory = createProjectNeutralFrameSettings(f.source).directory
   const editors: WorkbenchEditorCatalogRow[] = [{ id: 'workbench.conversation', label: '对话', scope: 'session' }, { id: 'example.notes', label: '笔记', scope: 'root', declaration: { editorId: 'example.notes', scope: 'root', label: '独立笔记', requiredBinding: 'none', state: { schemaVersion: 1, maxBytes: 4096, restore: 'always', share: 'reference-only' }, runtime: { background: 'keep', collapsed: 'keep', reacquire: 'on-visible' } } }, { id: 'workbench.plan', label: '计划', scope: 'session', resourceOnly: true }]
@@ -25,12 +26,12 @@ function setup(overrides: Partial<WorkbenchCoreSettingsSectionProps> = {}) {
     close, registerCloseRequest: (request: () => void) => { closeRequest = request; return () => { closeRequest = close } },
     ...overrides,
   } as WorkbenchCoreSettingsSectionProps
-  const view = render(<WorkbenchCoreSettingsSection {...props} />)
+  const view = render(home ? <WorkbenchHomeCenter {...props} directory={directory} workbenchSettings={f.source} onOpenWorkbench={async id => { await directory.openAndSelect(id) }} onCreated={() => {}} /> : <WorkbenchCoreSettingsSection {...props} />)
   return { ...f, view, props, directory, close, requestClose: () => closeRequest() }
 }
 describe('settings product interactions', () => {
   it('keeps list layout thumbnails visual-only while preserving the detailed layout preview', () => {
-    const { view } = setup()
+    const { view } = setup({ openOptions: { section: 'workbenches' } }, true)
     const thumbnail = view.container.querySelector('[class*="previewCompact"]')
     expect(thumbnail).toBeTruthy()
     expect(thumbnail?.textContent?.trim()).toBe('')
@@ -43,8 +44,8 @@ describe('settings product interactions', () => {
   })
   it('uses the same navigation order for keyboard and visible categories', () => {
     const { view } = setup()
-    expect(view.getAllByRole('tab').map(tab => tab.textContent)).toEqual(['工作台管理', '内页与扩展', '交互偏好', '导入与分享'])
-    fireEvent.keyDown(view.getByRole('tab', { name: '工作台管理' }), { key: 'ArrowDown' })
+    expect(view.getAllByRole('tab').map(tab => tab.textContent)).toEqual(['内页与扩展', '交互偏好'])
+    fireEvent.keyDown(view.getByRole('tab', { name: '交互偏好' }), { key: 'ArrowDown' })
     expect(view.getByRole('tab', { name: '内页与扩展' }).getAttribute('aria-selected')).toBe('true')
     expect(document.activeElement).toBe(view.getByRole('tab', { name: '内页与扩展' }))
   })
@@ -56,11 +57,11 @@ describe('settings product interactions', () => {
     expect(view.getByText('由对话结果打开')).toBeTruthy()
     expect(writes).toEqual([])
   })
-  it('protects metadata on tab switch and close, keeps failed input, and retries', async () => {
-    const { view, props, close, requestClose } = setup({ openOptions: { workbenchId: 'a' } })
+  it('protects Home metadata on navigation, keeps failed input, and retries', async () => {
+    const { view, props } = setup({ openOptions: { section: 'workbenches', workbenchId: 'a' } }, true)
     const update = vi.spyOn(props.workbenchDirectory!, 'updateMetadata').mockResolvedValueOnce({ status: 'conflict', expectedRevision: 1, actualRevision: 2 })
     fireEvent.change(view.getByLabelText('名称'), { target: { value: 'Edited A' } })
-    fireEvent.click(view.getByRole('tab', { name: '内页与扩展' }))
+    fireEvent.click(view.getByRole('button', { name: '返回总览' }))
     expect(view.getByRole('alertdialog', { name: '资料尚未保存' })).toBeTruthy()
     fireEvent.click(view.getByRole('button', { name: '继续编辑' }))
     fireEvent.click(view.getByRole('button', { name: '保存资料' }))
@@ -70,10 +71,10 @@ describe('settings product interactions', () => {
     fireEvent.click(view.getByRole('button', { name: '重试' }))
     await waitFor(() => expect(update).toHaveBeenCalledTimes(2))
     fireEvent.change(view.getByLabelText('名称'), { target: { value: 'Unsaved again' } })
-    act(() => requestClose())
-    expect(close).not.toHaveBeenCalled()
+    fireEvent.click(view.getByRole('button', { name: '返回总览' }))
+    expect(view.getByRole('alertdialog', { name: '资料尚未保存' })).toBeTruthy()
     fireEvent.click(view.getByRole('button', { name: '放弃修改' }))
-    expect(close).toHaveBeenCalledOnce()
+    await waitFor(() => expect(view.getByRole('heading', { name: '你的工作台' })).toBeTruthy())
   })
   it('scopes browser data and removes global management, import and preference controls', () => {
     const context = { mode: 'browser-workbench' as const, workbenchId: 'a' }
@@ -98,7 +99,7 @@ describe('settings product interactions', () => {
   it('unsubscribes settings listeners and performs no writes during idle navigation', () => {
     const { view, writes, listeners } = setup()
     expect(listeners.size).toBeGreaterThan(0)
-    for (const name of ['内页与扩展', '交互偏好', '工作台管理']) fireEvent.click(view.getByRole('tab', { name }))
+    for (const name of ['内页与扩展', '交互偏好', '内页与扩展']) fireEvent.click(view.getByRole('tab', { name }))
     expect(writes).toEqual([])
     view.unmount(); expect(listeners.size).toBe(0)
   })

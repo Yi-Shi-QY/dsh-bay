@@ -22,7 +22,7 @@ window.__ModuleLoader__.load({
         : `Workspace ${owner.workspaceId}`),
       h('button', {
         type: 'button',
-        onClick: () => owner.setState({ acknowledged: true }),
+        onClick: () => owner.setState({ schemaVersion: 1, acknowledged: true }),
       }, '记录本机状态'))
     }
 
@@ -40,7 +40,7 @@ window.__ModuleLoader__.load({
       moduleId: 'workbench.editor-example',
       apiVersion: 1,
       editorIds: ['workbench.example'],
-      coreCompatibility: '0.2.2-alpha.17',
+      coreCompatibility: '0.2.2-alpha.17.2',
       dshGeneration: '0.2.1-rc.5',
     }
 
@@ -65,9 +65,15 @@ window.__ModuleLoader__.load({
             schemaVersion: 1,
             declaration,
             extension,
-            // Use one of Workbench Core's stable semantic icon tokens. The
-            // same glyph appears in tabs, page menus, collapsed previews and settings.
-            presentation: { icon: 'extension' },
+            distribution: { version: 1, portableId: 'workbench.editor-example', packageVersion: '0.1.0', packageName: '@local/workbench-editor-example', exportPolicy: 'embed', sourcePolicy: 'binary-only', provides: { editorIds: ['workbench.example'] }, requires: [], permissions: [] },
+            portability: { version: 1, exportState: value => ({ schemaVersion: 1, acknowledged: value?.acknowledged === true }), importState: value => { if (value?.schemaVersion !== 1) throw new Error('Unsupported portable state'); return { schemaVersion: 1, acknowledged: value.acknowledged === true } } },
+            // Supply editor-specific 24×24 path geometry, tested at 16/20/24px.
+            // Core owns stroke, theme and SVG elements; never pass raw SVG markup or URLs.
+            // Replace this example's notebook glyph with your editor's own semantic icon.
+            presentation: { iconSvg: { version: 1, paths: [
+              'M7 3h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z',
+              'M3 7h4M3 12h4M3 17h4M10 8h7M10 12h7M10 16h4',
+            ] } },
           } }),
         }, Editor))
       },

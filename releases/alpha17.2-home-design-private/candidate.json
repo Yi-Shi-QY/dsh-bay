@@ -1,0 +1,43 @@
+{
+  "version": "0.2.2-alpha.17.2",
+  "filename": "dsh-workbench-core-0.2.2-alpha.17.2-home-design-9a4f35db2123.tgz",
+  "sha256": "9a4f35db21230e1ad60082bc89835102091ac6960c672df9a38c01190f7d6794",
+  "bytes": 1000513,
+  "createdAt": "2026-11-04T09:12:06.735Z",
+  "status": "experimental private trial; strict release gate held",
+  "validation": {
+    "tests": "108 files / 651 tests passed",
+    "build": "passed",
+    "rc5Identity": "passed",
+    "typecheck": "112 existing RC5 generated Sidebar/Workspace errors; zero new errors",
+    "inputChecks": 363,
+    "artifact": "extracted archive, source input hashes, Creator files and actual installed Host/Client bytes verified",
+    "ui": {
+      "pageTitle": "DeepSeek Harness",
+      "url": "http://127.0.0.1:19274",
+      "viewports": [
+        "1440x1000",
+        "640x900",
+        "390x900"
+      ],
+      "browser": "Edge headless; Browser plugin not available",
+      "errors": [],
+      "checks": [
+        "two-area preview",
+        "metadata normalization",
+        "unsaved prompt centered and cancellation",
+        "wizard focus and three-step create",
+        "delete created workbench",
+        "menu keyboard export",
+        "three distribution modes",
+        "import/history",
+        "search/filter",
+        "native dark theme",
+        "responsive overflow",
+        "narrow modal Escape"
+      ]
+    },
+    "remaining": "Native Electron, real Browser Companion/LAN and two-Profile private extension migration were not rerun for this visual follow-up; previous acceptance retained"
+  },
+  "evidenceDirectory": "C:\\Users\\WeChenXC000\\AppData\\Local\\Temp\\dsh-bay-home-design"
+}

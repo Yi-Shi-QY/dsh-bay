@@ -9,7 +9,7 @@ const project = fileURLToPath(new URL('../', import.meta.url))
 const core = path.join(project, 'packages', 'workbench-core')
 const manifestPath = path.join(core, 'package.json')
 const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
-const buildId = process.env.DSH_BAY_BUILD_ID ?? 'dsh-bay-0.2.2-alpha.17-dsh-0.2.1-rc.5'
+const buildId = process.env.DSH_BAY_BUILD_ID ?? `dsh-bay-${WORKBENCH_CORE_VERSION}-dsh-${WORKBENCH_DSH_GENERATION}`
 
 if (manifest.version !== WORKBENCH_CORE_VERSION) throw new Error('DSH Bay Core version mismatch')
 if (manifest.dsh.workbench.dshGeneration !== WORKBENCH_DSH_GENERATION) throw new Error('DSH generation mismatch')
@@ -17,16 +17,18 @@ if (manifest.dsh.workbench.upstreamCommit !== WORKBENCH_UPSTREAM_COMMIT) throw n
 
 mkdirSync(path.join(core, 'lib'), { recursive: true })
 
-await build({
+const hostResult = await build({
   absWorkingDir: core,
   entryPoints: ['src/index.ts'],
   outfile: 'lib/index.js',
   bundle: true,
   platform: 'node',
   format: 'esm',
+  banner: { js: 'import { createRequire as __dshCreateRequire } from "node:module"; const require = __dshCreateRequire(import.meta.url);' },
   target: 'node24',
   external: ['@deepseek-ai/*'],
   sourcemap: false,
+  metafile: true,
 })
 
 const external = [
@@ -81,7 +83,7 @@ const inputs = [...new Set(Object.keys(result.metafile.inputs))].sort().map(file
 }))
 writeFileSync(path.join(core, 'lib/build-inputs.json'), JSON.stringify({
   candidateId: buildId,
-  productLine: 'DSH Bay 0.2.2-alpha.17',
+  productLine: `DSH Bay ${WORKBENCH_CORE_VERSION}`,
   mode: 'core-only',
   buildId,
   dshGeneration: WORKBENCH_DSH_GENERATION,
@@ -92,6 +94,10 @@ writeFileSync(path.join(core, 'lib/build-inputs.json'), JSON.stringify({
   excludedModules: ['@dsh-workbench/conversation-suite', '@dsh-workbench/svgdeepseek-pet'],
   more: { workbench: 'deferred', official: 'rc5-ui-entry-customization-only' },
   inputs,
+  hostInputs: Object.keys(hostResult.metafile.inputs).sort().map(file => ({
+    path: file.replaceAll(String.fromCharCode(92), '/'),
+    sha256: createHash('sha256').update(readFileSync(path.resolve(core, file))).digest('hex'),
+  })),
   external: imports,
   creator: { mode: 'native-dsh-skill-provider', presetOverride: false },
 }, null, 2) + '\n')

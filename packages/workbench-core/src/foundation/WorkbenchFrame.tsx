@@ -1,3 +1,9 @@
+import { WorkbenchEmptyArea } from './WorkbenchEmptyArea.tsx'
+import { WorkbenchEditorPicker } from './WorkbenchEditorPicker.tsx'
+import type { WorkbenchEditorSvgIconV1 } from './workbench-editor-icons.ts'
+import { WorkbenchCreateDialog } from './WorkbenchCreateDialog.tsx'
+import { WorkbenchCreateMenu } from './WorkbenchCreateMenu.tsx'
+import type { WorkbenchLayoutPresetId } from './workbench-layout-presets.ts'
 import { WorkbenchEditorIcon as EditorIcon } from './WorkbenchEditorIcon.tsx'
 import {
   memo, Profiler, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore,
@@ -24,7 +30,7 @@ import type {
   SessionOpenCommandV1, SessionPlacementRequestV2, SessionPlacementReservationV1, SessionTarget,
 } from './workbench-session-navigation.ts'
 import {
-  editorPresentationFor,
+  resolveWorkbenchEditorPresentation,
   type WorkbenchEditorCatalog,
   type WorkbenchEditorCatalogRow,
 } from './catalog.ts'
@@ -237,6 +243,17 @@ export type WorkbenchFrameProps =
     shareController?: WorkbenchShareControllerV1
     /** User preference for Conversation resource routing in Workbench mode. */
     conversationResourcePolicy?: WorkbenchConversationInteractionPolicyV1 | undefined
+    /** UI-only surface inside Workbench mode. Browser views always remain workbench. */
+    surfaceView?: 'home' | 'workbench'
+    /** Fixed rail entry for the virtual Workbench Home surface. */
+    onShowHome?: (() => void) | undefined
+    /** Return to the layout surface after a Workbench is selected or created. */
+    onShowWorkbench?: (() => void) | undefined
+    onImportWorkbench?: (() => void) | undefined
+    onManageEditors?: (() => void) | undefined
+    beforeHomeLeave?: (() => Promise<boolean>) | undefined
+    /** Content rendered in place of the layout canvas while Home is active. */
+    renderHome?: ReactNode | undefined
   }
 
 interface WorkbenchNavigationHandler {
@@ -382,7 +399,7 @@ function WorkbenchFloatingMenu({
 }
 
 function WorkbenchFloatingInfo({
-  anchorRef, id, ownerId, side, open, icon, title, detail, tabs, onExpand, onActivate, onPointerEnter, onPointerLeave,
+  anchorRef, id, ownerId, side, open, icon, iconSvg, title, detail, tabs, onExpand, onActivate, onPointerEnter, onPointerLeave,
 }: {
   anchorRef: RefObject<HTMLElement>
   id: string
@@ -390,6 +407,7 @@ function WorkbenchFloatingInfo({
   side: FloatingMenuSide
   open: boolean
   icon: string
+  iconSvg?: WorkbenchEditorSvgIconV1 | undefined
   title: string
   detail: string
   tabs?: readonly WorkbenchAreaTabSummary[]
@@ -469,7 +487,7 @@ function WorkbenchFloatingInfo({
       onPointerLeave={onPointerLeave}
     >
       <span className={css.areaCollapseInfoIcon} data-editor-icon={icon} aria-hidden="true">
-        <EditorIcon name={icon} />
+        <EditorIcon name={icon} iconSvg={iconSvg} />
       </span>
       <span className={css.areaCollapseInfoCopy}>
         <strong>{title}</strong>
@@ -488,7 +506,7 @@ function WorkbenchFloatingInfo({
             onClick={() => onActivate?.(tab.id)}
           >
             <span className={css.areaTabStatusDot} data-tab-status={tab.status} aria-hidden="true" />
-            <span className={css.areaCollapseInfoTabIcon} data-editor-icon={tab.icon}><EditorIcon name={tab.icon} /></span>
+            <span className={css.areaCollapseInfoTabIcon} data-editor-icon={tab.icon}><EditorIcon name={tab.icon} iconSvg={tab.iconSvg} /></span>
             <span className={css.areaCollapseInfoTabTitle}>{tab.title}</span>
             <small>{tab.statusLabel}</small>
           </button>)}
@@ -696,37 +714,6 @@ function AreaCollapseIcon({ direction }: { direction: CollapseEdge }) {
 }
 
 
-function editorPresentation(editor: WorkbenchEditorCatalogRow | undefined): {
-  icon: string
-  category: string
-  categoryOrder: number
-} {
-  if (editor === undefined) return { icon: 'panel', category: '其他', categoryOrder: 100 }
-  const fallback = editorPresentationFor(editor.id, editor.scope)
-  return {
-    icon: editor.icon ?? fallback.icon,
-    category: editor.category ?? fallback.category,
-    categoryOrder: editor.categoryOrder ?? fallback.categoryOrder,
-  }
-}
-
-function groupedEditors(editors: readonly WorkbenchEditorCatalogRow[]): Array<{
-  category: string
-  editors: readonly WorkbenchEditorCatalogRow[]
-}> {
-  const groups = new Map<string, { order: number; editors: WorkbenchEditorCatalogRow[] }>()
-  for (const editor of editors) {
-    if (editor.resourceOnly === true) continue
-    const presentation = editorPresentation(editor)
-    const group = groups.get(presentation.category) ?? { order: presentation.categoryOrder, editors: [] }
-    group.editors.push(editor)
-    groups.set(presentation.category, group)
-  }
-  return [...groups.entries()]
-    .sort(([, left], [, right]) => left.order - right.order)
-    .map(([category, group]) => ({ category, editors: group.editors }))
-}
-
 function frameRepository(document: WorkbenchLayoutDocument, workbenchId: string): WorkbenchRepository {
   const now = Date.now()
   return new WorkbenchRepository({
@@ -901,6 +888,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
     connectWorkspace, createWorkspaceSession, createWorkspace, sidebarHostActions, openOfficialSession, runtimeMetrics,
     conversationResourcePolicy,
   } = props
+  const surfaceView = props.browserView === true ? 'workbench' : (props.surfaceView ?? 'workbench')
   const subscribeExtensionRegistry = useCallback(
     (listener: () => void) => props.extensionRegistry?.subscribe(listener) ?? (() => {}), [props.extensionRegistry],
   )
@@ -1067,9 +1055,8 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
   // write per event while retaining the latest local document for recovery.
   const [persistenceTick, setPersistenceTick] = useState(0)
   const [saveState, setSaveState] = useState<'saved' | 'saving' | 'offline' | 'conflict'>('saved')
-  const [workbenchCreating, setWorkbenchCreating] = useState(false)
   const [workbenchClosing, setWorkbenchClosing] = useState(false)
-  const [createMenuOpen, setCreateMenuOpen] = useState(false)
+  const [createPreset, setCreatePreset] = useState<WorkbenchLayoutPresetId>()
   const [workbenchMenuOpenId, setWorkbenchMenuOpenId] = useState<string>()
   const [toolGatewayOpenId, setToolGatewayOpenId] = useState<string>()
   const [workbenchMenuPosition, setWorkbenchMenuPosition] = useState<{ top: number; left: number }>()
@@ -1086,7 +1073,6 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
   const [workbenchNameError, setWorkbenchNameError] = useState<string>()
   const [workbenchRenaming, setWorkbenchRenaming] = useState(false)
   const createWorkbenchButtonRef = useRef<HTMLButtonElement>(null)
-  const createWorkbenchMenuRef = useRef<HTMLDivElement>(null)
   const workbenchMenuRef = useRef<HTMLDivElement>(null)
   const workbenchMenuAnchorRef = useRef<HTMLButtonElement>()
   const toolGatewayReturnFocusRef = useRef<HTMLElement | null>(null)
@@ -1305,19 +1291,6 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
   }, [browserWorkbenchName, props.browserView])
 
   useEffect(() => {
-    if (!createMenuOpen) return
-    const closeOnOutsidePointer = (event: PointerEvent) => {
-      const target = event.target
-      if (!(target instanceof Node)) return
-      if (createWorkbenchMenuRef.current?.contains(target)
-        || createWorkbenchButtonRef.current?.contains(target)) return
-      setCreateMenuOpen(false)
-    }
-    document.addEventListener('pointerdown', closeOnOutsidePointer)
-    return () => { document.removeEventListener('pointerdown', closeOnOutsidePointer) }
-  }, [createMenuOpen])
-
-  useEffect(() => {
     if (workbenchMenuOpenId === undefined) return
     const closeOnOutsidePointer = (event: PointerEvent) => {
       const target = event.target
@@ -1482,6 +1455,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
   }, [account, current, future, past, saveState, settings, patchLayout, settingsWritable])
 
   useEffect(() => {
+    if (surfaceView === 'home') return
     if (pending.length === 0 || conflict !== undefined
       || saveInFlightRef.current !== undefined || flushInFlightRef.current !== undefined) return
     if (savePausedRef.current || !settingsWritable) {
@@ -1548,7 +1522,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
       window.clearTimeout(timer)
       if (saveTimerRef.current === timer) saveTimerRef.current = undefined
     }
-  }, [account, conflict, current, pending, persistenceTick, projectNeutral, settings, patchLayout, scheduleAutosaveRetry, settingsWritable])
+  }, [account, conflict, current, pending, persistenceTick, projectNeutral, settings, patchLayout, scheduleAutosaveRetry, settingsWritable, surfaceView])
 
   const reloadRemote = useCallback(() => {
     const remote = conflictRef.current?.remote
@@ -2090,6 +2064,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
   const workspaceTitle = activeWorkspace?.title ?? '未分组'
   const sessionTitle = current === undefined ? undefined : sessionRows[current]?.displayTitle
   const flushCurrentWorkbench = useCallback((): Promise<boolean> => {
+    if (surfaceView === 'home') return props.beforeHomeLeave?.() ?? Promise.resolve(true)
     if (flushInFlightRef.current !== undefined) return flushInFlightRef.current
     // A lifecycle transition must still honor dirty snapshots and conflicts,
     // but a clean document has nothing to flush. Avoid making every
@@ -2160,7 +2135,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
     })
     flushInFlightRef.current = flushing
     return flushing
-  }, [settings, patchLayout, scheduleAutosaveRetry])
+  }, [settings, patchLayout, scheduleAutosaveRetry, surfaceView, props.beforeHomeLeave])
   const flushForLifecycleTransition = useCallback(() => {
     const diagnostics = (globalThis as { __DSH_WORKBENCH_PERF_DIAGNOSTICS__?: unknown }).__DSH_WORKBENCH_PERF_DIAGNOSTICS__ === true
     if (!diagnostics) return flushCurrentWorkbench()
@@ -2195,8 +2170,13 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
     return () => window.removeEventListener('workbench-browser-reclaim-flush', requestFlush)
   }, [flushCurrentWorkbench])
   const selectWorkbench = useCallback(async (workbenchId: string) => {
+    if (surfaceView === 'home' && !(await (props.beforeHomeLeave?.() ?? Promise.resolve(true)))) return
     const currentWorkbenchId = workbenchDirectory.getSnapshot().activeWorkbenchId
-    if (currentWorkbenchId === workbenchId || frameTransition !== undefined) return
+    if (currentWorkbenchId === workbenchId) {
+      props.onShowWorkbench?.()
+      return
+    }
+    if (frameTransition !== undefined) return
     const trace = { id: nextId('workbench-switch'), targetWorkbenchId: workbenchId }
     selectionTraceRef.current = trace
     workbenchSelectionMark(trace, 'requested')
@@ -2209,9 +2189,10 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
       setStateDiagnostic('无法切换工作台；设置已在其他页面改变或当前连接不可用。')
       return
     }
+    props.onShowWorkbench?.()
     navigationReservationsRef.current.clear()
     setStateDiagnostic(undefined)
-  }, [frameTransition, workbenchDirectory])
+  }, [frameTransition, props.onShowWorkbench, workbenchDirectory, surfaceView, props.beforeHomeLeave])
   const reorderWorkbench = useCallback(async (workbenchId: string, targetIndex: number) => {
     if (props.browserView === true || workbenchReordering || workbenchDirectory.reorder === undefined) return
     setWorkbenchReordering(true)
@@ -2226,24 +2207,6 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
       setWorkbenchReordering(false)
     }
   }, [props.browserView, workbenchDirectory, workbenchReordering])
-  const createWorkbench = useCallback(async (templateId?: string) => {
-    if (workbenchCreating) return
-    setCreateMenuOpen(false)
-    setWorkbenchCreating(true)
-    try {
-      const result = await workbenchDirectory.create(templateId === undefined ? undefined : { templateId })
-      if (result.status !== 'committed') {
-        setStateDiagnostic(result.status === 'rejected' && result.reason === 'not-found'
-          ? '这个已保存布局已不存在；请重新打开新建菜单。'
-          : '无法创建工作台；设置已在其他页面改变或当前连接不可用。')
-        return
-      }
-      navigationReservationsRef.current.clear()
-      setStateDiagnostic(undefined)
-    } finally {
-      setWorkbenchCreating(false)
-    }
-  }, [workbenchCreating, workbenchDirectory])
   const openTemplateDialog = useCallback((targetWorkbenchId?: string, returnFocus?: HTMLElement) => {
     const snapshot = workbenchDirectory.getSnapshot()
     const workbenchId = targetWorkbenchId ?? snapshot.activeWorkbenchId
@@ -2654,7 +2617,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
                 type="button"
                 className={css.browserWorkspaceIconButton}
                 onClick={toggleLayoutLocked}
-              disabled={!settingsWritable || layoutLockPending || browserHandoffRequest?.status === 'reclaiming'
+              disabled={surfaceView === 'home' || !settingsWritable || layoutLockPending || browserHandoffRequest?.status === 'reclaiming'
                 || frameTransition !== undefined}
                 aria-label={layoutLocked ? '解锁布局尺寸' : '锁定布局尺寸'}
                 title={layoutLocked ? '布局尺寸已锁定，点击解锁' : '锁定布局尺寸，防止拖动分隔线调整区域'}
@@ -2666,7 +2629,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
                   type="button"
                   className={css.browserWorkspaceIconButton}
                   onClick={undoLayout}
-                  disabled={past.length === 0}
+                  disabled={surfaceView === 'home' || past.length === 0}
                   aria-label="撤回上一步"
                   title="撤回上一步"
                 ><UndoLayoutIcon /></button>
@@ -2674,7 +2637,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
                   type="button"
                   className={css.browserWorkspaceIconButton}
                   onClick={redoLayout}
-                  disabled={future.length === 0}
+                  disabled={surfaceView === 'home' || future.length === 0}
                   aria-label="重做布局修改"
                   title="重做布局修改"
                 ><RedoLayoutIcon /></button>
@@ -2744,16 +2707,31 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
             </div>
           </header>
         ) : <header className={css.workspaceBar}>
-          {projectNeutral && openWorkbenchRows.length > 0 ? (
+          {projectNeutral ? (
             <div className={css.workbenchRail}>
+              <div className={css.workbenchTabs} role="tablist" aria-label="工作台总览">
+                <button
+                  type="button"
+                  className={`${css.workbenchTab} ${css.workbenchTabTrigger}`}
+                  role={props.workbenchDirectory === undefined ? undefined : 'tab'}
+                  aria-selected={surfaceView === 'home'}
+                  tabIndex={surfaceView === 'home' ? 0 : -1}
+                  data-workbench-home-entry
+                  data-active={surfaceView === 'home' || undefined}
+                  onClick={() => { void flushCurrentWorkbench().then(ok => { if (ok) props.onShowHome?.() }) }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault()
+                      void flushCurrentWorkbench().then(ok => { if (ok) props.onShowHome?.() })
+                    }
+                  }}
+                >工作台总览</button>
+              </div>
               <div className={css.workbenchTabs} role="tablist" aria-label="工作台" data-workbench-tabs>
                 {openWorkbenchRows.map((row) => {
                   const active = row.workbenchId === displayedWorkbenchId
                   const renaming = row.workbenchId === renamingWorkbenchId
                   const browserOwned = isBrowserOwnedWorkbench(row.workbenchId)
-                  const canUnload = workbenchDirectorySnapshot.openWorkbenchIds.length > 1
-                    || workbenchDirectorySnapshot.rows.some(item => !workbenchDirectorySnapshot.openWorkbenchIds.includes(item.workbenchId)
-                      && item.archivedAt === undefined)
                   const canReadTargetDocument = active || workbenchDirectory.getDocument !== undefined
                   return (
                     <div
@@ -2959,15 +2937,13 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
                               type="button"
                               role="menuitem"
                               data-action="close"
-                              disabled={browserOwned || frameTransition !== undefined || workbenchClosing || !canUnload}
-                              title={browserOwned
-                                ? '该工作台正在浏览器中使用，请先收回到 DSH 客户端'
-                                : !canUnload ? '至少保留一个可运行工作台或先加载其他工作台' : undefined}
+                              disabled={browserOwned || frameTransition !== undefined || workbenchClosing}
+                              title={browserOwned ? '该工作台正在浏览器中使用，请先收回到 DSH 客户端' : undefined}
                               onClick={() => {
                                 setWorkbenchMenuOpenId(undefined)
                                 setWorkbenchMenuPosition(undefined)
                                 workbenchMenuAnchorRef.current = undefined
-                                if (canUnload) void unloadWorkbench(row.workbenchId)
+                                void unloadWorkbench(row.workbenchId)
                               }}
                             ><IconCloseOutlineMedium size={16} /><span>从标签栏卸载</span></button>
                           </div>, document.body)
@@ -2978,67 +2954,10 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
                 })}
               </div>
               <div className={css.createWorkbenchControl}>
-                <button
-                  ref={createWorkbenchButtonRef}
-                  type="button"
-                  className={css.createWorkbenchButton}
-                  onClick={() => { setCreateMenuOpen(open => !open) }}
-                  onKeyDown={(event) => {
-                    if (event.key !== 'ArrowDown') return
-                    event.preventDefault()
-                    setCreateMenuOpen(true)
-                    requestAnimationFrame(() => {
-                      createWorkbenchMenuRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus()
-                    })
-                  }}
-                  disabled={workbenchCreating || frameTransition !== undefined}
-                  aria-label={workbenchCreating ? '正在新建工作台' : '新建工作台'}
-                  aria-haspopup="menu"
-                  aria-expanded={createMenuOpen}
-                  title="新建工作台"
-                >+</button>
-                {createMenuOpen ? (
-                  <div
-                    ref={createWorkbenchMenuRef}
-                    className={css.createWorkbenchMenu}
-                    role="menu"
-                    aria-label="新建工作台"
-                    onKeyDown={(event) => {
-                      if (event.key === 'Escape') {
-                        event.preventDefault()
-                        setCreateMenuOpen(false)
-                        createWorkbenchButtonRef.current?.focus()
-                        return
-                      }
-                      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-                        event.preventDefault()
-                        const items = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
-                        const index = items.indexOf(document.activeElement as HTMLButtonElement)
-                        const offset = event.key === 'ArrowDown' ? 1 : -1
-                        items[(index + offset + items.length) % items.length]?.focus()
-                      }
-                    }}
-                  >
-                    <button type="button" role="menuitem" onClick={() => { void createWorkbench() }}>
-                      <span className={css.createMenuIcon}>+</span>
-                      <span><strong>新建空白工作台</strong><small>从一个空白对话区域开始</small></span>
-                    </button>
-                    <div className={css.createMenuSection} role="presentation">从已保存布局新建</div>
-                    {workbenchDirectorySnapshot.templates.length === 0 ? (
-                      <p className={css.createMenuEmpty}>还没有已保存的布局</p>
-                    ) : workbenchDirectorySnapshot.templates.map(template => (
-                      <button
-                        key={template.templateId}
-                        type="button"
-                        role="menuitem"
-                        onClick={() => { void createWorkbench(template.templateId) }}
-                      >
-                        <span className={css.createMenuTemplateIcon}><SaveLayoutIcon /></span>
-                        <span><strong>{template.name}</strong><small>创建独立副本</small></span>
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
+                <WorkbenchCreateMenu onImport={props.onImportWorkbench}
+                  onSelect={presetId => { void flushCurrentWorkbench().then(ok => { if (ok) setCreatePreset(presetId) }) }}
+                  anchor={menuProps => <button ref={createWorkbenchButtonRef} type="button" className={css.createWorkbenchButton}
+                    disabled={frameTransition !== undefined} aria-label="新建工作台" title="新建工作台" {...menuProps}>+</button>} />
               </div>
             </div>
           ) : (
@@ -3064,7 +2983,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
             {workbenchDirectory.setLayoutLocked === undefined ? null : <button
               type="button"
               onClick={toggleLayoutLocked}
-              disabled={!settingsWritable || layoutLockPending || activeBrowserOwned || browserOpening
+              disabled={surfaceView === 'home' || !settingsWritable || layoutLockPending || activeBrowserOwned || browserOpening
                 || browserActionPhase !== undefined || frameTransition !== undefined}
               aria-label={layoutLocked ? '解锁布局尺寸' : '锁定布局尺寸'}
               title={layoutLocked ? '布局尺寸已锁定，点击解锁' : '锁定布局尺寸，防止拖动分隔线调整区域'}
@@ -3074,14 +2993,14 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
             <button
               type="button"
               onClick={undoLayout}
-              disabled={activeBrowserOwned || past.length === 0}
+              disabled={surfaceView === 'home' || activeBrowserOwned || past.length === 0}
               aria-label="撤销布局更改"
               title="撤销布局更改"
             ><UndoLayoutIcon /></button>
             <button
               type="button"
               onClick={redoLayout}
-              disabled={activeBrowserOwned || future.length === 0}
+              disabled={surfaceView === 'home' || activeBrowserOwned || future.length === 0}
               aria-label="重做布局更改"
               title="重做布局更改"
             ><RedoLayoutIcon /></button>
@@ -3128,7 +3047,10 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
           data-layout-locked={layoutLocked ? 'true' : undefined}
           {...(frameTransition !== undefined || browserOpening || browserActionPhase !== undefined ? { inert: '' } : {})}
         >
-          {activeBrowserOwned && browserHandoffRequest !== undefined ? <WorkbenchBrowserControlPage
+          {createPreset && props.browserView !== true ? <WorkbenchCreateDialog directory={workbenchDirectory} presetId={createPreset}
+            onClose={() => { setCreatePreset(undefined); requestAnimationFrame(() => createWorkbenchButtonRef.current?.focus()) }}
+            onCreated={() => { props.onShowWorkbench?.(); navigationReservationsRef.current.clear(); setStateDiagnostic(undefined) }} /> : null}
+          {surfaceView === 'home' ? props.renderHome : <>{activeBrowserOwned && browserHandoffRequest !== undefined ? <WorkbenchBrowserControlPage
             workbenchId={browserHandoffRequest.workbenchId}
             workbenchName={workbenchDirectorySnapshot.rows.find(row => row.workbenchId === browserHandoffRequest.workbenchId)?.name ?? browserHandoffRequest.workbenchId}
             browserStatus={browserHandoffRequest.status}
@@ -3150,6 +3072,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
             }}
           /> : <Profiler id="workbench-layout" onRender={reportWorkbenchLayoutCommit}>
           <LayoutView
+            onManageEditors={props.onManageEditors}
             workbenchId={placementWorkbenchId}
             sharePresenceEnabled={shareGuest || props.browserView === true
               || workbenchShareSnapshot.links[placementWorkbenchId] !== undefined
@@ -3272,7 +3195,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
                 </div>
               )}
             </div>
-          )}
+          )}</>}
         </div>
         {templateDialogOpen ? (
           <div
@@ -3357,6 +3280,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
 }
 
 interface LayoutViewProps {
+  onManageEditors?: (() => void) | undefined
   /** Runtime identity; never part of a persisted Area or editor state. */
   workbenchId: string
   sharePresenceEnabled: boolean
@@ -4961,6 +4885,7 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
   const emptyEditorTriggerRef = editorTriggerRef
   const collapseTriggerRef = useRef<HTMLButtonElement>(null)
   const areaTabsRef = useRef<HTMLDivElement>(null)
+  const areaTabStripRef = useRef<HTMLDivElement>(null)
   const tabOverviewTriggerRef = useRef<HTMLButtonElement>(null)
   const tabOverviewSurfaceRef = useRef<HTMLDivElement>(null)
   const collapsePreviewTimerRef = useRef<ReturnType<typeof globalThis.setTimeout>>()
@@ -4975,6 +4900,7 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
   const [collapsePreviewOpen, setCollapsePreviewOpen] = useState(false)
   const [tabOverviewOpen, setTabOverviewOpen] = useState(false)
   const [tabOverviewQuery, setTabOverviewQuery] = useState('')
+  const tabOverviewAnchorRef = useRef<HTMLElement | null>(null)
   const [tabStripOverflow, setTabStripOverflow] = useState({ left: false, right: false })
   const [bindingOpen, setBindingOpen] = useState(false)
   const pendingEditorRef = useRef<WorkbenchEditorCatalogRow>()
@@ -4995,7 +4921,7 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
   const activeEditor = active === undefined
     ? undefined
     : workbenchEditorFromIndex(props.editorIndex, active.editorId, active.editorScope)
-  const activePresentation = editorPresentation(activeEditor)
+  const activePresentation = resolveWorkbenchEditorPresentation(activeEditor)
   // Visibility describes whether this Area is rendered in the current Workbench.
   // Focus is tracked separately so a visible sibling does not get paused or
   // treated as a background document merely because another Area is active.
@@ -5030,7 +4956,6 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
   const collapsePreviewSummary = group.tabs.length > 1
     ? `${collapsePreviewDetail} · ${String(group.tabs.length)} 个内页${group.tabs.length > 6 ? ` · 另有 ${String(group.tabs.length - 6)} 个` : ''}`
     : collapsePreviewDetail
-  const editorGroups = groupedEditors(selectableEditors)
   const floatingMenuSide: FloatingMenuSide = collapseEdge === 'left' ? 'right'
     : collapseEdge === 'right' ? 'left'
       : collapseEdge === 'up' ? 'bottom'
@@ -5072,11 +4997,11 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
       if (event.key !== 'Escape') return
       event.preventDefault()
       setTabOverviewOpen(false)
-      tabOverviewTriggerRef.current?.focus()
+      tabOverviewAnchorRef.current?.focus()
     }
     const closeOnOutside = (event: globalThis.PointerEvent) => {
       if (event.target instanceof Node
-        && (tabOverviewSurfaceRef.current?.contains(event.target) || tabOverviewTriggerRef.current?.contains(event.target))) return
+        && (tabOverviewSurfaceRef.current?.contains(event.target) || tabOverviewAnchorRef.current?.contains(event.target))) return
       setTabOverviewOpen(false)
     }
     globalThis.window.addEventListener('keydown', closeOnEscape)
@@ -5111,6 +5036,29 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
       element.removeEventListener('scroll', updateTabStripOverflow)
     }
   }, [areaCollapsed, collapseEdge, group.tabs.length, updateTabStripOverflow])
+
+  useEffect(() => {
+    const strip = areaTabStripRef.current
+    const tabs = areaTabsRef.current
+    if (strip === null || tabs === null || areaCollapsed) return
+    const scrollWithWheel = (event: WheelEvent) => {
+      // Preserve browser zoom and let non-overflowing Areas keep normal wheel behavior.
+      if (event.ctrlKey || event.metaKey || event.altKey || event.defaultPrevented) return
+      const maxScroll = tabs.scrollWidth - tabs.clientWidth
+      if (tabs.clientWidth === 0 || maxScroll <= 0) return
+      const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY
+      if (delta === 0) return
+      const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? tabs.clientWidth : 1
+      event.preventDefault()
+      event.stopPropagation()
+      tabs.scrollLeft = Math.max(0, Math.min(maxScroll, tabs.scrollLeft + delta * unit))
+      updateTabStripOverflow()
+    }
+    // A native non-passive listener is needed to turn vertical wheel input into
+    // horizontal tab scrolling without also scrolling the surrounding surface.
+    strip.addEventListener('wheel', scrollWithWheel, { passive: false })
+    return () => strip.removeEventListener('wheel', scrollWithWheel)
+  }, [areaCollapsed, updateTabStripOverflow])
 
   useEffect(() => {
     if (active === undefined || areaCollapsed) return
@@ -5746,7 +5694,7 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
       }}
     >
       <header className={css.areaHeader}>
-        <div className={css.areaTabStrip} data-workbench-area-tab-strip>
+        <div ref={areaTabStripRef} className={css.areaTabStrip} data-workbench-area-tab-strip>
           <button
             type="button"
             className={css.areaTabScroll}
@@ -5785,7 +5733,7 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
                   const nextIndex = event.key === 'Home' ? 0 : event.key === 'End' ? group.tabs.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : -1) + group.tabs.length) % group.tabs.length
                   const next = group.tabs[nextIndex]; if (next !== undefined) { commit({ type: 'activate', groupId: group.id, tabId: next.id }); requestAnimationFrame(() => findAreaTabElement(areaRef.current, next.id)?.querySelector<HTMLButtonElement>('[role="tab"]')?.focus()) }
                 }}>
-                <span className={css.editorGlyph} data-editor-icon={tabPresentation.icon}><EditorIcon name={tabPresentation.icon} /></span>
+                <span className={css.editorGlyph} data-editor-icon={tabPresentation.icon}><EditorIcon name={tabPresentation.icon} iconSvg={tabPresentation.iconSvg} /></span>
                 <span className={css.areaTabStatusDot} data-tab-status={summary.status} aria-hidden="true" />
                 <WorkbenchAreaTabLabel tab={tab} fallback={tab.lastKnownTitle} />
               </button>
@@ -5794,7 +5742,8 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
             </div>
           })}
           </div>
-          {group.tabs.length > 0 ? <button
+          {group.tabs.length === 0 ? <span className={css.areaTabsEmpty}>{'区域 ' + areaOrdinal}</span> : null}
+          <button
             type="button"
             className={css.areaTabAdd}
             data-workbench-editor-add-trigger="true"
@@ -5809,7 +5758,7 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
               setTabOverviewOpen(false)
               setMenu(value => value === 'editor' ? undefined : 'editor')
             }}
-          ><IconPlusOutlineMedium size={16} /></button> : null}
+          ><IconPlusOutlineMedium size={16} /></button>
           <button
             type="button"
             className={css.areaTabScroll}
@@ -5819,10 +5768,9 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
             data-direction="right"
             onClick={(event) => { event.stopPropagation(); scrollTabs(1) }}
           ><IconChevronRightOutlineMedium size={15} /></button>
-          {group.tabs.length === 0 ? <span className={css.areaTabsEmpty}>空区域</span> : null}
         </div>
         {tabOverviewOpen ? (
-          <WorkbenchFloatingMenu kind="editor" ownerId={`${group.id}:tab-overview`} anchorRef={tabOverviewTriggerRef} surfaceRef={tabOverviewSurfaceRef} side={floatingMenuSide} align="end" className={css.tabOverviewMenu} label="全部内页">
+          <WorkbenchFloatingMenu kind="editor" ownerId={`${group.id}:tab-overview`} anchorRef={tabOverviewAnchorRef} surfaceRef={tabOverviewSurfaceRef} side={floatingMenuSide} align="end" className={css.tabOverviewMenu} label="全部内页">
             <label className={css.tabOverviewSearch}>
               <span className={css.visuallyHidden}>搜索内页</span>
               <input autoFocus value={tabOverviewQuery} onChange={(event) => setTabOverviewQuery(event.target.value)} placeholder="搜索内页" />
@@ -5841,7 +5789,7 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
                 }}
               >
                 <span className={css.areaTabStatusDot} data-tab-status={summary.status} aria-hidden="true" />
-                <span className={css.editorOptionIcon} data-editor-icon={summary.icon}><EditorIcon name={summary.icon} /></span>
+                <span className={css.editorOptionIcon} data-editor-icon={summary.icon}><EditorIcon name={summary.icon} iconSvg={summary.iconSvg} /></span>
                 <span className={css.tabOverviewItemTitle}>{summary.title}</span>
                 <small>{summary.statusLabel}</small>
               </button>)}
@@ -5850,20 +5798,8 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
         ) : null}
         {menu === 'editor' ? (
           <WorkbenchFloatingMenu kind="editor" ownerId={group.id} anchorRef={editorMenuAnchorRef} surfaceRef={editorMenuSurfaceRef} side={floatingMenuSide} align="start" className={css.editorMenu}>
-            {editorGroups.map(({ category, editors: categoryEditors }) => (
-              <div className={css.editorMenuSection} data-editor-category={category} key={category}>
-                <span className={css.menuHeading}>{category}</span>
-                {categoryEditors.map((editor) => { const presentation = editorPresentation(editor); return (
-                  <div className={css.editorMenuRow} key={editor.scope + ':' + editor.id}>
-                    <button role="menuitem" aria-label={`${editorMenuMode === 'replace' ? '切换为' : '添加为标签'} ${editor.label}`} onClick={() => {
-                      if (editorMenuMode === 'replace') replaceEditor(editor)
-                      else addEditor(editor)
-                    }}><span className={css.editorOptionIcon} data-editor-icon={presentation.icon}><EditorIcon name={presentation.icon} /></span><span className={css.editorOptionLabel}>{editor.label}</span></button>
-                  </div>
-                ) })}
-              </div>
-            ))}
-            {targetBinding === undefined ? <span className={css.menuHint}>选择会话内页后会保留为待绑定标签；选择已有对话后即可完成绑定，不会自动创建新的对话。</span> : null}
+            <WorkbenchEditorPicker key={editorMenuMode} editors={selectableEditors} mode={editorMenuMode}
+              onSelect={editor => editorMenuMode === 'replace' ? replaceEditor(editor) : addEditor(editor)} />
           </WorkbenchFloatingMenu>
         ) : null}
         {activeBinding === undefined || resolvedActive === undefined ? hasPendingSessionTabs ? (
@@ -5931,6 +5867,7 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
             aria-expanded={tabOverviewOpen}
             onClick={(event) => {
               event.stopPropagation()
+              tabOverviewAnchorRef.current = event.currentTarget
               setMenu(undefined)
               setTabOverviewQuery('')
               setTabOverviewOpen(value => !value)
@@ -5969,7 +5906,7 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
               ownerId={group.id}
               side={floatingMenuSide}
               open={collapsePreviewOpen}
-              icon={activePresentation.icon}
+              icon={activePresentation.icon} iconSvg={activePresentation.iconSvg}
               title={collapsePreviewTitle}
               detail={collapsePreviewSummary}
               tabs={tabSummaries.slice(0, 6)}
@@ -5993,7 +5930,7 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
             aria-label="区域操作"
             title="点击打开区域菜单；按住拖到另一个容器可快速合并"
             aria-haspopup="menu"
-            aria-expanded={menu === 'area'}
+            aria-expanded={menu === 'area' || menu === 'editor' && editorMenuAnchorRef.current === areaMenuTriggerRef.current || tabOverviewOpen && tabOverviewAnchorRef.current === areaMenuTriggerRef.current}
             data-area-merge-drag-handle="true"
             onPointerDown={startAreaMergeGesture}
             onClick={(event) => {
@@ -6015,6 +5952,19 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
               active={active} group={group} sibling={sibling}
               document={document}
               commit={commit} close={() => { setMenu(undefined) }}
+              addPage={() => {
+                editorMenuAnchorRef.current = areaMenuTriggerRef.current
+                setTabOverviewOpen(false)
+                setEditorMenuMode('add')
+                setMenu('editor')
+              }}
+              showPages={() => {
+                tabOverviewAnchorRef.current = areaMenuTriggerRef.current
+                setMenu(undefined)
+                setTabOverviewQuery('')
+                setTabOverviewOpen(true)
+              }}
+              {...(collapseEdge === undefined ? {} : { toggleCollapse: () => toggleAreaCollapsed(group.id), canCollapse, collapseLabel })}
               requestSplit={(axis) => {
                 setMenu(undefined)
                 /* v8 ignore next -- AreaMenu disables split actions without an active tab. */
@@ -6038,17 +5988,9 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
       </header>
       <div ref={bodyRef} id={`workbench-area-body-${group.id}`} className={css.body} data-workbench-body>
         {active === undefined ? (
-          <div className={css.empty}>
-            <strong>这个区域还没有内容</strong>
-            <button
-              ref={emptyEditorTriggerRef}
-              type="button"
-              data-workbench-empty-editor-trigger="true"
-              aria-haspopup="menu"
-              aria-expanded={menu === 'editor'}
-              onClick={(event) => { event.stopPropagation(); editorMenuAnchorRef.current = event.currentTarget; setEditorMenuMode('add'); setMenu(value => value === 'editor' ? undefined : 'editor') }}
-            >选择编辑器</button>
-          </div>
+          <WorkbenchEmptyArea editors={selectableEditors} onSelect={addEditor} triggerRef={emptyEditorTriggerRef} expanded={menu === 'editor'}
+            onManage={props.onManageEditors}
+            onBrowse={anchor => { editorMenuAnchorRef.current = anchor; setEditorMenuMode('add'); setMenu(value => value === 'editor' ? undefined : 'editor') }} />
         ) : disposeWhenCollapsed ? (
           <div className={css.empty} data-workbench-editor-suspended="collapsed" role="status">
             <strong>{active?.lastKnownTitle ?? '当前内页'}已暂停</strong>
@@ -6176,7 +6118,7 @@ function WorkbenchAreaTabLabel({ tab, fallback }: { tab: TabDocument; fallback: 
 }
 
 function AreaMenu({
-  anchorRef, surfaceRef, side, align, active, group, sibling, document, commit, close, requestSplit, splitActive, openRelated, openOfficial,
+  anchorRef, surfaceRef, side, align, active, group, sibling, document, commit, close, requestSplit, splitActive, openRelated, openOfficial, addPage, showPages, toggleCollapse, canCollapse, collapseLabel,
 }: {
   anchorRef: RefObject<HTMLElement>
   surfaceRef: RefObject<HTMLDivElement>
@@ -6188,6 +6130,11 @@ function AreaMenu({
   document: WorkbenchLayoutDocument
   commit: Commit
   close: () => void
+  addPage: () => void
+  showPages: () => void
+  toggleCollapse?: () => void
+  canCollapse?: boolean
+  collapseLabel?: string
   requestSplit: (axis: SplitNode['axis']) => void
   splitActive: (edge: Exclude<DropEdge, 'center'>, ratio?: number) => void
   openOfficial?: () => void
@@ -6208,6 +6155,13 @@ function AreaMenu({
       align={align}
       className={css.areaMenu}
     >
+      <button role="menuitem" onClick={addPage}>添加内页</button>
+      <button role="menuitem" disabled={group.tabs.length === 0} onClick={showPages}>查看全部内页</button>
+      {toggleCollapse === undefined ? null : <button role="menuitem" disabled={!canCollapse} onClick={() => { toggleCollapse(); close() }}>{collapseLabel}</button>}
+      <div className={css.menuDivider} />
+      <button role="menuitem" disabled={active === undefined} onClick={() => {
+        if (active !== undefined) run({ type: 'move-tab', tabId: active.id, targetGroupId: group.id, edge: 'right', ids: { groupId: nextId('group'), splitId: nextId('split') } })
+      }}>拆出当前内页</button>
       {openOfficial === undefined ? null : <button role="menuitem" onClick={() => { openOfficial(); close() }}>在原版 DSH 中打开</button>}
       {openRelated === undefined ? null : (
         <>
@@ -6398,6 +6352,7 @@ function Editor({
     })}>清空内页状态并继续</button>
     <button type="button" onClick={() => props.close()}>关闭内页</button>
   </div>
+  if (tab.pendingDistribution !== undefined) return <div className={css.body} role="status" data-workbench-pending-distribution><strong>{tab.lastKnownTitle}等待扩展和配置恢复</strong><p>原配置安全保存在本机导入记录中。请安装并授权完全匹配的扩展，然后从“工作台导入与分发 → 导入记录”恢复配置。</p></div>
   if (tab.pendingBinding !== undefined) {
     const policy: WorkbenchEditorBindingPolicyV1 = editor?.declaration?.binding ?? {
       requirement: editor?.declaration?.requiredBinding ?? 'session',

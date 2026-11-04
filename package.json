@@ -2,7 +2,7 @@
   "name": "dsh-bay-private-staging",
   "description": "Private staging repository for DSH Bay (湾域) on DSH",
   "private": true,
-  "version": "0.2.2-alpha.17",
+  "version": "0.2.2-alpha.17.2",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Yi-Shi-QY/dsh-bay.git"
@@ -40,6 +40,7 @@
     "@types/react-dom": "^18.3.1",
     "@xterm/addon-fit": "0.11.0",
     "@xterm/xterm": "6.0.0",
+    "acorn": "8.15.0",
     "anser": "2.3.5",
     "diff": "9.0.0",
     "esbuild": "0.27.4",

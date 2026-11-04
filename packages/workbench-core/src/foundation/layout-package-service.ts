@@ -56,14 +56,15 @@ export function createWorkbenchLayoutPackageService(options: {
         receipt = await options.journal.save(receipt)
         const snapshot = options.settings.getSnapshot()
         const value = snapshot.value
-        if (!value || !snapshot.writable || !options.canImport()) throw new Error('当前无法写入工作台，请恢复连接后重试。')
+        if (snapshot.status !== 'ready' || !snapshot.writable || !options.canImport()) throw new Error('当前无法写入工作台，请恢复连接后重试。')
         const restored = restoreLayoutPackage(preview.layout, options.editors.getSnapshot(), bindings)
-        const occupied = new Set(Object.values(value.workbenches).map(row => row.name))
+        const occupied = new Set(Object.values(value?.workbenches ?? {}).map(row => row.name))
         let name = preview.layout.name
         for (let index = 2; occupied.has(name); index++) name = `${preview.layout.name.slice(0, 145)} ${index}`
-        const result = await options.settings.patch({ operation: 'set', path: ['workbenches', receipt.workbenchId],
-          value: { workbenchId: receipt.workbenchId, name, description: preview.layout.description, tags: preview.layout.tags, document: restored.document,
-            createdAt: receipt.createdAt, updatedAt: receipt.createdAt, offlineOrigin: { schemaVersion: 1, packageId: preview.digest, archiveSha256: preview.digest } },
+        const imported = { workbenchId: receipt.workbenchId, name, description: preview.layout.description, tags: preview.layout.tags, document: restored.document,
+          createdAt: receipt.createdAt, updatedAt: receipt.createdAt, offlineOrigin: { schemaVersion: 1, packageId: preview.digest, archiveSha256: preview.digest } }
+        const result = await options.settings.patch({ operation: 'set', path: value ? ['workbenches', receipt.workbenchId] : [],
+          value: value ? imported : { version: 4, activeWorkbenchId: receipt.workbenchId, openWorkbenchIds: [], workbenches: { [receipt.workbenchId]: imported }, layoutTemplates: {}, invalidWorkbenches: {}, sessionMarkers: {} },
           ...(snapshot.revision === undefined ? {} : { expectedRevision: snapshot.revision }) })
         if (result.status !== 'committed') throw new Error(result.status === 'conflict' ? '设置已在其他窗口更新，导入未覆盖现有内容，请重试。' : '布局未能保存，请重试。')
         await options.journal.save({ ...receipt, state: 'completed' })

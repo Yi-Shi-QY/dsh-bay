@@ -67,6 +67,7 @@ export interface TabDocument {
   binding?: SessionBindingV1
   /** Anonymous recipient binding group. Never sent to Session services. */
   pendingBinding?: string
+  pendingDistribution?: string
   /** Per-target editor states owned by this stable module instance. */
   sessionStates?: Record<string, JsonValue>
   /** Least-recently-used to most-recently-used target keys. */
@@ -352,7 +353,7 @@ export function retargetSession(
     ...item,
     tabs: item.tabs.map((tab) => {
       if ((tab.id !== tabId && (pending === undefined || tab.pendingBinding !== pending)) || tab.editorScope !== 'session') return tab
-      if (tab.pendingBinding !== undefined) return createSessionTab(tab.id, tab.editorId, binding, tab.lastKnownTitle)
+      if (tab.pendingBinding !== undefined) return { ...createSessionTab(tab.id, tab.editorId, binding, tab.lastKnownTitle), state: tab.state, ...(tab.pendingDistribution ? {pendingDistribution:tab.pendingDistribution} : {}) }
       const oldBinding = tab.binding ?? (tab.sessionId === undefined ? undefined : { sessionId: tab.sessionId })
       const oldKey = oldBinding === undefined ? undefined : sessionTargetKey(oldBinding)
       const nextKey = sessionTargetKey(binding)

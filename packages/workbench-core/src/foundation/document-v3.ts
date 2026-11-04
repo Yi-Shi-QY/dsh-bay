@@ -49,6 +49,8 @@ export interface ModuleInstanceDocument {
   binding?: SessionBindingV1
   /** Explicitly inert Session page awaiting a recipient-local binding. */
   pendingBinding?: string
+  /** Inert until this Host distribution transaction restores verified state. */
+  pendingDistribution?: string
   state: JsonValue
   sessionStates?: Record<string, JsonValue>
   sessionStateOrder?: string[]
@@ -280,6 +282,7 @@ export function migrateDocumentV2ToV3(document: WorkbenchLayoutDocument): Workbe
     editorScope: tab.editorScope,
     ...(tab.binding === undefined ? {} : { binding: structuredClone(tab.binding) }),
     ...(tab.pendingBinding === undefined ? {} : { pendingBinding: tab.pendingBinding }),
+    ...(tab.pendingDistribution === undefined ? {} : { pendingDistribution: tab.pendingDistribution }),
     state: structuredClone(tab.state),
     ...(tab.sessionStates === undefined ? {} : { sessionStates: structuredClone(tab.sessionStates) }),
     ...(tab.sessionStateOrder === undefined ? {} : { sessionStateOrder: [...tab.sessionStateOrder] }),
@@ -446,6 +449,7 @@ export function projectDocumentV3ToLayoutV2(document: WorkbenchDocumentV3): Work
     editorId: module.editorId,
     editorScope: module.editorScope,
     ...(module.pendingBinding === undefined ? {} : { pendingBinding: module.pendingBinding }),
+    ...(module.pendingDistribution === undefined ? {} : { pendingDistribution: module.pendingDistribution }),
     ...(module.binding === undefined ? {} : {
       binding: structuredClone(module.binding), sessionId: module.binding.sessionId,
     }),
@@ -491,6 +495,7 @@ export function validateWorkbenchDocumentV3(value: unknown, options: { allowDeta
       || moduleIds.has(candidate.moduleInstanceId)) return undefined
     const preparedStart = candidate.editorScope === 'root'
       && candidate.editorId === 'workbench.conversation.start'
+    if (candidate.pendingDistribution !== undefined && (typeof candidate.pendingDistribution !== 'string' || !/^distribution-[a-f0-9-]{36}$/u.test(candidate.pendingDistribution))) return undefined
     if (candidate.editorScope === 'root' && candidate.binding !== undefined
       && (!preparedStart || !isSessionBinding(candidate.binding))) return undefined
     if (candidate.pendingBinding !== undefined && (candidate.editorScope !== 'session'

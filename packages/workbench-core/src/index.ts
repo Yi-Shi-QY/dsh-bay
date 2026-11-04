@@ -1,4 +1,5 @@
 import { installLayoutImportJournalRoute } from './host-layout-import-journal.ts'
+import { installDistributionRoutes } from './host-distribution-route.ts'
 export * from './module-contract.ts'
 export {
   isWorkbenchExtensionDeclarationV1,
@@ -71,7 +72,7 @@ import { installWorkbenchCreatorSkillProvider } from './workbench-creator-skill.
  */
 export const Config = WorkbenchSettingsSchema.volatile()
 
-export const inject = ['connection', 'pluginManager', 'profileContext', 'pluginPackages', 'sessions', 'sessionController', 'webServer', 'settings', 'skills'] as const
+export const inject = ['connection', 'pluginManager', 'profileContext', 'pluginPackages', 'credentials', 'sessions', 'sessionController', 'webServer', 'settings', 'skills'] as const
 
 interface WorkbenchCoreHostContextV1 {
   baseUrl?: string
@@ -108,11 +109,13 @@ export function apply(ctx: WorkbenchCoreHostContextV1): void {
       // Connection from the parent can return undefined in DSH Desktop even
       // though it is declared by this plugin.
       get: (name: string, strict?: boolean) => child.get?.(name, strict) ?? context.get?.(name, strict),
+      provide: (name: string, value: unknown) => context.provide?.(name, value),
     }
     const disposeRoute = installWorkbenchHostSignedCatalogInstallRoute(routeContext as never)
     const disposeIdentity = installWorkbenchModuleIdentityRoute(routeContext as never)
     const disposeCenter = installWorkbenchModuleCenterRoutes(routeContext as never)
     const disposeLayoutJournal = installLayoutImportJournalRoute(routeContext as never)
+    const disposeDistribution = installDistributionRoutes(routeContext as never)
     const disposeOffline = installWorkbenchOfflineImportRoutes(routeContext as never)
     const disposeDirectSource = installWorkbenchHostDirectSourceInstallRoute(routeContext as never)
     const disposeNativeOfflineBundle = installWorkbenchDshNativeOfflineBundleRoutes(routeContext as never)
@@ -122,6 +125,7 @@ export function apply(ctx: WorkbenchCoreHostContextV1): void {
       disposeNativeOfflineBundle?.()
       disposeDirectSource?.()
       disposeLayoutJournal?.()
+      disposeDistribution?.()
       disposeOffline?.()
       disposeCenter?.()
       disposeIdentity?.()

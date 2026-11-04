@@ -8,11 +8,15 @@
     "./client": "./client.js"
   },
   "dsh": {
-    "bundle": { "patch": "./cordis.patch.yml" },
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
     "client": {
       "platform": "web",
       "immediately": true,
-      "inject": ["@deepseek-ai/dsh-client-ui-slots"]
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-slots"
+      ]
     },
     "workbench": {
       "schemaVersion": 1,
@@ -20,23 +24,58 @@
       "kind": "extension",
       "delivery": "direct-source",
       "version": "0.1.0",
-      "coreCompatibility": "0.2.2-alpha.17",
+      "coreCompatibility": "0.2.2-alpha.17.2",
       "dshGeneration": "0.2.1-rc.5",
       "upstreamCommit": "b830ec950faba0a46dda564be3e2d854afed94f1",
       "activation": "restart-only",
       "scope": "root",
-      "editorIds": ["workbench.example"],
+      "editorIds": [
+        "workbench.example"
+      ],
       "permissions": [],
       "requiredCapabilities": [],
-      "editors": [{
-        "editorId": "workbench.example",
-        "scope": "root",
-        "label": "示例内页",
-        "requiredBinding": "none",
-        "binding": { "requirement": "none", "unbound": "available", "sharing": "none" },
-        "state": { "schemaVersion": 1, "maxBytes": 16384, "restore": "if-valid", "share": "portable" },
-        "runtime": { "background": "pause", "collapsed": "dispose", "reacquire": "on-visible" }
-      }]
+      "editors": [
+        {
+          "editorId": "workbench.example",
+          "scope": "root",
+          "label": "示例内页",
+          "requiredBinding": "none",
+          "binding": {
+            "requirement": "none",
+            "unbound": "available",
+            "sharing": "none"
+          },
+          "state": {
+            "schemaVersion": 1,
+            "maxBytes": 16384,
+            "restore": "if-valid",
+            "share": "portable"
+          },
+          "runtime": {
+            "background": "pause",
+            "collapsed": "dispose",
+            "reacquire": "on-visible"
+          }
+        }
+      ],
+      "distribution": {
+        "version": 1,
+        "exportPolicy": "embed",
+        "runtimeFiles": [
+          "package.json",
+          "index.js",
+          "client.js",
+          "cordis.patch.yml",
+          "LICENSE"
+        ],
+        "requires": [],
+        "runtimeKind": "client-only"
+      }
     }
-  }
+  },
+  "peerDependencies": {
+    "react": "18.3.1",
+    "@deepseek-ai/dsh-client-ui-slots": "0.2.1-rc.5"
+  },
+  "license": "MIT"
 }

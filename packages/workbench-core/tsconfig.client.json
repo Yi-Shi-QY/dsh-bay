@@ -29,6 +29,10 @@
     "src/host-direct-source-service.ts",
     "src/host-source-resolver.ts",
     "src/dsh-native-plugin-manager.ts",
-    "src/host-native-offline-bundle-route.ts"
+    "src/host-native-offline-bundle-route.ts",
+    "src/host-distribution-artifacts.ts",
+    "src/host-distribution-service.ts",
+    "src/host-distribution-route.ts",
+    "src/host-distribution-installer.ts"
   ]
 }

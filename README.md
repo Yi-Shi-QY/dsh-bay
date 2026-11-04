@@ -4,7 +4,7 @@
 >
 > DSH Bay（中文名：湾域）是面向 [DeepSeek Harness（DSH）](https://github.com/deepseek-ai/deepseek-harness) 的多区域插件工作台。它把 DSH 原生 Session、Workspace Files、Terminal、Browser 及其他官方内页组织到相互隔离、可恢复的工作区域中，让插件作者可以在一个清晰的边界内开发和验证自己的扩展。
 
-当前仓库是 DSH Bay `0.2.2-alpha.17` 的私有候选仓库，目标宿主为 DSH `0.2.1-rc.5`。仓库已经从研究、迁移和历史验收材料中独立出来，方便进行来源审计、兼容性验证和后续公测准备。
+当前仓库是 DSH Bay `0.2.2-alpha.17.2` 的私有候选仓库，目标宿主为 DSH `0.2.1-rc.5`。仓库已经从研究、迁移和历史验收材料中独立出来，方便进行来源审计、兼容性验证和后续公测准备。
 
 > 当前候选仍处于 `private-staging / experimental-unvalidated`。`pnpm test`、运行时构建和 rc5 身份检查已通过；Sidebar/Workspace 复制源的类型声明门禁和真实 rc5 桌面 smoke 仍是发布前置条件。请不要把当前构建当作已发布的稳定包。
 
@@ -15,7 +15,7 @@
 | 产品展示名 | **DSH Bay** |
 | 中文名 | **湾域** |
 | 产品定位 | DSH 插件开发、验证、组合和分享的多区域工作台 |
-| 当前版本 | `0.2.2-alpha.17` |
+| 当前版本 | `0.2.2-alpha.17.2` |
 | DSH 兼容版本 | `0.2.1-rc.5` |
 | DSH 上游提交 | `b830ec950faba0a46dda564be3e2d854afed94f1` |
 | 默认交付 | Core-only |
@@ -36,6 +36,10 @@ DSH Bay 是独立社区项目，不代表 DeepSeek 官方产品。它遵循 DSH 
 - 原生内页可用时直接投影 DSH 提供的实现；原生 entry 不可用时进入显式 fallback，并保留诊断信息。
 - 布局、Area 状态和 Session placement 由 Workbench 负责持久化，重启后可以恢复。
 - Core 为后续的验证、组合和分享能力提供模块身份、artifact staging、provenance 和 package contract。
+
+## 17.2 工作台分发
+
+保留 17.1 Home，新增布局分享、签名在线引用和签名离线嵌入。自包含私有 Client/Host Bundle 可随包安装、重启并恢复配置；完整性不足时阻止导出。使用范围与限制见 [17.2 分发说明](docs/DISTRIBUTION-17.2.zh-CN.md)，实际验收与发布门禁见 [验证记录](docs/VALIDATION.md)。
 
 ## 当前能力
 
@@ -69,7 +73,7 @@ Settings 继续使用 DSH 原生 Plugin Manager 入口。DSH Bay 不维护第二
 
 ### More 菜单隔离
 
-`0.2.2-alpha.17` 采用 Core-only 方向：Workbench 不显示、不消费 Workbench More。DSH 官方页面仍可使用 rc5 的 `ui-entry-customization`；在 Workbench projection boundary 只过滤官方 `entry-customization` 注册，不屏蔽整个 actions Slot，也不影响其他合法的官方或第三方 action。
+`0.2.2-alpha.17.2` 采用 Core-only 方向：Workbench 不显示、不消费 Workbench More。DSH 官方页面仍可使用 rc5 的 `ui-entry-customization`；在 Workbench projection boundary 只过滤官方 `entry-customization` 注册，不屏蔽整个 actions Slot，也不影响其他合法的官方或第三方 action。
 
 因此，官方页面、Workbench 页面和模式切换分别遵循以下行为：
 
@@ -148,7 +152,7 @@ pnpm pack:core   # 生成 Core 包（依赖类型声明门禁）
 - DSH generation：`0.2.1-rc.5`
 - upstream commit：`b830ec950faba0a46dda564be3e2d854afed94f1`
 - Sidebar/Workspace source digest：`28b18fcb45e98bb5a5b4451bb65e4f4f87a4ea6ba727aa9be81cb977c76f78ee`
-- lockfile digest：`f8ccc800d6fe1a70a985f8e1dab7878b2c18926023c5cf63434ab3b624fb5fca`
+- lockfile digest：`0c0ef887bc84c95ea8418872328157776b33815f8a739530996353e52cb4dfc7`
 
 详细记录见：
 

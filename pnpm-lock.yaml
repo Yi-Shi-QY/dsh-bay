@@ -32,6 +32,9 @@ importers:
       '@xterm/xterm':
         specifier: 6.0.0
         version: 6.0.0
+      acorn:
+        specifier: 8.15.0
+        version: 8.15.0
       anser:
         specifier: 2.3.5
         version: 2.3.5
@@ -122,6 +125,12 @@ importers:
       '@deepseek-ai/dsh-api-workspace-files':
         specifier: 0.2.1-rc.5
         version: 0.2.1-rc.5(@deepseek-ai/cordis@4.0.5)
+      '@deepseek-ai/dsh-app-boot':
+        specifier: 0.2.1-rc.5
+        version: 0.2.1-rc.5(@deepseek-ai/cordis-plugin-group@1.0.5(@deepseek-ai/cordis-plugin-loader@1.0.6)(@deepseek-ai/cordis@4.0.5))(@deepseek-ai/cordis-plugin-include@1.0.10)(@deepseek-ai/cordis-plugin-loader@1.0.6)(@deepseek-ai/cordis@4.0.5)(@deepseek-ai/dsh-home-paths@0.2.1-rc.5(@deepseek-ai/cordis@4.0.5))(@deepseek-ai/dsh-launch-environment@0.2.1-rc.5(@deepseek-ai/cordis@4.0.5))
+      '@deepseek-ai/dsh-atomic-write':
+        specifier: 0.2.1-rc.5
+        version: 0.2.1-rc.5(@deepseek-ai/cordis@4.0.5)
       '@deepseek-ai/dsh-client-connection':
         specifier: 0.2.1-rc.5
         version: 0.2.1-rc.5(@deepseek-ai/cordis@4.0.5)(@deepseek-ai/dsh-scope@0.2.1-rc.5(@deepseek-ai/cordis@4.0.5))
@@ -179,6 +188,9 @@ importers:
       '@deepseek-ai/dsh-cordis-host-runner':
         specifier: 0.2.1-rc.5
         version: 0.2.1-rc.5(@deepseek-ai/cordis@4.0.5)(@deepseek-ai/dsh-agent@0.2.1-rc.5(cbd9b78489f743dd32cfe135059e56db))(@deepseek-ai/dsh-brand@0.2.1-rc.5(@deepseek-ai/cordis@4.0.5))(@deepseek-ai/dsh-llm@0.2.1-rc.5(@deepseek-ai/cordis@4.0.5))(@deepseek-ai/dsh-scope@0.2.1-rc.5(@deepseek-ai/cordis@4.0.5))(@deepseek-ai/dsh-session@0.2.1-rc.5(@deepseek-ai/cordis@4.0.5)(@deepseek-ai/dsh-scope@0.2.1-rc.5(@deepseek-ai/cordis@4.0.5)))(@deepseek-ai/dsh-tools@0.2.1-rc.5(47e11ee6492a70a2f2353a0c993abe69))(@deepseek-ai/dsh-typert-protocol@0.2.1-rc.5(@deepseek-ai/cordis@4.0.5))
+      '@deepseek-ai/dsh-credentials':
+        specifier: 0.2.1-rc.5
+        version: 0.2.1-rc.5(@deepseek-ai/cordis@4.0.5)
       '@deepseek-ai/dsh-plugin-manager':
         specifier: 0.2.1-rc.5
         version: 0.2.1-rc.5(e109ae9fbbee80b3e1b50f7ff3fe1f93)
@@ -3827,6 +3839,11 @@ packages:
   '@zip.js/zip.js@2.8.6':
     resolution: {integrity: sha512-E7Dai2C0wsTgzgDuDAb2Cf/Z57wHJd5zp+x2+f5/silcmpDuRY4fW7SH0cCmMKqlKgHuf01BtzLqXegesE5qCg==}
     engines: {bun: '>=0.7.0', deno: '>=1.0.0', node: '>=18.0.0'}
+
+  acorn@8.15.0:
+    resolution: {integrity: sha512-NZyJarBfL7nWwIq+FDL6Zp/yHEhePMNnnJ0y3qfieCrmNvYct8uvtiV41UvlSe6apAfk0fY1FbWx+NwfmpvtTg==}
+    engines: {node: '>=0.4.0'}
+    hasBin: true
 
   agent-base@7.1.4:
     resolution: {integrity: sha512-MnA+YT8fwfJPgBx3m60MNqakm30XOkyIoH1y6huTQvC0PwZG7ki8NacLBcrPbNoo8vEZy7Jpuk7+jMO+CUovTQ==}
@@ -9690,6 +9707,8 @@ snapshots:
   '@xterm/xterm@6.0.0': {}
 
   '@zip.js/zip.js@2.8.6': {}
+
+  acorn@8.15.0: {}
 
   agent-base@7.1.4: {}
 

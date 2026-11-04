@@ -1,0 +1,63 @@
+{
+  "version": "0.2.2-alpha.17.2",
+  "filename": "dsh-workbench-core-0.2.2-alpha.17.2-area-header-d75dbab26a0f.tgz",
+  "sha256": "d75dbab26a0f84fd2d9f8a88dff53eb39a28021952c04c327a6b6fd3ef427b05",
+  "bytes": 1006165,
+  "createdAt": "2026-11-04T11:30:58.911Z",
+  "status": "experimental private trial; strict release gate held",
+  "validation": {
+    "tests": "111 files / 693 tests passed",
+    "build": "passed",
+    "rc5Identity": "passed",
+    "typecheck": "112 existing RC5 generated Sidebar/Workspace errors; zero new errors",
+    "inputChecks": 373,
+    "artifact": "extracted archive, source input hashes, Creator files and actual installed Host/Client bytes verified",
+    "ui": {
+      "browser": "Edge headless; Browser plugin not available",
+      "stressCases": 40,
+      "widths": [
+        568,
+        401,
+        400,
+        360,
+        320,
+        319,
+        280,
+        240,
+        239,
+        220,
+        200,
+        180,
+        179,
+        160,
+        140,
+        120,
+        119,
+        96,
+        80,
+        64
+      ],
+      "themes": [
+        "light",
+        "dark"
+      ],
+      "checks": [
+        "narrow menu adds, switches and closes tabs; Escape returns focus",
+        "pending binding remains reachable at 96px",
+        "collapsed rail still expands correctly",
+        "natural split geometry fills allocated space after real divider drag, no injected styles"
+      ],
+      "naturalGrid": [
+        "fresh four-Area preset",
+        "real divider drag with three retained tabs",
+        "narrow viewport",
+        "reload preserves complete grid"
+      ],
+      "noInjectedSizingStyles": true,
+      "errors": [],
+      "limits": "Pending Session binding tested in browser; already-bound Session header geometry not separately verified. Native Electron, Companion/LAN and two-Profile distribution not rerun."
+    },
+    "remaining": "Native Electron, real Browser Companion/LAN and two-Profile private extension migration were not rerun for this visual follow-up; previous acceptance retained"
+  },
+  "evidenceDirectory": "C:\\Users\\WeChenXC000\\AppData\\Local\\Temp\\dsh-bay-area-header"
+}

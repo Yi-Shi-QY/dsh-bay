@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { IconSearchOutlineRegular, IconShareOutlineMedium, IconSettingsOutlineMedium } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { WorkbenchCoreSettingsSectionProps } from './WorkbenchCoreSettingsSection.tsx'
 import { WorkbenchEditorIcon as EditorIcon } from './WorkbenchEditorIcon.tsx'
-import { editorPresentationFor, type WorkbenchEditorCatalogRow } from './catalog.ts'
+import { resolveWorkbenchEditorPresentation, type WorkbenchEditorCatalogRow } from './catalog.ts'
 import { buildWorkbenchInventory } from './workbench-inventory.ts'
 import { areasOf, type WorkbenchNodeV3 } from './document-v3.ts'
 import type { WorkbenchRecordV2, WorkbenchSettingsV4 } from './persistence.ts'
+import { normalizeWorkbenchTags } from './persistence.ts'
 import { DESKTOP_SETTINGS_CONTEXT, settingsTargetWritable, type SettingsViewMemory, type WorkbenchSettingsOpenOptionsV1 } from './settings-context.ts'
 import { WORKBENCH_CORE_VERSION, WORKBENCH_DSH_GENERATION } from '../release-compatibility.ts'
 import { workbenchExtensionUnavailableCopyV1, type WorkbenchExtensionAccessSnapshotV1 } from '../workbench-extension-access.ts'
@@ -21,7 +23,7 @@ export type SettingsPageProps = WorkbenchCoreSettingsSectionProps & {
   navigate(options: WorkbenchSettingsOpenOptionsV1): void
   onDirty(form: PendingSettingsForm | undefined): void
 }
-export function useSettingsAction() {
+export function useSettingsAction(messages = { busy: '正在保存…', success: '已保存' }) {
   const [states, setStates] = useState<Record<string, { busy: boolean; message: string; error: boolean }>>({})
   const pending = useRef(new Set<string>())
   const retries = useRef(new Map<string, () => Promise<unknown>>())
@@ -31,14 +33,14 @@ export function useSettingsAction() {
     if (pending.current.has(key)) return false
     pending.current.add(key)
     retries.current.set(key, action)
-    setStates(current => ({ ...current, [key]: { busy: true, message: '正在保存…', error: false } }))
+    setStates(current => ({ ...current, [key]: { busy: true, message: messages.busy, error: false } }))
     try {
       const result = await action()
       if (result === false || (result && typeof result === 'object' && 'status' in result && result.status !== 'committed')) {
         const status = result && typeof result === 'object' && 'status' in result ? result.status : ''
         throw new Error(status === 'conflict' ? '其他窗口已更新设置，本次未覆盖。请检查后重试。' : '操作未完成，请检查目标状态并重试。')
       }
-      if (mounted.current) setStates(current => ({ ...current, [key]: { busy: false, message: '已保存', error: false } }))
+      if (mounted.current) setStates(current => ({ ...current, [key]: { busy: false, message: messages.success, error: false } }))
       return true
     } catch (error) {
       if (mounted.current) setStates(current => ({ ...current, [key]: { busy: false, message: error instanceof Error ? error.message : '保存失败，请重试。', error: true } }))
@@ -48,9 +50,9 @@ export function useSettingsAction() {
   return { states, run, feedback: (key: string) => states[key] ? <span className={css.feedback} role={states[key].error ? 'alert' : 'status'}>{states[key].message}{states[key].error ? <button onClick={() => { const retry = retries.current.get(key); if (retry) void run(key, retry) }}>重试</button> : null}</span> : null }
 }
 
-export function PageIcon({ editor }: { editor: Pick<WorkbenchEditorCatalogRow, 'id' | 'scope' | 'icon'> }) {
-  const icon = editor.icon ?? editorPresentationFor(editor.id, editor.scope).icon
-  return <span className={css.pageIcon} data-editor-icon={icon}><EditorIcon name={icon} /></span>
+export function PageIcon({ editor }: { editor: WorkbenchEditorCatalogRow }) {
+  const { icon, iconSvg } = resolveWorkbenchEditorPresentation(editor)
+  return <span className={css.pageIcon} data-editor-icon={icon}><EditorIcon name={icon} iconSvg={iconSvg} /></span>
 }
 export function BindingRequirement({ editor }: { editor: WorkbenchEditorCatalogRow | undefined }) {
   return <span>{editor?.resourceOnly ? '由对话结果打开' : editor?.declaration?.requiredBinding === 'session' ? '需要对话' : editor?.declaration?.requiredBinding === 'workspace' ? '需要工作区' : editor?.declaration?.requiredBinding === 'none' ? '可直接使用' : '资源要求尚未检查'}</span>
@@ -63,7 +65,7 @@ export function LayoutDiagram({ node, editors, compact = false }: { node: Workbe
   const page = node.moduleHistory.find(page => page.moduleInstanceId === node.activeModuleInstanceId) ?? node.moduleHistory[0]
   const editor = page && editors.find(row => row.id === page.editorId && row.scope === page.editorScope)
   return <div className={`${css.previewArea} ${compact ? css.previewAreaCompact : ''}`}>
-    {page ? <span className={compact ? css.previewGlyph : undefined} aria-hidden={compact || undefined}><PageIcon editor={{ id: page.editorId, scope: page.editorScope, ...(editor?.icon ? { icon: editor.icon } : {}) }} /></span> : null}
+    {page ? <span className={compact ? css.previewGlyph : undefined} aria-hidden={compact || undefined}><PageIcon editor={editor ?? { id: page.editorId, scope: page.editorScope, label: page.lastKnownTitle ?? page.editorId }} /></span> : null}
     {!compact ? <><span>{editor?.label ?? page?.lastKnownTitle ?? '空区域'}</span><small>{node.moduleHistory.length} 个内页</small></> : null}
   </div>
 }
@@ -73,7 +75,7 @@ export function WorkbenchManagementPage(props: SettingsPageProps) {
   const browser = context.mode === 'browser-workbench'
   const directory = props.workbenchDirectory
   const [query, setQuery] = useState(props.memory.searches.workbenches ?? '')
-  const [category, setCategory] = useState(props.memory.filters.workbenches ?? 'open')
+  const [category, setCategory] = useState(props.memory.filters.workbenches ?? 'all')
   const [selectedId, setSelectedId] = useState(props.openOptions?.workbenchId ?? props.memory.selectedId ?? (browser ? context.workbenchId : undefined))
   const actions = useSettingsAction()
   const rows = Object.values(props.value?.workbenches ?? {})
@@ -86,7 +88,7 @@ export function WorkbenchManagementPage(props: SettingsPageProps) {
   }
   const selected = rows.find(row => row.workbenchId === selectedId)
   const inventories = useMemo(() => new Map(rows.map(row => [row.workbenchId, buildWorkbenchInventory(row.document, props.editors)])), [props.value?.workbenches, props.editors])
-  const filtered = rows.filter(row => browser || (category === 'archived' ? row.archivedAt !== undefined : row.archivedAt === undefined && (category === 'open' ? openIds.includes(row.workbenchId) : !openIds.includes(row.workbenchId))))
+  const filtered = rows.filter(row => browser || category === 'all' || (category === 'archived' ? row.archivedAt !== undefined : row.archivedAt === undefined && (category === 'open' ? openIds.includes(row.workbenchId) : !openIds.includes(row.workbenchId))))
     .filter(row => `${row.name} ${row.description} ${row.tags?.join(' ') ?? ''}`.toLocaleLowerCase().includes(query.toLocaleLowerCase()))
     .sort((a, b) => Number(Boolean(b.pinnedAt)) - Number(Boolean(a.pinnedAt)) || b.updatedAt - a.updatedAt)
   const reportDirty = useCallback((form: PendingSettingsForm | undefined) => { pendingForm.current = form; props.onDirty(form) }, [props.onDirty])
@@ -95,7 +97,7 @@ export function WorkbenchManagementPage(props: SettingsPageProps) {
       {!browser ? <button className={css.primaryButton} onClick={() => props.navigate({ section: 'sharing', shareMode: 'import' })}>导入工作台</button> : null}</header>
     {!selected ? <>
       <label className={css.search}><IconSearchOutlineRegular aria-hidden="true" /><input type="search" aria-label="搜索工作台" placeholder="搜索名称、简介或标签" value={query} onChange={event => { setQuery(event.target.value); props.memory.searches.workbenches = event.target.value }} /></label>
-      {!browser ? <div className={css.filters} aria-label="工作台状态">{[['open', '已打开'], ['inactive', '未打开'], ['archived', '已归档']].map(([id, label]) => <button key={id} aria-pressed={category === id} onClick={() => { setCategory(id!); props.memory.filters.workbenches = id! }}>{label}</button>)}</div> : null}
+      {!browser ? <div className={css.filters} aria-label="工作台状态">{[['all', '全部'], ['open', '已打开'], ['inactive', '未打开'], ['archived', '已归档']].map(([id, label]) => <button key={id} aria-pressed={category === id} onClick={() => { setCategory(id!); props.memory.filters.workbenches = id! }}>{label}</button>)}</div> : null}
       <div className={css.cards}>{filtered.map(row => { const inventory = inventories.get(row.workbenchId); const writable = settingsTargetWritable(context, row.workbenchId, props.windowController)
         return <button key={row.workbenchId} className={css.card} onClick={() => select(row.workbenchId)}>
           <span className={css.cardTitle}>{row.pinnedAt ? '置顶 · ' : ''}{row.name}</span><span className={`${css.preview} ${css.previewCompact}`}><LayoutDiagram node={row.document.root} editors={props.editors} compact /></span>
@@ -103,7 +105,7 @@ export function WorkbenchManagementPage(props: SettingsPageProps) {
           <small>{inventory ? `${inventory.areas.length} 个区域 · ${inventory.pageCount} 个内页` : '尚未检查'} · {writable ? '本机' : '浏览器运行中'}</small><small>修改于 {new Date(row.updatedAt).toLocaleString()}</small>
         </button> })}</div>
       {filtered.length === 0 ? <div className={css.empty}>没有符合条件的工作台。</div> : null}
-      {Object.values(props.value?.invalidWorkbenches ?? {}).length ? <details><summary>无法解析的历史布局</summary>{Object.values(props.value!.invalidWorkbenches).map(row => <div key={row.workbenchId}><strong>{row.name}</strong><p>布局尚未检查，原始记录已保留。</p><button className={css.secondaryButton} onClick={() => downloadSettingsFile(`${row.name}-诊断.json`, JSON.stringify(row.rawRecord, null, 2), 'application/json')}>导出原始诊断配置</button></div>)}</details> : null}
+      {Object.values(props.value?.invalidWorkbenches ?? {}).length ? <details open={props.openOptions?.workbenchId !== undefined && props.value?.invalidWorkbenches[props.openOptions.workbenchId] !== undefined ? true : undefined}><summary>无法解析的历史布局</summary>{Object.values(props.value!.invalidWorkbenches).map(row => <div key={row.workbenchId}><strong>{row.name}</strong><p>布局尚未检查，原始记录已保留。</p><button className={css.secondaryButton} onClick={() => downloadSettingsFile(`${row.name}-诊断.json`, JSON.stringify(row.rawRecord, null, 2), 'application/json')}>导出原始诊断配置</button></div>)}</details> : null}
     </> : <>
       {!browser ? <button className={css.backButton} onClick={() => select()}>‹ 返回工作台列表</button> : null}
       <WorkbenchDetails key={selected.workbenchId} {...props} record={selected} onDirty={reportDirty} onRemoved={() => select()} action={actions} />
@@ -117,13 +119,13 @@ export function UnsavedFormPrompt({ form, onContinue, onLeave }: { form: Pending
   const [busy, setBusy] = useState(false)
   const root = useRef<HTMLDivElement>(null)
   useEffect(() => { const focus = document.activeElement; root.current?.querySelector<HTMLButtonElement>('button')?.focus(); return () => { if (focus instanceof HTMLElement && focus.isConnected) focus.focus() } }, [])
-  return <div className={css.promptBackdrop}><div className={css.prompt} ref={root} role="alertdialog" aria-modal="true" aria-label="资料尚未保存" onKeyDown={event => {
+  return createPortal(<div className={`${css.settingsRoot} ${css.promptLayer}`}><div className={css.promptBackdrop}><div className={css.prompt} ref={root} role="alertdialog" aria-modal="true" aria-label="资料尚未保存" onKeyDown={event => {
     if (event.key === 'Escape') { event.stopPropagation(); onContinue() }
     if (event.key === 'Tab') { const buttons = [...root.current!.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')]; const index = buttons.indexOf(document.activeElement as HTMLButtonElement); event.preventDefault(); buttons[(index + (event.shiftKey ? buttons.length - 1 : 1)) % buttons.length]?.focus() }
   }}><h3>资料尚未保存</h3><p>保存后离开，或放弃这次资料编辑。</p><div className={css.actions}>
     <button className={css.primaryButton} disabled={busy} onClick={() => { setBusy(true); void form.save().then(ok => { setBusy(false); if (ok) onLeave() }) }}>保存并离开</button>
     <button className={css.secondaryButton} disabled={busy} onClick={() => { form.discard(); onLeave() }}>放弃修改</button><button className={css.secondaryButton} disabled={busy} onClick={onContinue}>继续编辑</button>
-  </div></div></div>
+  </div></div></div></div>, document.body)
 }
 
 function WorkbenchDetails(props: SettingsPageProps & { record: WorkbenchRecordV2; onRemoved(): void; action: ReturnType<typeof useSettingsAction> }) {
@@ -135,7 +137,9 @@ function WorkbenchDetails(props: SettingsPageProps & { record: WorkbenchRecordV2
   const [name, setName] = useState(record.name)
   const [description, setDescription] = useState(record.description)
   const [tags, setTags] = useState(record.tags?.join('，') ?? '')
-  const dirty = name !== record.name || description !== record.description || tags !== (record.tags?.join('，') ?? '')
+  const normalizedTags = normalizeWorkbenchTags(tags.split(/[,，]/u))
+  const dirty = name.trim() !== record.name || description.trim() !== record.description
+    || JSON.stringify(normalizedTags) !== JSON.stringify(record.tags ?? [])
   const [confirmDelete, setConfirmDelete] = useState(false)
   const save = useCallback(async () => {
     if (!directory) return false
@@ -147,18 +151,18 @@ function WorkbenchDetails(props: SettingsPageProps & { record: WorkbenchRecordV2
   useEffect(() => { props.onDirty(dirty ? { save: () => saveRef.current(), discard: () => discardRef.current() } : undefined); return () => props.onDirty(undefined) }, [dirty, props.onDirty])
   const mutate = (key: string, fn: () => Promise<unknown>) => void action.run(key, fn)
   const openIds = props.value?.openWorkbenchIds ?? []
-  const statusLabel = !writable ? '浏览器运行中' : openIds.includes(record.workbenchId) ? '已打开' : '未打开'
+  const statusLabel = !writable ? '浏览器运行中' : record.archivedAt !== undefined ? '已归档' : openIds.includes(record.workbenchId) ? '已打开' : '未打开'
   return <div className={css.detail}>
     <header className={css.detailHeader}>
       <div className={css.detailHeaderMain}>
         <div className={css.detailBackRow}><span className={css.detailEyebrow}>工作台详情</span><span className={css.detailId}>{record.workbenchId}</span></div>
         <h3 className={css.workbenchName}>{record.name}</h3>
-        <p>{record.description || '暂无简介'}{props.value?.activeWorkbenchId === record.workbenchId ? ' · 当前工作台' : ''}</p>
+        <p>{record.description || '暂无简介'}{props.value?.activeWorkbenchId === record.workbenchId && openIds.includes(record.workbenchId) ? ' · 当前工作台' : ''}</p>
         <div className={css.detailBadges}><span className={css.statusBadge} data-status={writable ? 'ready' : 'browser'}>{statusLabel}</span><span>{inventory.areas.length} 个区域</span><span>{inventory.pageCount} 个内页</span>{inventory.missingPageCount ? <span className={css.warningBadge}>{inventory.missingPageCount} 个不可用</span> : null}</div>
       </div>
       <div className={css.detailHeaderActions}>
         {!writable ? <button className={css.primaryButton} disabled={action.states.reclaim?.busy} onClick={() => mutate('reclaim', async () => { const result = await props.windowController?.reclaim?.(record.workbenchId); if (result?.status !== 'reclaimed') throw new Error('尚未确认收回，请检查浏览器连接后重试。') })}>收回到 DSH 客户端</button> : null}
-        {global && writable && !openIds.includes(record.workbenchId) && !record.archivedAt ? <button className={css.primaryButton} disabled={!directory} onClick={() => mutate('open', () => directory!.openAndSelect(record.workbenchId))}>打开工作台</button> : null}
+        {global && writable && !record.archivedAt ? <button className={css.primaryButton} disabled={!directory} onClick={() => mutate('open', () => props.onOpenWorkbench ? props.onOpenWorkbench(record.workbenchId) : directory!.openAndSelect(record.workbenchId))}>打开工作台</button> : null}
         <button className={css.secondaryButton} onClick={() => props.navigate({ section: 'sharing', workbenchId: record.workbenchId, shareMode: 'export' })} disabled={!writable}>分享</button>
         {action.feedback('reclaim')}{action.feedback('open')}
       </div>
@@ -178,13 +182,13 @@ function WorkbenchDetails(props: SettingsPageProps & { record: WorkbenchRecordV2
     <section className={css.previewSection}><div className={css.sectionHeader}><div><h4>布局预览</h4><p>显示每个区域的分屏比例和当前内页。</p></div><span className={css.sectionCount}>{inventory.areas.length} 个区域</span></div><div className={css.largePreview}><LayoutDiagram node={record.document.root} editors={props.editors} /></div><div className={css.previewSummary}><span>{inventory.pageCount} 个保留内页</span><span>{inventory.missingPageCount ? `${inventory.missingPageCount} 个内页不可用` : '全部内页已就绪'}</span></div></section>
     <section className={css.pagesSection}><div className={css.sectionHeader}><div><h4>区域与内页</h4><p>保留的标签和当前内页会随工作台一起保存。</p></div><span className={css.sectionCount}>{inventory.pageCount} 个内页</span></div>{inventory.areas.map(area => <div key={area.areaId} className={css.group}><div className={css.groupHeader}><h5>区域 {area.ordinal}</h5><span>{area.pages.length} 个内页</span></div>{area.pages.map((page, index) => {
       const editor = props.editors.find(editor => editor.id === page.editorId && editor.scope === page.editorScope)
-      return <div className={css.row} key={page.moduleInstanceId}><PageIcon editor={{ id: page.editorId, scope: page.editorScope }} /><div><strong>{index + 1}. {page.name}{page.active ? ' · 当前' : ''}</strong><p><BindingRequirement editor={editor} /> · {page.available ? '就绪' : '未安装、未允许或无法核实，布局引用已保留'}</p><small>{page.editorId}</small></div></div>
+      return <div className={css.row} key={page.moduleInstanceId}><PageIcon editor={editor ?? { id: page.editorId, scope: page.editorScope, label: page.name }} /><div><strong>{index + 1}. {page.name}{page.active ? ' · 当前' : ''}</strong><p><BindingRequirement editor={editor} /> · {page.available ? '就绪' : '未安装、未允许或无法核实，布局引用已保留'}</p><small>{page.editorId}</small></div></div>
     })}</div>)}</section>
     <section className={css.extensionsSection}><div className={css.sectionHeader}><div><h4>所需扩展</h4><p>工作台实际引用的扩展和兼容状态。</p></div><span className={css.sectionCount}>{inventory.plugins.length} 个包</span></div>{inventory.plugins.length ? <div className={css.pluginList}>{inventory.plugins.map(plugin => <div className={css.pluginRow} key={plugin.key}><span className={css.pluginStatus} data-status={plugin.status}>{plugin.status === 'available' ? '✓' : '!'}</span><div><strong>{plugin.pluginId ?? '提供包尚未核实'}</strong><p>{plugin.pageCount} 个内页 · {plugin.status === 'available' ? '已就绪' : plugin.status === 'missing' ? '需要处理' : '尚未检查'}</p></div></div>)}</div> : <div className={css.emptyInline}>此工作台只使用 DSH 原生内页，不需要额外扩展。</div>}</section>
-    <section className={css.shareSection}><div className={css.sectionHeader}><div><h4>分享与诊断</h4><p>分享包只包含布局和可迁移配置，不包含对话、凭据或本机路径。</p></div></div><div className={css.shareActions}><button className={css.primaryButton} disabled={!writable} onClick={() => props.navigate({ section: 'sharing', workbenchId: record.workbenchId, shareMode: 'export' })}><IconShareOutlineMedium size={16} /> 分享这个工作台</button><details><summary>兼容与诊断</summary><p>原始配置包含本机绑定，只用于排查问题，不是布局分享包。</p><button className={css.secondaryButton} onClick={() => downloadSettingsFile(`${record.name}-诊断.json`, JSON.stringify(record, null, 2), 'application/json')}>导出原始诊断配置</button></details></div></section>
-    {global ? <section className={css.danger}><h4>危险操作</h4><p>永久删除工作台布局；DSH 对话和运行任务保留。请先关闭工作台视图。</p>
+    <section className={css.shareSection}><div className={css.sectionHeader}><div><h4>分享与诊断</h4><p>{global ? '可分享布局，或在检查通过后分发包含扩展与配置的工作台包；不包含对话、凭据或本机路径。' : '分享包只包含布局和可迁移配置，不包含对话、凭据或本机路径。'}</p></div></div><div className={css.shareActions}><button className={css.primaryButton} disabled={!writable} onClick={() => props.navigate({ section: 'sharing', workbenchId: record.workbenchId, shareMode: 'export' })}><IconShareOutlineMedium size={16} /> 分享这个工作台</button><details><summary>兼容与诊断</summary><p>原始配置包含本机绑定，只用于排查问题，不是布局分享包。</p><button className={css.secondaryButton} onClick={() => downloadSettingsFile(`${record.name}-诊断.json`, JSON.stringify(record, null, 2), 'application/json')}>导出原始诊断配置</button></details></div></section>
+    {global ? <section className={css.danger}><h4>危险操作</h4><p>永久删除工作台布局，DSH 对话和运行任务保留。当前视图会自动关闭；删除最后一个工作台后回到总览。</p>
       {confirmDelete ? <div className={css.actions}><button className={css.dangerButton} disabled={!writable || action.states.delete?.busy} onClick={() => mutate('delete', async () => { const result = await directory?.remove(record.workbenchId); if (result?.status === 'committed') props.onRemoved(); return result })}>确认永久删除“{record.name}”</button><button className={css.secondaryButton} onClick={() => setConfirmDelete(false)}>取消</button></div>
-        : <button className={css.dangerButton} disabled={!writable || openIds.includes(record.workbenchId) || !directory} onClick={() => setConfirmDelete(true)}>永久删除布局</button>}{action.feedback('delete')}</section> : null}
+        : <button className={css.dangerButton} disabled={!writable || !directory} onClick={() => setConfirmDelete(true)}>永久删除布局</button>}{action.feedback('delete')}</section> : null}
   </div>
 }
 
@@ -219,7 +223,7 @@ export function InnerPagesSettingsPage(props: SettingsPageProps) {
       const extension = access.extensions.find(row => row.editorIds.includes(editor.id))
       const available = props.editors.includes(editor)
       return <article className={css.row} key={`${editor.scope}:${editor.id}`}><PageIcon editor={editor} /><div className={css.rowBody}><strong>{editor.label}</strong><p><BindingRequirement editor={editor} /></p><small>{extension ? `${extension.packageName ?? '包身份尚未核实'} · ${extension.packageVersion ?? '版本尚未检查'}` : '内置 · DSH 原生能力'}</small><p>{extension ? extension.availability === 'ready' ? '已就绪' : workbenchExtensionUnavailableCopyV1(extension).title : available ? '已就绪' : '尚未检查'}</p>
-      <details><summary>用途与声明详情</summary><p>{editor.declaration?.label ?? editor.label}</p><p>身份：{editor.id}</p><p>状态分享：{editor.portability?.exportState ? '通过已声明处理器迁移' : '仅分享内页引用'}</p>{extension ? <p>{extension.detail}</p> : null}</details></div>
+      <details><summary>用途与声明详情</summary><p>{editor.declaration?.label ?? editor.label}</p><p>身份：{editor.id}</p><p>图标：{editor.iconSvg ? '内页自带 SVG' : resolveWorkbenchEditorPresentation(editor).icon === 'extension' ? '兼容标识；建议扩展作者补充专属图标' : '语义 SVG'}</p><p>状态分享：{editor.portability?.exportState ? '通过已声明处理器迁移' : '仅分享内页引用'}</p>{extension ? <p>{extension.detail}</p> : null}</details></div>
       {!browser && !editor.resourceOnly && available ? <label className={css.toggle}><input type="checkbox" aria-label={`显示 ${editor.label} 添加入口`} disabled={actions.states[`entry:${editor.id}`]?.busy || !props.workbenchDirectory?.setGlobalEditorVisible} checked={!props.value?.globalHiddenEditorIds?.includes(editor.id)} onChange={event => { const visible = event.target.checked; void actions.run(`entry:${editor.id}`, () => props.workbenchDirectory!.setGlobalEditorVisible!(editor.id, visible)) }} />显示添加入口{actions.feedback(`entry:${editor.id}`)}</label> : null}
       </article>
     })}</div>{!filtered.length ? <div className={css.empty}>没有符合条件的内页。</div> : null}

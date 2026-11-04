@@ -13,6 +13,7 @@ import type { WorkbenchSettingsV4 } from './persistence.ts'
 import type { WorkbenchSettingsSection } from './WorkbenchFrame.tsx'
 import { WorkbenchManagementPage, InnerPagesSettingsPage, InteractionSettingsPage, UnsavedFormPrompt, type PendingSettingsForm } from './WorkbenchSettingsPages.tsx'
 import { WorkbenchLayoutSharingPage } from './WorkbenchLayoutSharingPage.tsx'
+import type { DistributionPackageService } from './distribution-package-service.ts'
 import { DESKTOP_SETTINGS_CONTEXT, scopeSettingsSnapshot, settingsViewMemory, type WorkbenchSettingsContextV1, type WorkbenchSettingsOpenOptionsV1 } from './settings-context.ts'
 import css from './WorkbenchSettings.module.css'
 
@@ -22,6 +23,8 @@ export type WorkbenchCoreSettingsSectionProps = ComponentProps<typeof WorkbenchS
   openOptions?: WorkbenchSettingsOpenOptionsV1
   windowController?: WorkbenchWindowControllerV1
   layoutPackage?: WorkbenchLayoutPackageService
+  distributionPackage?: DistributionPackageService
+  onOpenWorkbench?: (workbenchId:string)=>Promise<void>
   patchInteractionPolicy?: (key: string, value: unknown) => Promise<boolean>
   registerCloseRequest?: (request: () => void) => (() => void)
   moduleManager?: WorkbenchModuleManagerV1
@@ -57,7 +60,8 @@ export function WorkbenchCoreSettingsSection(props: WorkbenchCoreSettingsSection
   const attempt = useCallback((action: () => void) => { if (form.current) setPendingIntent(() => action); else action() }, [])
   const navigate = useCallback((options: WorkbenchSettingsOpenOptionsV1) => attempt(() => {
     if (panel.current) memory.scroll[section] = panel.current.scrollTop
-    const target = options.section ?? 'workbenches'
+    const target = options.section ?? (browser ? 'workbenches' : 'pages')
+    if (!browser && (target === 'workbenches' || target === 'sharing')) return
     if (browser && (target === 'interactions' || options.shareMode === 'import' || options.shareMode === 'history')) return
     if (browser && options.workbenchId && options.workbenchId !== context.workbenchId) return
     memory.section = target; setSection(target); setOpenOptions(options)
@@ -66,8 +70,8 @@ export function WorkbenchCoreSettingsSection(props: WorkbenchCoreSettingsSection
   useEffect(() => { if (panel.current) panel.current.scrollTop = memory.scroll[section] ?? 0 }, [section, memory])
   useEffect(() => { const start = performance.now(); const mark = `workbench-settings:${id}`; performance.mark(mark); return () => { performance.measure('workbench-settings-lifetime', { start, end: performance.now() }); performance.clearMarks(mark) } }, [id])
   const tabs = browser ? [{ id: 'workbenches', label: '当前工作台', icon: <IconPanelLeftOutlineMedium /> }, { id: 'pages', label: '使用中的内页', icon: <IconCordisPluginOutlineMedium /> }, { id: 'sharing', label: '导出分享', icon: <IconShareOutlineMedium /> }]
-    : [{ id: 'workbenches', label: '工作台管理', icon: <IconPanelLeftOutlineMedium /> }, { id: 'pages', label: '内页与扩展', icon: <IconCordisPluginOutlineMedium /> }, { id: 'interactions', label: '交互偏好', icon: <IconSettingsOutlineMedium /> }, { id: 'sharing', label: '导入与分享', icon: <IconShareOutlineMedium /> }]
-  const actualSection = tabs.some(tab => tab.id === section) ? section : 'workbenches'
+    : [{ id: 'pages', label: '内页与扩展', icon: <IconCordisPluginOutlineMedium /> }, { id: 'interactions', label: '交互偏好', icon: <IconSettingsOutlineMedium /> }]
+  const actualSection = tabs.some(tab => tab.id === section) ? section : browser ? 'workbenches' : 'pages'
   const editors = browser ? allEditors.filter(editor => Object.values(scoped.value?.workbenches ?? {}).some(record => areasOf(record.document.root).some(area => area.moduleHistory.some(page => page.editorId === editor.id && page.editorScope === editor.scope)))) : allEditors
   const pageProps = { ...props, settingsContext: context, ...(openOptions ? { openOptions } : {}), value: scoped.value ?? lastValue.current, editors, memory, navigate, onDirty }
   return <div className={css.settingsRoot} data-workbench-settings="core" data-settings-mode={context.mode}>
@@ -79,7 +83,7 @@ export function WorkbenchCoreSettingsSection(props: WorkbenchCoreSettingsSection
       }}><span className={css.navIcon}>{tab.icon}</span>{tab.label}</button>)}</div><label className={css.narrowNavigation}>设置分类<select aria-label="工作台设置分类" value={actualSection} onChange={event => navigate({ section: event.target.value as typeof section })}>{tabs.map(tab => <option key={tab.id} value={tab.id}>{tab.label}</option>)}</select></label></nav>
       <div ref={panel} className={css.content} id={`${id}-content`} role="tabpanel" aria-label={tabs.find(tab => tab.id === actualSection)?.label} tabIndex={0} onScroll={event => { memory.scroll[section] = event.currentTarget.scrollTop }}>
         {snapshot.status === 'loading' ? <p role="status">正在读取工作台设置…</p> : snapshot.status !== 'ready' ? <p role="alert">设置连接中断，请恢复 DSH 连接后重试。未保存资料保留在当前表单中。</p> : null}
-        {actualSection === 'workbenches' ? <WorkbenchManagementPage {...pageProps} /> : actualSection === 'pages' ? <InnerPagesSettingsPage {...pageProps} /> : actualSection === 'interactions' && !browser ? <InteractionSettingsPage {...pageProps} /> : <WorkbenchLayoutSharingPage {...pageProps} />}
+        {actualSection === 'workbenches' ? <WorkbenchManagementPage {...pageProps} /> : actualSection === 'pages' ? <InnerPagesSettingsPage {...pageProps} /> : actualSection === 'interactions' && !browser ? <InteractionSettingsPage {...pageProps} /> : browser ? <WorkbenchLayoutSharingPage {...pageProps} /> : null}
       </div>
     </div>
     {pendingIntent && form.current ? <UnsavedFormPrompt form={form.current} onContinue={() => setPendingIntent(undefined)} onLeave={() => { const next = pendingIntent; form.current = undefined; setPendingIntent(undefined); next() }} /> : null}

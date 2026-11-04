@@ -1,4 +1,5 @@
 import type { WorkbenchSettingsScope as SettingsScope } from '../client/workbench-settings-contracts.ts'
+import {createDistributionPackageService, type DistributionPackageService} from './distribution-package-service.ts'
 import type { SettingsScopePatchResult } from '../client/workbench-settings-contracts.ts'
 import type { WorkbenchEditorCatalog, WorkbenchEditorCatalogRow } from './catalog.ts'
 import { buildWorkbenchInventory } from './workbench-inventory.ts'
@@ -262,7 +263,13 @@ function compatibilityFor(environment: WorkbenchPackagePreflightEnvironmentV1): 
  * layout projection; executable plugin artifacts are included only from the
  * Runtime-owned catalog/Artifact Store and never guessed from plugin IDs.
  */
-export function createWorkbenchPackageService(
+type WorkbenchPackageServiceOptionsV4 = Parameters<typeof createDistributionPackageService>[0] & {version:4}
+export function createWorkbenchPackageService(options:WorkbenchPackageServiceOptionsV4):DistributionPackageService
+export function createWorkbenchPackageService(options:WorkbenchPackageServiceOptionsV1):WorkbenchPackageServiceV1
+export function createWorkbenchPackageService(options:WorkbenchPackageServiceOptionsV1|WorkbenchPackageServiceOptionsV4):DistributionPackageService|WorkbenchPackageServiceV1 {
+  return 'version' in options ? createDistributionPackageService(options) : createLegacyWorkbenchPackageService(options)
+}
+function createLegacyWorkbenchPackageService(
   options: WorkbenchPackageServiceOptionsV1,
 ): WorkbenchPackageServiceV1 {
   const runtime = () => {

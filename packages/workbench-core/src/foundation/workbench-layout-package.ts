@@ -35,11 +35,11 @@ const record = (value: unknown): value is Record<string, unknown> => typeof valu
 const keys = (value: object, allowed: string[]) => Object.keys(value).every(key => allowed.includes(key))
 
 /** Descriptor output is still untrusted data. Never use raw runtime state as a fallback. */
-function portableStateSafe(value: unknown, depth = 0): value is JsonValue {
+export function portableStateSafe(value: unknown, depth = 0): value is JsonValue {
   if (depth > 16) return false
   if (value === null || typeof value === 'boolean') return true
   if (typeof value === 'number') return Number.isFinite(value)
-  if (typeof value === 'string') return value.length <= 32768 && !/^(?:[a-z]:[\\/]|\\\\|\/(?:Users|home|tmp|var|etc)\/)/iu.test(value)
+  if (typeof value === 'string') return value.length <= 32768 && !/^(?:[a-z]:[\\/]|\\\\|[/]|~[/\\]|file:)/iu.test(value)
   if (Array.isArray(value)) return value.length <= 1024 && value.every(item => portableStateSafe(item, depth + 1))
   if (!record(value)) return false
   return Object.entries(value).length <= 256 && Object.entries(value).every(([key, child]) =>
@@ -140,10 +140,15 @@ export async function inspectLayoutPackage(bytes: Uint8Array): Promise<LayoutPac
   const manifest = parse(entries.find(file => file.path === 'manifest.json')?.content ?? new Uint8Array())
   const digest = await sha256Hex(bytes)
   if (!record(manifest)) throw new Error('分享包 manifest 无效。')
+  if (manifest.schemaVersion === 4) {
+    const preview = await (await import('./workbench-package-v4.ts')).inspectWorkbenchPackageV4(bytes)
+    if (preview.manifest.mode !== 'layout-only') throw new Error('此包包含扩展安装要求，请使用完整工作台导入入口。')
+    return { digest: preview.digest, layout: preview.layout, warnings: preview.layout.warnings, legacy: false }
+  }
   if (manifest.schemaVersion === 3) {
     if (!keys(manifest, ['schemaVersion', 'format', 'mode', 'compatibility', 'files']) || manifest.format !== 'dsh-workbench-package' || manifest.mode !== 'layout-only'
       || !record(manifest.compatibility) || !keys(manifest.compatibility, ['dsh', 'core', 'portableLayout']) || manifest.compatibility.dsh !== WORKBENCH_DSH_GENERATION
-      || manifest.compatibility.core !== WORKBENCH_CORE_VERSION || manifest.compatibility.portableLayout !== 2) throw new Error('分享协议或 Core／DSH 代际不兼容，需要迁移。')
+      || ![WORKBENCH_CORE_VERSION, '0.2.2-alpha.17.1'].includes(manifest.compatibility.core as string) || manifest.compatibility.portableLayout !== 2) throw new Error('分享协议或 Core／DSH 代际不兼容，需要迁移。')
     if (entries.length !== 2 || !Array.isArray(manifest.files) || manifest.files.length !== 1) throw new Error('布局分享包包含未声明文件。')
     const file = entries.find(file => file.path === 'workbench.json')
     const declared = manifest.files[0]
@@ -172,10 +177,11 @@ export async function inspectLayoutPackage(bytes: Uint8Array): Promise<LayoutPac
   return { digest, layout: sanitized, warnings: sanitized.warnings, legacy: true }
 }
 
-export function restoreLayoutPackage(layout: PortableLayoutV2, editors: readonly WorkbenchEditorCatalogRow[], bindings: Readonly<Record<string, SessionBindingV1>> = {}): { document: WorkbenchDocumentV3; warnings: string[] } {
+export function restoreLayoutPackage(layout: PortableLayoutV2, editors: readonly WorkbenchEditorCatalogRow[], bindings: Readonly<Record<string, SessionBindingV1>> = {}, strict = false, verifiedOnly = false): { document: WorkbenchDocumentV3; warnings: string[]; pendingPageIds: string[] } {
   validatePortableLayout(layout)
   const warnings: string[] = []
   const document = structuredClone(layout.document)
+  const pendingPageIds: string[] = []
   const areaIds = new Map<string, string>()
   const fresh = (kind: string) => `${kind}-${globalThis.crypto.randomUUID()}`
   const visit = (node: WorkbenchNodeV3) => {
@@ -190,22 +196,32 @@ export function restoreLayoutPackage(layout: PortableLayoutV2, editors: readonly
       const oldId = page.moduleInstanceId
       page.moduleInstanceId = fresh('page')
       if (oldId === current) node.activeModuleInstanceId = page.moduleInstanceId
-      const editor = editors.find(row => row.id === page.editorId && row.scope === page.editorScope)
+      const identity = layout.modules.find(m => m.editorId === page.editorId && m.scope === page.editorScope)
+      const editor = editors.find(row => row.id === page.editorId && row.scope === page.editorScope
+        && (!verifiedOnly || (identity?.packageName === '@dsh-workbench/core' || !!identity?.digest))
+        && (identity?.packageName === undefined || (row.provenance?.packageName === identity.packageName && row.provenance.packageVersion === identity.version && (identity.digest === undefined || row.provenance.artifactDigest === identity.digest))))
       const state = page.state
+      let migrated = false
       page.state = {}
       if (editor?.declaration?.state.share === 'portable' && editor.portability?.version === 1 && editor.portability.importState) {
         try {
+          // Validate the untrusted projection before invoking extension code.
+          if (workbenchEditorStateFailureV1(state, editor.declaration)
+            || (verifiedOnly && (!record(state) || state.schemaVersion !== editor.declaration.state.schemaVersion))) throw new Error('配置声明、版本或大小不匹配')
           const restored = editor.portability.importState(state, { version: 1, editor: { id: editor.id, scope: editor.scope, moduleInstanceId: page.moduleInstanceId, title: page.lastKnownTitle }, ...(binding ? { target: binding } : {}) })
-          if (workbenchEditorStateFailureV1(restored, editor.declaration)) throw new Error('配置超限或无效')
+          if (workbenchEditorStateFailureV1(restored, editor.declaration) || !portableStateSafe(restored)) throw new Error('配置超限、敏感或无效')
           page.state = structuredClone(restored) as JsonValue
-        } catch { warnings.push(`「${page.lastKnownTitle}」配置恢复失败，保留空内页引用。`) }
+          migrated = true
+        } catch { if (strict) throw new Error(`「${page.lastKnownTitle}」配置恢复失败，导入尚未提交。`); warnings.push(`「${page.lastKnownTitle}」配置恢复失败，保留空内页引用。`) }
       } else if (Object.keys(Object(state)).length) warnings.push(`「${page.lastKnownTitle}」没有配置恢复处理器，保留引用。`)
-      if (!editor) warnings.push(`「${page.lastKnownTitle}」不可用，请在 DSH 安装并允许对应扩展。`)
+      if (!editor) { if(strict) throw new Error(`「${page.lastKnownTitle}」扩展身份或运行状态尚未验证。`); warnings.push(`「${page.lastKnownTitle}」不可用，请在 DSH 安装并允许对应扩展。`) }
+      if (strict && (!editor?.portability?.importState || editor.declaration?.state.share !== 'portable')) throw new Error(`「${page.lastKnownTitle}」缺少可靠的配置恢复处理器。`)
+      if (!migrated && verifiedOnly) pendingPageIds.push(oldId)
       if (binding && (page.editorScope === 'session' || editor?.declaration?.requiredBinding !== 'none')) { page.binding = { ...binding }; page.bindingGeneration = 0; delete page.pendingBinding }
     }
   }
   visit(document.root)
   document.activeAreaId = areaIds.get(layout.document.activeAreaId)!
   if (!validateWorkbenchDocumentV3(document)) throw new Error('恢复后的布局无效。')
-  return { document, warnings }
+  return { document, warnings, pendingPageIds }
 }

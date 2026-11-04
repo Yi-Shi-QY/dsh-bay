@@ -1,4 +1,4 @@
-import { editorPresentationFor, type WorkbenchEditorCatalogRow, type WorkbenchEditorPresentation } from './catalog.ts'
+import { resolveWorkbenchEditorPresentation, type WorkbenchEditorCatalogRow, type WorkbenchEditorPresentation } from './catalog.ts'
 import type { GroupNode, SessionBindingV1, TabDocument } from './model.ts'
 
 export type WorkbenchAreaTabStatus = 'ready' | 'unbound' | 'missing' | 'paused'
@@ -7,6 +7,7 @@ export interface WorkbenchAreaTabSummary {
   id: string
   title: string
   icon: string
+  iconSvg?: WorkbenchEditorPresentation['iconSvg']
   status: WorkbenchAreaTabStatus
   statusLabel: string
   selected: boolean
@@ -75,11 +76,12 @@ export function buildWorkbenchAreaTabRows(input: {
     const editor = workbenchEditorFromIndex(input.editorIndex, tab.editorId, tab.editorScope)
     const selected = tab.id === input.activeTabId
     const status = statusFor(tab, editor, input.areaBinding, tab.id === input.pausedTabId)
-    const presentation = presentationFor(editor)
+    const presentation = resolveWorkbenchEditorPresentation(editor)
     const summary: WorkbenchAreaTabSummary = {
       id: tab.id,
       title: tab.lastKnownTitle,
       icon: presentation.icon,
+      ...(presentation.iconSvg ? { iconSvg: presentation.iconSvg } : {}),
       status,
       statusLabel: statusLabel(status),
       selected,
@@ -124,15 +126,5 @@ function statusLabel(status: WorkbenchAreaTabStatus): string {
     case 'missing': return '不可用'
     case 'paused': return '已暂停'
     default: return '就绪'
-  }
-}
-
-function presentationFor(editor: WorkbenchEditorCatalogRow | undefined): WorkbenchEditorPresentation {
-  if (editor === undefined) return { icon: 'panel', category: '其他', categoryOrder: 100 }
-  const fallback = editorPresentationFor(editor.id, editor.scope)
-  return {
-    icon: editor.icon ?? fallback.icon,
-    category: editor.category ?? fallback.category,
-    categoryOrder: editor.categoryOrder ?? fallback.categoryOrder,
   }
 }

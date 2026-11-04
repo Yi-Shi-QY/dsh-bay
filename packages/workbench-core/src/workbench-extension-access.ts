@@ -520,3 +520,8 @@ function consentDeclaration(value: unknown): unknown {
     return contract
   }) }
 }
+
+/** Same declaration fingerprint for verified package metadata and live Slot contracts. */
+export function workbenchExtensionContractFingerprint(extension: WorkbenchExtensionDeclarationV1, editors: readonly {editorId:string;scope:string}[]): string {
+  return fingerprint({extension, editors:editors.map(declaration=>({id:declaration.editorId,scope:declaration.scope,declaration:consentDeclaration(declaration)})).sort((a,b)=>(a.scope+':'+a.id).localeCompare(b.scope+':'+b.id))})
+}

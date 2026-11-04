@@ -1,0 +1,243 @@
+{
+  "coreHash": "339c85d0186629a8fb9549c7238a8ff2385c7a4837df1162849e46c80a66882a",
+  "before": {
+    "description": "Client + Host，两个区域、三个保留标签",
+    "tags": [
+      "17.2"
+    ],
+    "packageOrigin": {
+      "packageId": "73a960178054d10a4b9ea853c06e04219d5d2e8d9f8d242a4b57a05f96a751ef",
+      "version": "0.2.2-alpha.17.2",
+      "archiveSha256": "28d107f97d8074321d0b0aac717e31bab117744781deb8d9c24126f26d84ff7f",
+      "completeness": "complete-offline",
+      "dependencies": [
+        {
+          "portableId": "qa.private.client",
+          "version": "0.1.0",
+          "digest": "130f2e03f5c31db549409e444587327453f8e57ae05b861604c6ee3da303a6d7",
+          "kind": "static",
+          "sourcePolicy": "binary-only",
+          "exportPolicy": "embed",
+          "editorIds": [
+            "qa.client"
+          ],
+          "permissions": [],
+          "editorScopes": [
+            {
+              "editorId": "qa.client",
+              "scope": "root"
+            }
+          ],
+          "requiredBy": [],
+          "packageName": "@local/private-client",
+          "integrity": "sha512-b/XijwsIT6oj1aE18P+dAvfgOK1cUS1nGaL/x5eyTWN4tBHoAc2qoxaAvp0rcE+XpAwDJX5utbeq+Jflt/kn+g=="
+        },
+        {
+          "portableId": "qa.private.host",
+          "version": "0.1.0",
+          "digest": "966ef1f848fb5734f5aa2992668fad567f1097c2a24c29f1fa3231ff73de2673",
+          "kind": "static",
+          "sourcePolicy": "binary-only",
+          "exportPolicy": "embed",
+          "editorIds": [
+            "qa.host"
+          ],
+          "permissions": [],
+          "editorScopes": [
+            {
+              "editorId": "qa.host",
+              "scope": "root"
+            }
+          ],
+          "requiredBy": [],
+          "packageName": "@local/private-host",
+          "integrity": "sha512-3oB5bsG1f7CjyXOYUqsX39e7zx/bBUVe5s0ivdSzCNRJh3D0yw8vZ9oqA8X7Sl8gO/NGTEXUlVY3MzPmP4vrjg=="
+        }
+      ]
+    },
+    "offlineOrigin": {
+      "schemaVersion": 1,
+      "packageId": "28d107f97d8074321d0b0aac717e31bab117744781deb8d9c24126f26d84ff7f",
+      "archiveSha256": "28d107f97d8074321d0b0aac717e31bab117744781deb8d9c24126f26d84ff7f"
+    },
+    "workbenchId": "workbench-c8599658-92fa-4712-bcf7-b62b1964215f",
+    "name": "17.2 完整分发验收",
+    "document": {
+      "version": 3,
+      "root": {
+        "kind": "split",
+        "id": "split-173d916b-2fff-4a60-870d-80a4fbf03b80",
+        "axis": "horizontal",
+        "ratio": 0.6,
+        "first": {
+          "kind": "area",
+          "areaId": "area-826c8f3a-9a0d-49b4-ac77-7a350e64796b",
+          "moduleHistory": [
+            {
+              "editorId": "qa.client",
+              "editorScope": "root",
+              "lastKnownTitle": "示例内页",
+              "moduleInstanceId": "page-396288fc-4096-487a-9b0a-89d26f86b015",
+              "state": {
+                "schemaVersion": 1,
+                "acknowledged": true
+              }
+            },
+            {
+              "editorId": "qa.client",
+              "editorScope": "root",
+              "lastKnownTitle": "示例内页",
+              "moduleInstanceId": "page-0268066f-8608-41da-bdea-9bbbc6196d8e",
+              "state": {
+                "schemaVersion": 1,
+                "acknowledged": false
+              }
+            }
+          ],
+          "activeModuleInstanceId": "page-0268066f-8608-41da-bdea-9bbbc6196d8e"
+        },
+        "second": {
+          "kind": "area",
+          "areaId": "area-b1f8246e-1085-463d-8ab0-1bd1ba6223ec",
+          "moduleHistory": [
+            {
+              "editorId": "qa.host",
+              "editorScope": "root",
+              "lastKnownTitle": "示例内页",
+              "moduleInstanceId": "page-a7143b1d-ce9d-4c93-9e02-2237b55428df",
+              "state": {
+                "schemaVersion": 1,
+                "acknowledged": false
+              }
+            }
+          ],
+          "activeModuleInstanceId": "page-a7143b1d-ce9d-4c93-9e02-2237b55428df"
+        }
+      },
+      "activeAreaId": "area-826c8f3a-9a0d-49b4-ac77-7a350e64796b"
+    },
+    "createdAt": 1793777295091,
+    "updatedAt": 1793777393799
+  },
+  "after": {
+    "description": "Client + Host，两个区域、三个保留标签",
+    "tags": [
+      "17.2"
+    ],
+    "packageOrigin": {
+      "packageId": "73a960178054d10a4b9ea853c06e04219d5d2e8d9f8d242a4b57a05f96a751ef",
+      "version": "0.2.2-alpha.17.2",
+      "archiveSha256": "28d107f97d8074321d0b0aac717e31bab117744781deb8d9c24126f26d84ff7f",
+      "completeness": "complete-offline",
+      "dependencies": [
+        {
+          "portableId": "qa.private.client",
+          "version": "0.1.0",
+          "digest": "130f2e03f5c31db549409e444587327453f8e57ae05b861604c6ee3da303a6d7",
+          "kind": "static",
+          "sourcePolicy": "binary-only",
+          "exportPolicy": "embed",
+          "editorIds": [
+            "qa.client"
+          ],
+          "permissions": [],
+          "editorScopes": [
+            {
+              "editorId": "qa.client",
+              "scope": "root"
+            }
+          ],
+          "requiredBy": [],
+          "packageName": "@local/private-client",
+          "integrity": "sha512-b/XijwsIT6oj1aE18P+dAvfgOK1cUS1nGaL/x5eyTWN4tBHoAc2qoxaAvp0rcE+XpAwDJX5utbeq+Jflt/kn+g=="
+        },
+        {
+          "portableId": "qa.private.host",
+          "version": "0.1.0",
+          "digest": "966ef1f848fb5734f5aa2992668fad567f1097c2a24c29f1fa3231ff73de2673",
+          "kind": "static",
+          "sourcePolicy": "binary-only",
+          "exportPolicy": "embed",
+          "editorIds": [
+            "qa.host"
+          ],
+          "permissions": [],
+          "editorScopes": [
+            {
+              "editorId": "qa.host",
+              "scope": "root"
+            }
+          ],
+          "requiredBy": [],
+          "packageName": "@local/private-host",
+          "integrity": "sha512-3oB5bsG1f7CjyXOYUqsX39e7zx/bBUVe5s0ivdSzCNRJh3D0yw8vZ9oqA8X7Sl8gO/NGTEXUlVY3MzPmP4vrjg=="
+        }
+      ]
+    },
+    "offlineOrigin": {
+      "schemaVersion": 1,
+      "packageId": "28d107f97d8074321d0b0aac717e31bab117744781deb8d9c24126f26d84ff7f",
+      "archiveSha256": "28d107f97d8074321d0b0aac717e31bab117744781deb8d9c24126f26d84ff7f"
+    },
+    "workbenchId": "workbench-c8599658-92fa-4712-bcf7-b62b1964215f",
+    "name": "17.2 完整分发验收",
+    "document": {
+      "version": 3,
+      "root": {
+        "kind": "split",
+        "id": "split-173d916b-2fff-4a60-870d-80a4fbf03b80",
+        "axis": "horizontal",
+        "ratio": 0.6,
+        "first": {
+          "kind": "area",
+          "areaId": "area-826c8f3a-9a0d-49b4-ac77-7a350e64796b",
+          "moduleHistory": [
+            {
+              "moduleInstanceId": "page-396288fc-4096-487a-9b0a-89d26f86b015",
+              "editorId": "qa.client",
+              "editorScope": "root",
+              "state": {
+                "schemaVersion": 1,
+                "acknowledged": true
+              },
+              "lastKnownTitle": "示例内页"
+            },
+            {
+              "moduleInstanceId": "page-0268066f-8608-41da-bdea-9bbbc6196d8e",
+              "editorId": "qa.client",
+              "editorScope": "root",
+              "state": {
+                "schemaVersion": 1,
+                "acknowledged": true
+              },
+              "lastKnownTitle": "示例内页"
+            }
+          ],
+          "activeModuleInstanceId": "page-0268066f-8608-41da-bdea-9bbbc6196d8e"
+        },
+        "second": {
+          "kind": "area",
+          "areaId": "area-b1f8246e-1085-463d-8ab0-1bd1ba6223ec",
+          "moduleHistory": [
+            {
+              "moduleInstanceId": "page-a7143b1d-ce9d-4c93-9e02-2237b55428df",
+              "editorId": "qa.host",
+              "editorScope": "root",
+              "state": {
+                "schemaVersion": 1,
+                "acknowledged": true
+              },
+              "lastKnownTitle": "示例内页"
+            }
+          ],
+          "activeModuleInstanceId": "page-a7143b1d-ce9d-4c93-9e02-2237b55428df"
+        }
+      },
+      "activeAreaId": "area-b1f8246e-1085-463d-8ab0-1bd1ba6223ec"
+    },
+    "createdAt": 1793777295091,
+    "updatedAt": 1793777395783
+  },
+  "browserBlocked": [],
+  "time": "2026-11-04T07:29:57.383Z"
+}
