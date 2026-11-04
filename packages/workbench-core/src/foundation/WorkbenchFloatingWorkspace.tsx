@@ -18,11 +18,22 @@ import type { WorkbenchConversationInteractionPolicyV1 } from '../workbench-inte
 import css from './WorkbenchFloatingWorkspace.module.css'
 import { COLLAPSED_DIVIDER_SIZE, EXPANDED_AREA_MIN_HEIGHT, EXPANDED_AREA_MIN_WIDTH } from './collapse-projection.ts'
 import type { SessionMarkerRecord } from './persistence.ts'
-import { ensureSessionMarkers } from './session-markers.ts'
+import { allocateSessionMarker } from './session-markers.ts'
 import frameCss from './WorkbenchFrame.module.css'
+import accentFrameCss from './SessionAccentFrame.module.css'
 
 const uid = () => 'floating-' + globalThis.crypto.randomUUID()
-export function FloatingWorkspaceIcon() { return <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="3" /><path d="M4 9h16M10 9v11" /></svg> }
+export function FloatingWorkspaceIcon({ size = 18 }: { size?: number } = {}) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+    <path d="M3.4 13.7A9.15 9.15 0 0 1 20.75 8.55" stroke="var(--dsw-alias-label-link, #1d4f9b)" strokeWidth="1.8" strokeLinecap="round" />
+    <path d="M2.15 16.75c3.25-2.45 6.35-2.9 9.4-1.6 3.6 1.55 7.05 1.2 10.3-1.1" stroke="var(--dsw-alias-label-link, #1d4f9b)" strokeWidth="2.2" strokeLinecap="round" />
+    <path d="M5.45 19.05c2.85 2.05 6.1 2.3 9.15.65" stroke="var(--dsw-alias-label-link, #1d4f9b)" strokeWidth="1.8" strokeLinecap="round" />
+    <path d="M7.75 10.55c.95-1.8 3.15-2.65 5.35-2.25 1.5.25 2.45 1.1 3.55 1.85 1.1.8 2.35.95 3.9.55-.8 1.05-2.05 1.6-3.4 1.8-.05 1.6-.45 3.05-1.1 4.45l-3.25-.2c-.55-1.7-1.15-3.6-2.5-5.05-.7-.7-1.5-1.1-2.55-1.15Z" fill="var(--dsw-alias-label-primary, #0b1220)" />
+    <path d="M8.15 10.65c1.55-.15 2.85.45 4.1 1.5 1.15.95 1.7 2.05 2.1 3.1" stroke="var(--dsw-alias-bg-base, #fff)" strokeWidth="1.25" strokeLinecap="round" />
+    <ellipse cx="15.45" cy="9.35" rx="1.1" ry=".55" transform="rotate(25 15.45 9.35)" fill="var(--dsw-alias-bg-base, #fff)" />
+    <path d="M19.45 13.75c.75-.8 1.4-1.3 2.05-1.6-.25.85-.75 1.6-1.4 2.15M20.55 15.05c.55-.25 1.05-.55 1.45-.95" stroke="var(--dsw-alias-label-link, #1d4f9b)" strokeWidth="1.25" strokeLinecap="round" />
+  </svg>
+}
 
 export function FloatingWorkspaceToolbarButton({ runtime, workbenchId, canvasRef, className, disabled }: {
   runtime: FloatingWorkspaceRuntime; workbenchId: string; canvasRef: RefObject<HTMLDivElement>; className: string | undefined; disabled: boolean
@@ -58,6 +69,7 @@ interface Props {
   layout: WorkbenchLayoutDocument
   policy?: WorkbenchConversationInteractionPolicyV1 | undefined
   sessionMarkers?: Readonly<Record<string, Readonly<Record<string, SessionMarkerRecord>>>>
+  selectedAreaBinding?: SessionBindingV1 | undefined
   commit: (command: Parameters<typeof applyLayoutCommand>[1]) => boolean | void
   pin: (tab: TabDocument, areaId: string, edge: DropEdge) => Promise<boolean>
 }
@@ -91,7 +103,14 @@ export function WorkbenchFloatingWorkspace(props: Props) {
     || (binding?.workspaceId ? '项目不可用' : sessionId ? '未分组项目' : '未绑定项目')
   const sourceSession = sessionId ? sessions[sessionId as keyof typeof sessions] : undefined
   const sessionTitle = sourceSession?.displayTitle || (sessionId ? '对话不可用' : '未绑定对话')
-  const sourceMarker = sessionId && sourceWorkspace ? ensureSessionMarkers(sourceWorkspace.sessionIds, props.sessionMarkers?.[sourceWorkspace.workspaceId] ?? {}).markers[sessionId] : undefined
+  const markerFor = (target: SessionBindingV1 | undefined) => {
+    if (!target) return undefined
+    const workspaceId = target.workspaceId ?? workspaces.find(workspace => workspace.sessionIds.includes(target.sessionId as never))?.workspaceId
+    const markers = workspaceId ? props.sessionMarkers?.[workspaceId] ?? {} : {}
+    return markers[target.sessionId] ?? allocateSessionMarker(markers)
+  }
+  const sourceMarker = markerFor(binding ?? (sessionId ? { sessionId } : undefined))
+  const launcherMarker = markerFor(props.selectedAreaBinding)
   const notice = (error: string) => runtime.patch(workbenchId, { error })
   const pinReason = (tab: TabDocument, areaId: string, edge: DropEdge) => {
     if (runtime.hasControl?.(workbenchId) === false) return '此页面已失去工作台控制权'
@@ -344,15 +363,17 @@ export function WorkbenchFloatingWorkspace(props: Props) {
     ? '此内页声明不支持浮窗，请在正式区域中打开。' : !editor.declaration ? '此内页缺少绑定与生命周期声明。' : undefined
   const canvasRect = canvasRef.current?.getBoundingClientRect()
   return <div className={css.layer} data-workbench-floating-layer style={{ display: visible ? undefined : 'none' }}>
-    {!space.expanded ? <button type="button" className={css.launcher} style={{ left: launcher.x, top: launcher.y }} aria-label="展开浮动工作区" title="浮动工作区 · 拖动可调整位置" onPointerDown={e => pointerGesture(e, 'launcher')} onClick={e => { if (e.detail === 0) runtime.patch(workbenchId, { expanded: true }) }}><FloatingWorkspaceIcon />{rows.some(row => row.unread) ? <span className={css.badge} /> : null}</button> : null}
-    <div ref={windowRef} className={css.window} data-workbench-floating-window role="region" aria-label="浮动工作区" style={{ display: space.expanded ? undefined : 'none', left: rect.x, top: rect.y, width: rect.width, height: rect.height }}
+    {!space.expanded ? <button type="button" className={css.launcher + ' ' + accentFrameCss.frame} data-session-frame={launcherMarker ? 'launcher' : undefined} data-accent={launcherMarker?.accentToken} style={{ left: launcher.x, top: launcher.y }} aria-label="展开浮动工作区" title="浮动工作区 · 拖动可调整位置" onPointerDown={e => pointerGesture(e, 'launcher')} onClick={e => { if (e.detail === 0) runtime.patch(workbenchId, { expanded: true }) }}><FloatingWorkspaceIcon />{rows.some(row => row.unread) ? <span className={css.badge} /> : null}</button> : null}
+    <div ref={windowRef} className={css.window + ' ' + accentFrameCss.frame} data-session-frame={sourceMarker ? 'floating' : undefined} data-accent={sourceMarker?.accentToken} data-workbench-floating-window role="region" aria-label="浮动工作区" style={{ display: space.expanded ? undefined : 'none', left: rect.x, top: rect.y, width: rect.width, height: rect.height }}
       onKeyDown={event => { if (event.key === 'Escape' && menu) { event.stopPropagation(); setMenu(undefined) } if (event.altKey && event.key === 'm') { event.preventDefault(); runtime.patch(workbenchId, { expanded: false }) } }}>
       <header className={css.header} onPointerDown={e => pointerGesture(e, 'move')} onDoubleClick={e => { if (!(e.target as HTMLElement).closest('button,[role=tab]')) runtime.patch(workbenchId, { maximized: !space.maximized }) }}>
-        <div ref={strip} className={css.tabs} role="tablist" aria-label="临时内页">{rows.map((row, index) => { const presentation = resolveWorkbenchEditorPresentation(editors.find(e => e.id === row.tab.editorId)); return <div key={row.tab.id} className={css.tab} role="tab" aria-selected={active?.tab.id === row.tab.id} tabIndex={active?.tab.id === row.tab.id ? 0 : -1} title={row.tab.lastKnownTitle} onPointerDown={e => dragTab(e, row)} onClick={() => { if (suppressClick.current) { suppressClick.current = false; return }; activate(row.tab.id) }} onKeyDown={e => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) { e.preventDefault(); const next = e.key === 'Home' ? 0 : e.key === 'End' ? rows.length - 1 : (index + (e.key === 'ArrowRight' ? 1 : -1) + rows.length) % rows.length; activate(rows[next]!.tab.id); strip.current?.querySelectorAll<HTMLElement>('[role=tab]')[next]?.focus() } if (e.key === 'Delete') { e.preventDefault(); e.stopPropagation(); void closeTab(row.tab.id) } }}><WorkbenchEditorIcon name={presentation.icon} iconSvg={presentation.iconSvg} /><span>{row.tab.lastKnownTitle}</span>{row.unread ? <i className={css.dot} /> : null}<button type="button" disabled={row.busy} aria-label={'关闭 ' + row.tab.lastKnownTitle} onClick={e => { e.stopPropagation(); void closeTab(row.tab.id) }}><IconCloseOutlineMedium size={12} /></button></div> })}</div>
-        <button type="button" aria-label="添加临时内页" title="添加内页" onClick={() => setMenu(menu === 'add' ? undefined : 'add')}><IconPlusOutlineMedium size={16} /></button>
-        <button type="button" aria-label="浮动工作区菜单" title="更多" onClick={() => setMenu(menu === 'window' ? undefined : 'window')}><IconEllipsisOutlineMedium size={16} /></button>
-        <button type="button" aria-label={space.maximized ? '还原浮动工作区' : '最大化浮动工作区'} onClick={() => runtime.patch(workbenchId, { maximized: !space.maximized })}><svg width="15" height="15" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5"><path d={space.maximized ? 'M7 4h9v9M4 7h9v9H4Z' : 'M5 2H2v3m13-3h3v3M2 15v3h3m10 0h3v-3M6 14 14 6'} /></svg></button>
-        <button type="button" aria-label="最小化浮动工作区" onClick={() => runtime.patch(workbenchId, { expanded: false })}><svg width="15" height="15" viewBox="0 0 20 20" stroke="currentColor"><path d="M4 10h12" /></svg></button>
+        <div ref={strip} className={css.tabs} role="tablist" aria-label="临时内页">{rows.map((row, index) => { const presentation = resolveWorkbenchEditorPresentation(editors.find(e => e.id === row.tab.editorId)); return <div key={row.tab.id} className={css.tab} role="tab" aria-selected={active?.tab.id === row.tab.id} tabIndex={active?.tab.id === row.tab.id ? 0 : -1} title={row.tab.lastKnownTitle} onPointerDown={e => dragTab(e, row)} onClick={() => { if (suppressClick.current) { suppressClick.current = false; return }; activate(row.tab.id) }} onKeyDown={e => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) { e.preventDefault(); const next = e.key === 'Home' ? 0 : e.key === 'End' ? rows.length - 1 : (index + (e.key === 'ArrowRight' ? 1 : -1) + rows.length) % rows.length; activate(rows[next]!.tab.id); strip.current?.querySelectorAll<HTMLElement>('[role=tab]')[next]?.focus() } if (e.key === 'Delete') { e.preventDefault(); e.stopPropagation(); void closeTab(row.tab.id) } }}><WorkbenchEditorIcon name={presentation.icon} iconSvg={presentation.iconSvg} /><span>{row.tab.lastKnownTitle}</span>{row.unread ? <i className={css.dot} /> : null}<button type="button" disabled={row.busy} aria-label={'关闭 ' + row.tab.lastKnownTitle} title={'关闭 ' + row.tab.lastKnownTitle} onClick={e => { e.stopPropagation(); void closeTab(row.tab.id) }}><IconCloseOutlineMedium size={12} /></button></div> })}</div>
+        <button type="button" className={css.add} aria-label="添加临时内页" title="添加内页" onClick={() => setMenu(menu === 'add' ? undefined : 'add')}><IconPlusOutlineMedium size={16} /></button>
+        <div className={css.headerActions} role="group" aria-label="浮动工作区窗口操作">
+          <button type="button" aria-label="浮动工作区菜单" title="浮动工作区菜单" aria-expanded={menu === 'window'} onClick={() => setMenu(menu === 'window' ? undefined : 'window')}><IconEllipsisOutlineMedium size={16} /></button>
+          <button type="button" aria-label={space.maximized ? '还原浮动工作区' : '最大化浮动工作区'} title={space.maximized ? '还原浮动工作区' : '最大化浮动工作区'} onClick={() => runtime.patch(workbenchId, { maximized: !space.maximized })}><svg width="15" height="15" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5"><path d={space.maximized ? 'M7 4h9v9M4 7h9v9H4Z' : 'M5 2H2v3m13-3h3v3M2 15v3h3m10 0h3v-3M6 14 14 6'} /></svg></button>
+          <button type="button" aria-label="最小化浮动工作区" title="最小化浮动工作区" onClick={() => runtime.patch(workbenchId, { expanded: false })}><svg width="15" height="15" viewBox="0 0 20 20" stroke="currentColor"><path d="M4 10h12" /></svg></button>
+        </div>
       </header>
       {active ? <div className={css.source} data-floating-source aria-label="内页来源">
         <span className={css.sourceProject} title={'来源项目：' + sourceTitle}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><path d="M3 7V5a1 1 0 0 1 1-1h5l2 3h9a1 1 0 0 1 1 1v11H3Z" /></svg><span>{sourceTitle}</span></span>
@@ -362,10 +383,10 @@ export function WorkbenchFloatingWorkspace(props: Props) {
           <span>{sessionTitle}</span>
         </span>
       </div> : null}
-      {space.error ? <div className={css.error} role="status">{space.error}<button onClick={() => runtime.patch(workbenchId, { error: undefined })}>关闭提示</button></div> : null}
+      {space.error ? <div className={css.error} role="status">{space.error}<button type="button" title="关闭提示" aria-label="关闭提示" onClick={() => runtime.patch(workbenchId, { error: undefined })}>关闭提示</button></div> : null}
       <div className={css.content}>{rows.map(renderRow)}{!rows.length ? <div className={css.empty}><FloatingWorkspaceIcon /><p>临时查看，随时放入区域</p><button onClick={() => setMenu('add')}><IconPlusOutlineMedium size={16} /> 添加内页</button><small>临时标签仅在本次运行中保留</small></div> : null}</div>
       {menu ? <div className={css.menu} role="dialog" aria-label="浮动工作区操作">
-        <button className={css.menuClose} aria-label="关闭浮窗菜单" onClick={() => setMenu(undefined)}><IconCloseOutlineMedium size={14} /></button>
+        <button type="button" className={css.menuClose} aria-label="关闭浮窗菜单" title="关闭菜单" onClick={() => setMenu(undefined)}><IconCloseOutlineMedium size={14} /></button>
         {menu === 'add' ? <WorkbenchEditorPicker editors={chooser} mode="add" unavailable={unavailable} onSelect={editor => { setMenu(undefined); open(editor, runtime.focusedWorkbenchId === workbenchId ? runtime.focusedBinding : undefined) }} /> : null}
         {menu === 'window' ? <><button disabled={!active || active.busy} onClick={() => setMenu('pin')}>放入区域</button><button onClick={() => setMenu('tabs')}>全部临时内页</button><button disabled={!active} onClick={() => setMenu('binding')}>选择来源对话</button><button onClick={() => { runtime.patch(workbenchId, { rect: defaultFloatingRect(size.width, size.height), launcher: { x: size.width - 54, y: size.height - 54 }, maximized: false }, true); setMenu(undefined) }}>重置位置</button></> : null}
         {menu === 'pin' && active ? groupsOf(props.layout.root).map((group, i) => <div key={group.id}><strong>区域 {i + 1}</strong>{(['center', 'left', 'right', 'top', 'bottom'] as const).map((edge, j) => { const reason = pinReason(active.tab, group.id, edge); return <button key={edge} disabled={active.busy || !!reason} title={reason} onClick={() => void pin(active.tab.id, group.id, edge)}>{['加入标签', '左侧分屏', '右侧分屏', '上方分屏', '下方分屏'][j]}</button> })}</div>) : null}

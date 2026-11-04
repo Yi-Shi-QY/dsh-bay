@@ -28,10 +28,11 @@ function setup() {
   const layout = defaultLayout(); if (layout.root.kind !== 'group') throw new Error('fixture')
   layout.root.id = 'target'; layout.root.tabs = []; delete layout.root.activeTabId
   const pin = vi.fn(async () => true)
-  const view = render(<WorkbenchFloatingWorkspace runtime={runtime} workbenchId="one" canvasRef={{ current: canvas }} visible
+  const content = (selectedAreaBinding?: { workspaceId: string; sessionId: string }) => <WorkbenchFloatingWorkspace runtime={runtime} workbenchId="one" canvasRef={{ current: canvas }} visible selectedAreaBinding={selectedAreaBinding}
     editors={[]} hidden={[]} extensionAccess={{} as never} frame={frame} layout={layout} commit={() => true} pin={pin}
-    sessionMarkers={{ project: { first: { label: 'A', accentToken: 'accent-1', customized: false }, second: { label: 'B', accentToken: 'accent-2', customized: false } } }} />, { container: canvas.appendChild(document.createElement('div')) })
-  return { runtime, pin, header, body, canvas, view }
+    sessionMarkers={{ project: { first: { label: 'A', accentToken: 'accent-1', customized: false }, second: { label: 'B', accentToken: 'accent-2', customized: false } } }} />
+  const view = render(content(), { container: canvas.appendChild(document.createElement('div')) })
+  return { runtime, pin, header, body, canvas, view, selectArea: (sessionId?: string) => view.rerender(content(sessionId ? { workspaceId: 'project', sessionId } : undefined)) }
 }
 
 it('shows the active tab project, existing colored marker and conversation title', () => {
@@ -40,6 +41,44 @@ it('shows the active tab project, existing colored marker and conversation title
   expect(screen.getByLabelText('绑定对话：B · 另一段对话').getAttribute('data-accent')).toBe('accent-2')
   fireEvent.click(screen.getByRole('tab', { name: /内页一/ }))
   expect(screen.getByLabelText('绑定对话：A · 项目方案')).toBeTruthy()
+})
+
+it('describes every floating window control on hover', () => {
+  setup()
+  expect(screen.getByRole('button', { name: '关闭 内页一' }).getAttribute('title')).toBe('关闭 内页一')
+  expect(screen.getByRole('button', { name: '浮动工作区菜单' }).getAttribute('title')).toBe('浮动工作区菜单')
+  expect(screen.getByRole('button', { name: '最大化浮动工作区' }).getAttribute('title')).toBe('最大化浮动工作区')
+  expect(screen.getByRole('button', { name: '最小化浮动工作区' }).getAttribute('title')).toBe('最小化浮动工作区')
+  fireEvent.click(screen.getByRole('button', { name: '浮动工作区菜单' }))
+  expect(screen.getByRole('button', { name: '关闭浮窗菜单' }).getAttribute('title')).toBe('关闭菜单')
+})
+
+it('colors the launcher from the selected Area and the expanded frame from its active tab', () => {
+  const { selectArea, runtime } = setup()
+  const panel = screen.getByRole('region', { name: '浮动工作区' })
+  expect(panel.getAttribute('data-accent')).toBe('accent-2')
+  selectArea('first')
+  expect(panel.getAttribute('data-accent')).toBe('accent-2')
+  fireEvent.click(screen.getByRole('button', { name: '最小化浮动工作区' }))
+  expect(screen.getByRole('button', { name: '展开浮动工作区' }).getAttribute('data-accent')).toBe('accent-1')
+  selectArea('second')
+  expect(screen.getByRole('button', { name: '展开浮动工作区' }).getAttribute('data-accent')).toBe('accent-2')
+  selectArea()
+  expect(screen.getByRole('button', { name: '展开浮动工作区' }).hasAttribute('data-session-frame')).toBe(false)
+  fireEvent.click(screen.getByRole('button', { name: '展开浮动工作区' }))
+  fireEvent.click(screen.getByRole('tab', { name: /内页一/ }))
+  expect(panel.getAttribute('data-accent')).toBe('accent-1')
+  // The visual linkage must not become an automatic-event routing context.
+  expect(runtime.focusedBinding).toBeUndefined()
+})
+
+it('keeps an unbound or empty floating frame neutral even with a selected bound Area', async () => {
+  const { runtime, selectArea } = setup()
+  selectArea('first')
+  act(() => { runtime.open('one', { id: 'independent', editorId: 'root', editorScope: 'root', lastKnownTitle: '独立内页', state: {} }) })
+  expect(screen.getByRole('region', { name: '浮动工作区' }).hasAttribute('data-session-frame')).toBe(false)
+  await act(async () => { await runtime.close('independent', 'one'); await runtime.close('second', 'one'); await runtime.close('first', 'one') })
+  expect(screen.getByRole('region', { name: '浮动工作区' }).hasAttribute('data-accent')).toBe(false)
 })
 
 it('closes the clicked temporary tab and keeps other tabs', async () => {

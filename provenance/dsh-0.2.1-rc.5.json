@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "candidateId": "dsh-bay-0.2.2-alpha.17.3-dsh-0.2.1-rc.5",
+  "candidateId": "dsh-bay-0.2.2-alpha.17.4-dsh-0.2.1-rc.5",
   "product": "DSH Bay / 湾域",
-  "workbenchVersion": "0.2.2-alpha.17.3",
+  "workbenchVersion": "0.2.2-alpha.17.4",
   "dshGeneration": "0.2.1-rc.5",
   "upstream": {
     "repository": "https://github.com/deepseek-ai/deepseek-harness.git",

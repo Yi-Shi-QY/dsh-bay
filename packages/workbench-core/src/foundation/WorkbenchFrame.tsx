@@ -53,6 +53,8 @@ import {
   type SessionBindingV1, type SplitNode, type TabDocument, type WorkbenchLayoutDocument,
 } from './model.ts'
 import { workbenchEditorStateFailureV1 } from '../workbench-editor-state.ts'
+import { areaSessionBinding } from './area-session-binding.ts'
+import accentFrameCss from './SessionAccentFrame.module.css'
 import {
   accountFor, normalizeWorkbenchTags, type SessionMarkerRecord, type WorkbenchSettings, type WorkbenchSettingsV4,
   type WorkspaceAccountKey,
@@ -2487,7 +2489,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
     if (workbenchId === undefined) return
     try {
       const result = await windowController.open(workbenchId, reservedPopup)
-      if (result.status === 'requested') setStateDiagnostic('已请求在浏览器打开工作台，正在等待页面连接。')
+      if (result.status === 'requested') setStateDiagnostic(undefined)
       else if (result.status === 'unsupported') setStateDiagnostic('当前无法连接 DSH 浏览器窗口服务。')
       else if (result.status === 'opened') setStateDiagnostic('工作台已在新窗口打开。')
       else setStateDiagnostic(`打开工作台页面失败（${result.code}）。`)
@@ -2520,7 +2522,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
         const accepted = await props.requestBrowserReclaim(workbenchId)
         if (accepted) {
           setBrowserHandoff({ workbenchId, status: 'reclaiming' })
-          setStateDiagnostic('收回请求已发送；正在保存布局并等待 DSH 客户端确认。')
+          setStateDiagnostic(undefined)
         } else {
           setStateDiagnostic('收回请求未能到达 DSH Host；此工作台仍由浏览器控制，请重试。')
         }
@@ -2538,9 +2540,8 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
     if (request?.status !== 'ready' && request?.status !== 'reclaiming') return
     setReclaimingBrowserWorkbench(true)
     try {
-      const result = await windowController.reclaim?.(workbenchId)
-      if (result?.status === 'reclaimed') setStateDiagnostic('工作台已收回到 DSH 客户端。')
-      else setStateDiagnostic('收回请求仍在确认中；浏览器页面保持锁定，请稍后重试。')
+      await windowController.reclaim?.(workbenchId)
+      setStateDiagnostic(undefined)
     } catch {
       setStateDiagnostic('收回请求仍在确认中；浏览器页面保持锁定，请稍后重试。')
     } finally { setReclaimingBrowserWorkbench(false) }
@@ -2565,13 +2566,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
       setBrowserHandoff({ workbenchId: request.workbenchId, status: request.status,
         ...(request.code === undefined ? {} : { code: request.code }) })
     }
-    if (request.status === 'ready') setStateDiagnostic('浏览器中的工作台已连接。')
-    else if (request.status === 'reclaimed') setStateDiagnostic('工作台已收回到 DSH 客户端。')
-    else if (request.status === 'failed' || request.status === 'expired') setStateDiagnostic(
-      request.code === 'browser-view-ready-timeout'
-        ? '没有收到浏览器页面的连接确认；请检查是否拦截了弹出窗口。'
-        : '浏览器工作台未能连接，请重新打开。',
-    )
+    setStateDiagnostic(undefined)
   }, [workbenchWindowSnapshot.requests, workbenchWindowSnapshot.request, workbenchDirectorySnapshot.activeWorkbenchId, props.browserWorkbenchId])
   useEffect(() => {
     if (props.browserView !== true || props.browserWorkbenchId === undefined) return
@@ -3149,7 +3144,9 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
             runtime={props.floatingRuntime} workbenchId={selectedWorkbenchId} canvasRef={resizeCanvasRef}
             visible={surfaceView === 'workbench' && !activeBrowserOwned && layoutActionsEnabled}
             editors={editors} hidden={workbenchDirectorySnapshot.globalHiddenEditorIds ?? []} extensionAccess={extensionAccess}
-            frame={props} layout={layout} policy={conversationResourcePolicy} sessionMarkers={allWorkspaceSessionMarkers} commit={commit} pin={pinFloatingTab} /> : null}
+            frame={props} layout={layout} policy={conversationResourcePolicy} sessionMarkers={allWorkspaceSessionMarkers}
+            selectedAreaBinding={areaSessionBinding(groupsOf(layout.root).find(group => group.id === layout.activeGroupId), workspaces, projectNeutral, account)}
+            commit={commit} pin={pinFloatingTab} /> : null}
           {createPreset && props.browserView !== true ? <WorkbenchCreateDialog directory={workbenchDirectory} presetId={createPreset}
             onClose={() => { setCreatePreset(undefined); requestAnimationFrame(() => createWorkbenchButtonRef.current?.focus()) }}
             onCreated={() => { props.onShowWorkbench?.(); navigationReservationsRef.current.clear(); setStateDiagnostic(undefined) }} /> : null}
@@ -3267,7 +3264,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
           />
           </Profiler>}
           {(saveState !== 'saved' || stateDiagnostic !== undefined || invalidLayout !== undefined || sidebarDiagnostic !== undefined) && (
-            <div className={css.diagnostic} role="status">
+            <div className={css.diagnostic} role="status" data-workbench-diagnostic>
               {sidebarDiagnostic === undefined ? null : <p>{sidebarDiagnostic}</p>}
               {stateDiagnostic === undefined && invalidLayout === undefined && saveState === 'saved' ? null : (
                 <p>{stateDiagnostic ?? (invalidLayout !== undefined
@@ -4537,6 +4534,7 @@ function SessionBindingChip({
   const selectorId = useId()
   const [query, setQuery] = useState('')
   const [highlighted, setHighlighted] = useState(0)
+  const [collapsedWorkspaceGroups, setCollapsedWorkspaceGroups] = useState<Set<string>>(() => new Set())
   const [editingMarker, setEditingMarker] = useState(false)
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false)
   const [draftLabel, setDraftLabel] = useState(marker.label)
@@ -4608,9 +4606,10 @@ function SessionBindingChip({
   ].filter((candidate, index, all) => all.findIndex(other =>
     sessionTargetKey(other.binding) === sessionTargetKey(candidate.binding),
   ) === index)
+  const sortedCandidates = nonCurrentCandidates.sort(sortByUpdatedAt)
   const recentCandidates = normalizedQuery.length === 0
-    ? nonCurrentCandidates.sort(sortByUpdatedAt).slice(0, 5)
-    : nonCurrentCandidates
+    ? sortedCandidates.slice(0, 5)
+    : sortedCandidates
   const candidates = [
     ...(currentCandidate === undefined ? [] : [currentCandidate]),
     ...recentCandidates,
@@ -4902,15 +4901,34 @@ function SessionBindingChip({
               <span className={css.bindingPickerSectionLabel}>{pickerCopy.recent}</span>
               {groupedCandidates.length === 0 ? (
                 <span className={css.bindingPickerEmpty}>{candidates.length === 0 ? copy.noMatches : pickerCopy.noRecent}</span>
-              ) : groupedCandidates.map(group => (
-                <div key={group.workspaceId ?? 'ungrouped'} className={css.bindingPickerGroup} data-workspace-id={group.workspaceId}>
-                  <span className={css.bindingPickerGroupTitle}>
+              ) : groupedCandidates.map((group, groupIndex) => {
+                const groupKey = group.workspaceId ?? 'ungrouped'
+                const collapsed = collapsedWorkspaceGroups.has(groupKey)
+                const groupDomId = `${selectorId}-workspace-${String(groupIndex)}`
+                return <div key={groupKey} className={css.bindingPickerGroup} data-workspace-id={group.workspaceId}>
+                  <button
+                    type="button"
+                    className={css.bindingPickerGroupTitle}
+                    aria-expanded={!collapsed}
+                    aria-controls={groupDomId}
+                    onClick={() => setCollapsedWorkspaceGroups(previous => {
+                      const next = new Set(previous)
+                      if (next.has(groupKey)) next.delete(groupKey)
+                      else next.add(groupKey)
+                      return next
+                    })}
+                  >
                     <span className={css.bindingPickerGroupIcon} aria-hidden="true"><IconFolderOpenOutlineMedium size={14} /></span>
                     <span>{group.title}</span>
-                  </span>
-                  {group.options.map(({ option, index }) => renderCandidate(option, index))}
+                    <span className={css.bindingPickerGroupChevron} aria-hidden="true">
+                      {collapsed ? <IconChevronRightOutlineMedium size={13} /> : <IconChevronDownOutlineMedium size={13} />}
+                    </span>
+                  </button>
+                  <div id={groupDomId} hidden={collapsed}>
+                    {group.options.map(({ option, index }) => renderCandidate(option, index))}
+                  </div>
                 </div>
-              ))}
+              })}
             </section>
           </div>
         </WorkbenchFloatingMenu>
@@ -4939,14 +4957,7 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
   const activeRosterWorkspace = activeSessionId === undefined
     ? undefined
     : workspaces.find(workspace => workspace.sessionIds.includes(activeSessionId))
-  const activeBinding = group.areaBinding ?? (active?.editorScope === 'session' && active.sessionId !== undefined
-    ? active.binding ?? {
-      ...(projectNeutral
-        ? activeRosterWorkspace === undefined ? {} : { workspaceId: activeRosterWorkspace.workspaceId }
-        : account.startsWith('workspace:') ? { workspaceId: account.slice('workspace:'.length) } : {}),
-      sessionId: active.sessionId,
-    }
-    : undefined)
+  const activeBinding = areaSessionBinding(group, workspaces, projectNeutral, account)
   const currentRosterWorkspace = currentSession === undefined
     ? undefined
     : workspaces.find(workspace => workspace.sessionIds.includes(currentSession))
@@ -4978,6 +4989,8 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
   const areaSessionMarkers = activeBinding?.workspaceId === undefined
     ? sessionMarkers
     : sessionMarkersByWorkspace[activeBinding.workspaceId] ?? sessionMarkers
+  const areaMarker = activeBinding === undefined ? undefined
+    : areaSessionMarkers[activeBinding.sessionId] ?? allocateSessionMarker(areaSessionMarkers)
   const areaRef = useRef<HTMLElement>(null)
   const bodyRef = useRef<HTMLDivElement>(null)
   const collapsePreviewId = useId()
@@ -5788,7 +5801,10 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
   return (
     <section
       ref={areaRef}
-      className={css.group}
+      className={css.group + ' ' + accentFrameCss.frame}
+      data-session-frame={areaMarker ? 'area' : undefined}
+      data-accent={areaMarker?.accentToken}
+      data-layout-locked={props.layoutLocked ? 'true' : undefined}
       data-active={document.activeGroupId === group.id || undefined}
       data-area-collapsed={areaCollapsed || undefined}
       data-collapse-edge={collapseEdge}
@@ -5935,7 +5951,7 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
           <SessionBindingChip
             binding={activeBinding}
             resolved={resolvedActive}
-            marker={areaSessionMarkers[activeBinding.sessionId] ?? allocateSessionMarker(areaSessionMarkers)}
+            marker={areaMarker!}
             sessionRows={sessionRows}
             sessionMarkers={areaSessionMarkers}
             sessionMarkersByWorkspace={sessionMarkersByWorkspace}

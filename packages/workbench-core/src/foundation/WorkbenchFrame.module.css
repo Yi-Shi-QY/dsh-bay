@@ -1552,7 +1552,8 @@
   top: calc(100% + 4px);
   left: 0;
   display: grid;
-  width: min(360px, calc(100vw - 24px));
+  width: min(340px, calc(100vw - 20px));
+  box-sizing: border-box;
   max-height: min(460px, calc(100vh - 80px));
   gap: 8px;
   padding: 8px;
@@ -1622,6 +1623,7 @@
 .searchIcon path,
 .markerEditChevron svg,
 .bindingPickerGroupIcon svg,
+.bindingPickerGroupChevron svg,
 .pickerCheck svg {
   fill: none;
   stroke: currentColor;
@@ -1863,10 +1865,21 @@
 }
 
 .bindingPickerGroupTitle {
+  width: 100%;
+  border: 0;
   padding-top: 4px;
   color: var(--dsw-alias-label-secondary);
+  background: transparent;
+  cursor: pointer;
   font-size: 10px;
   text-transform: none;
+  text-align: left;
+}
+
+.bindingPickerGroupTitle:hover,
+.bindingPickerGroupTitle:focus-visible {
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-interactive-bg-hover);
 }
 
 .bindingPickerGroupIcon {
@@ -1878,11 +1891,21 @@
   color: var(--dsw-alias-label-tertiary);
 }
 
-.bindingPickerGroupTitle > span:last-child {
+.bindingPickerGroupTitle > span:nth-child(2) {
   min-width: 0;
+  flex: 1 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.bindingPickerGroupChevron {
+  display: grid;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  place-items: center;
+  color: var(--dsw-alias-label-tertiary);
 }
 
 .bindingPickerEmpty {

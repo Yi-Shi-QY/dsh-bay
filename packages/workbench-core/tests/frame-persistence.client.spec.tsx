@@ -3,7 +3,7 @@ import React from 'react'
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { WorkbenchFrame } from '../src/foundation/WorkbenchFrame.tsx'
-import { defaultLayout } from '../src/foundation/model.ts'
+import { createSessionTab, defaultLayout } from '../src/foundation/model.ts'
 import type { WorkbenchEditorOwnerProps } from '../src/client/editor-slots.ts'
 import type { SettingsScopePatchResult, SettingsScopeSnapshot } from '../src/client/workbench-settings-contracts.ts'
 import type { WorkbenchSettings } from '../src/foundation/persistence.ts'
@@ -31,13 +31,18 @@ function setup(
   projectNeutralOverride?: boolean,
   nestedSplit?: boolean,
   nestedCollapsedSplit?: boolean,
+  boundSession = false,
 ) {
   const layout = defaultLayout()
   const first = layout.root
   if (first.kind !== 'group') throw new Error('fixture must have one Area')
-  first.tabs = tabTitles.map((title, index) => ({
-    id: `test-page-${String(index + 1)}`, editorId: 'test.editor', editorScope: 'root', lastKnownTitle: title, state: {},
-  }))
+  first.tabs = boundSession
+    ? tabTitles.map((title, index) => createSessionTab(
+      `test-page-${String(index + 1)}`, 'test.editor', { workspaceId: 'workspace-a', sessionId: 'session-a' }, title,
+    ))
+    : tabTitles.map((title, index) => ({
+      id: `test-page-${String(index + 1)}`, editorId: 'test.editor', editorScope: 'root' as const, lastKnownTitle: title, state: {},
+    }))
   first.activeTabId = first.tabs[0]!.id
   const targetLayout = structuredClone(layout)
   if (targetLayout.root.kind !== 'group') throw new Error('fixture must have one target Area')
@@ -89,12 +94,16 @@ function setup(
     subscribe: (listener: () => void) => { listeners.add(listener); return () => listeners.delete(listener) },
     set: vi.fn(), unset: vi.fn(), patch: vi.fn(patch),
   }
-  const sessions = { byId: {}, ids: [], phase: 'ready' }
-  const workspaces = { items: [], archivedSessionIds: [], phase: 'ready' }
+  const sessions = boundSession
+    ? { ids: ['session-a'], byId: { 'session-a': { id: 'session-a', title: '\u7ed1\u5b9a\u5bf9\u8bdd', displayTitle: '\u7ed1\u5b9a\u5bf9\u8bdd', running: true, blank: false, updatedAt: 1, retainedBy: { mainView: 1 } } }, phase: 'ready' }
+    : { byId: {}, ids: [], phase: 'ready' }
+  const workspaces = boundSession
+    ? { items: [{ workspaceId: 'workspace-a', title: '\u7ed1\u5b9a\u9879\u76ee', path: '/workspace-a', sessionIds: ['session-a'] }], archivedSessionIds: [], phase: 'ready' }
+    : { items: [], archivedSessionIds: [], phase: 'ready' }
   const entries = [{
-    id: 'test.editor', scope: 'root', label: '测试内页',
+    id: 'test.editor', scope: boundSession ? 'session' as const : 'root' as const, label: '测试内页',
     declaration: {
-      editorId: 'test.editor', scope: 'root', label: '测试内页', requiredBinding: 'none',
+      editorId: 'test.editor', scope: boundSession ? 'session' as const : 'root' as const, label: '测试内页', requiredBinding: boundSession ? 'session' as const : 'none' as const,
       state: { schemaVersion: 1, maxBytes: 1024, restore: 'if-valid', share: 'portable' },
       runtime: { background: 'dispose', collapsed: collapsed ?? 'keep', reacquire: 'on-visible' },
     },
@@ -859,6 +868,7 @@ describe('Frame layout persistence', () => {
     const h = setup(async () => ({ status: 'committed', revision: 2 }), undefined, ['测试内页'], controller)
     await waitFor(() => expect(h.view.container.querySelector('[data-workbench-browser-handoff="ready"]')?.textContent)
       .toBe('当前工作台正在浏览器中打开。'))
+    expect(h.view.container.querySelector('[data-workbench-diagnostic]')).toBeNull()
     const controlPage = h.view.container.querySelector<HTMLElement>('[data-workbench-browser-control-page]')
     const handoffLock = controlPage
     expect(controlPage).not.toBeNull()
@@ -869,6 +879,7 @@ describe('Frame layout persistence', () => {
     await waitFor(() => expect(reclaim).toHaveBeenCalledOnce())
     await waitFor(() => expect(h.view.container.querySelector('[data-workbench-browser-handoff="reclaimed"]')?.textContent)
       .toBe('工作台已收回到 DSH 客户端。'))
+    expect(h.view.container.querySelector('[data-workbench-diagnostic]')).toBeNull()
     expect(h.view.container.querySelector('[data-workbench-browser-control-page]')).toBeNull()
     act(() => {
       windowSnapshot = { supported: true, windows: [], request: { workbenchId: 'one', status: 'closed' } }
@@ -1009,6 +1020,23 @@ describe('Frame layout persistence', () => {
     if (savedOperation.value?.root.kind === 'split') expect(savedOperation.value.root.ratio).toBeCloseTo(514 / 788, 5)
     expect(h.metrics.getSnapshot().mountedEditorOutlets).toBe(2)
     h.view.unmount()
+  })
+
+  it('keeps the bound Area accent marker present while layout is locked', async () => {
+    const h = setup(async () => ({ status: 'committed', revision: 2 }), undefined, ['Bound page'],
+      undefined, undefined, undefined, undefined, false, false, true)
+    const area = h.view.container.querySelector<HTMLElement>('[data-workbench-group="group-main"]')!
+    expect(area.dataset.sessionFrame).toBe('area')
+    expect(area.dataset.accent).toBe('accent-1')
+    expect(area.dataset.layoutLocked).toBeUndefined()
+
+    fireEvent.click(h.view.container.querySelector<HTMLButtonElement>('[data-workbench-layout-lock]')!)
+    await waitFor(() => expect(h.view.container.querySelector<HTMLElement>('[data-workbench-canvas]')?.dataset.layoutLocked).toBe('true'))
+
+    const lockedArea = h.view.container.querySelector<HTMLElement>('[data-workbench-group="group-main"]')!
+    expect(lockedArea.dataset.sessionFrame).toBe('area')
+    expect(lockedArea.dataset.accent).toBe('accent-1')
+    expect(lockedArea.dataset.layoutLocked).toBe('true')
   })
 
   it('freezes a collapsed branch divider while leaving the separate expanded split adjustable', async () => {

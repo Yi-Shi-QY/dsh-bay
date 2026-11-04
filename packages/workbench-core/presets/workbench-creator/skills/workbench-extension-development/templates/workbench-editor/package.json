@@ -24,7 +24,7 @@
       "kind": "extension",
       "delivery": "direct-source",
       "version": "0.1.0",
-      "coreCompatibility": "0.2.2-alpha.17.3",
+      "coreCompatibility": "0.2.2-alpha.17.4",
       "dshGeneration": "0.2.1-rc.5",
       "upstreamCommit": "b830ec950faba0a46dda564be3e2d854afed94f1",
       "activation": "restart-only",

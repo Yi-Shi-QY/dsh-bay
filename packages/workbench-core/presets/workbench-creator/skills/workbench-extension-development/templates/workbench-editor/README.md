@@ -2,7 +2,7 @@
 
 ## 17.3 展示位置与实例生命周期
 
-Core 兼容版本为 `0.2.2-alpha.17.3`。模板扩展自身保留独立的 `0.1.0` 版本，不能把它误当成 Core 版本。
+Core 兼容版本为 `0.2.2-alpha.17.4`。模板扩展自身保留独立的 `0.1.0` 版本，不能把它误当成 Core 版本。
 
 - 声明 `presentation.floating: false` 可禁止浮窗；缺少完整绑定及生命周期声明的内页不能在浮窗运行。
 - `owner.instanceId` 是布局内标签 ID，运行时缓存使用 `owner.runtimeIdentity`；不能跨工作台仅按标签 ID 缓存。`owner.presentation` 为 `floating` 或 `area`，位置变化不是新建实例。
@@ -55,7 +55,7 @@ ctx.slots.inject('workbench.editor.session', () => ctx.slots.register({
     moduleId: 'workbench.editor-example',
     apiVersion: 1,
     editorIds: ['workbench.example'],
-    coreCompatibility: '0.2.2-alpha.17.3',
+    coreCompatibility: '0.2.2-alpha.17.4',
     dshGeneration: '0.2.1-rc.5',
   } } }),
 }, Editor))
