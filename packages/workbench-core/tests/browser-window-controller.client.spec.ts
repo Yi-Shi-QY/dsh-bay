@@ -1,10 +1,53 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createBrowserWindowController } from '../src/client/browser-window-controller.ts'
+import { createHostBrowserWindowController } from '../src/host-browser-window-controller.ts'
+import { createFloatingWorkspaceRuntime } from '../src/client/floating-workspace-runtime.ts'
 
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks() })
 
 describe('browser Workbench handoff controller', () => {
+  it('freezes the source before staging and restores the return receipt once before unlocking', async () => {
+    vi.useFakeTimers()
+    const host = createHostBrowserWindowController({ origin: 'http://127.0.0.1:4200', lookupWorkbench: () => true,
+      authenticatedUrl: url => { const result = new URL(url); result.searchParams.set('token', 'test'); return result.href } })
+    const source = createFloatingWorkspaceRuntime(), receiver = createFloatingWorkspaceRuntime()
+    source.open('one', { id: 'one', editorId: 'test', editorScope: 'root', lastKnownTitle: 'one', state: {} })
+    let closeToken = '', windowId = ''
+    let controller: ReturnType<typeof createBrowserWindowController>
+    const restore = vi.fn((id: string, data: unknown) => source.restoreHandoff(id, data))
+    const rpc = { call: vi.fn(async (_channel: string, endpoint: string, payload: unknown) => {
+      if (endpoint.endsWith('/floating-stage')) expect(controller.getSnapshot().request?.status).toBe('requested')
+      return host.handle(endpoint.replace('workbench-window/', ''), payload)
+    }) }
+    controller = createBrowserWindowController({ rpc: rpc as never, floating: { snapshot: id => source.snapshotHandoff(id), restore } })
+    const popup = { opener: null, location: { replace(url: string) {
+      void host.handle('redeem', { ticket: new URL(url).searchParams.get('workbench') }).then(async response => {
+        if (!response.ok) throw new Error('Expected redeem')
+        const view = (response.value as { view: { windowId: string; closeToken: string } }).view
+        closeToken = view.closeToken; windowId = view.windowId
+        const read = await host.handle('floating-read', { windowId, closeToken })
+        if (!read.ok) throw new Error('Expected handoff')
+        receiver.restoreHandoff('one', (read.value as { snapshot: unknown }).snapshot)
+        await host.handle('ready', { windowId })
+      })
+    } } }
+    expect(await controller.prepare('one')).toBe(true)
+    expect((await controller.open('one', popup as never)).status).toBe('requested')
+    await vi.advanceTimersByTimeAsync(800)
+    expect(controller.getSnapshot().request?.status).toBe('ready')
+    await receiver.close('one', 'one')
+    receiver.open('one', { id: 'two', editorId: 'test', editorScope: 'root', lastKnownTitle: 'two', state: { count: 4 } })
+    const reclaim = controller.reclaim('one')
+    await vi.advanceTimersByTimeAsync(0)
+    expect((await host.handle('reclaimed', { closeToken, floating: receiver.snapshotHandoff('one') })).ok).toBe(true)
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(await reclaim).toEqual({ status: 'reclaimed' })
+    expect(restore).toHaveBeenCalledOnce()
+    expect(source.find('one', 'one')).toBeUndefined()
+    expect(source.find('two', 'one')?.tab.state).toEqual({ count: 4 })
+    controller.dispose(); host.dispose()
+  })
   it('can recover browser support when Connection RPC becomes available after initialization', async () => {
     const controller = createBrowserWindowController()
     expect(controller.getSnapshot().supported).toBe(false)

@@ -7,11 +7,12 @@ export function guestDistributionDenied(path:string):boolean {
   }catch{return true}
   if(path.includes('%')||path.includes(String.fromCharCode(92))||path.includes('//'))return true
   const clean=path.replace(/^[/]?api[/]/u,'').replace(/^[/]/u,'').toLowerCase()
+  if (/^workbench-window\/floating-/u.test(clean)) return true
   if(clean.startsWith('dynamiccordisrunner/'))return !/^dynamiccordisrunner[/](?:inventory|syncinspectmanifest|inspectmanifest)$/u.test(clean)
   if(/^(?:pluginmanager|pluginmarket|configeditor|credentials|workbenchdistribution|workbenchhost|workbenchoffline|workbenchmodule|workbenchnative)/u.test(clean)){
     return !/^pluginmanager[/](?:listplugins|listbundles|registries)$/u.test(clean)
   }
-  return /^workbench[/](?:distribution|layout-import|offline|module|direct-source|native-offline)/u.test(clean)
+  return /^workbench[/](?:ui-settings|distribution|layout-import|offline|module|direct-source|native-offline)/u.test(clean)
     || /^workbench-(?:module|offline|direct-source|native-offline|distribution|layout-import)/u.test(clean)
 }
 

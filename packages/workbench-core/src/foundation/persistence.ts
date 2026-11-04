@@ -7,7 +7,7 @@ import {
 } from './document-v3.ts'
 import {
   DEFAULT_WORKBENCH_CONVERSATION_INTERACTION_POLICY,
-  normalizeWorkbenchConversationInteractionPolicy,
+  normalizeWorkbenchConversationInteractionPolicy, migrateWorkbenchInteractionPolicy,
   type WorkbenchConversationInteractionPolicyV1,
 } from '../workbench-interaction-policy.ts'
 import type { WorkbenchExtensionConsentV1 } from '../workbench-extension-access.ts'
@@ -440,7 +440,7 @@ function decodeSettingsV4(value: unknown): WorkbenchSettingsV4 | undefined {
   if (toolGatewayUsageAggregates === undefined) return undefined
   const workbenches: Record<string, WorkbenchRecordV2> = {}
   const invalidWorkbenches: Record<string, InvalidWorkbenchRecordV1> = {}
-  let migrationRequired = value.migrationRequired === true
+  let migrationRequired = value.migrationRequired === true || !isRecord(value.interactionPolicy) || value.interactionPolicy.version !== 2
   for (const [key, raw] of Object.entries(value.workbenches)) {
     if (!isRecord(raw)) { invalidWorkbenches[key] = retainedInvalid(key, raw); continue }
     const document = validateWorkbenchDocumentV3(raw.document)
@@ -546,7 +546,7 @@ function decodeSettingsV4(value: unknown): WorkbenchSettingsV4 | undefined {
   return { version: 4, activeWorkbenchId, openWorkbenchIds: open,
     globalHiddenEditorIds: migratedGlobalHiddenEditorIds,
     workbenches, layoutTemplates: {}, invalidWorkbenches, sessionMarkers: decodeSessionMarkers(value.sessionMarkers),
-    interactionPolicy: normalizeWorkbenchConversationInteractionPolicy(value.interactionPolicy),
+    interactionPolicy: migrateWorkbenchInteractionPolicy(value.interactionPolicy),
     ...(Object.keys(extensionConsents).length === 0 ? {} : { extensionConsents }),
     ...(Object.keys(toolGatewayPolicies).length === 0 ? {} : { toolGatewayPolicies }),
     ...(Object.keys(toolUsageAggregates).length === 0 ? {} : { toolUsageAggregates }),

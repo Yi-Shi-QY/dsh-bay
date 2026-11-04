@@ -148,7 +148,7 @@ describe('Host browser Workbench window controller', () => {
       .toEqual({ status: 'reclaimed' })
     expect(value(await controller.handle('status', { windowId: prepared.windowId })))
       .toEqual({ status: 'reclaimed' })
-    expect((await controller.handle('reclaimed', { closeToken: redeemed.view.closeToken })).ok).toBe(false)
+    expect((await controller.handle('reclaimed', { closeToken: redeemed.view.closeToken })).ok).toBe(true)
     controller.dispose()
   })
 

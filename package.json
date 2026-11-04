@@ -2,7 +2,7 @@
   "name": "dsh-bay-private-staging",
   "description": "Private staging repository for DSH Bay (湾域) on DSH",
   "private": true,
-  "version": "0.2.2-alpha.17.2",
+  "version": "0.2.2-alpha.17.3",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Yi-Shi-QY/dsh-bay.git"

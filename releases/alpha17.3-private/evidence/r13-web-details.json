@@ -1,0 +1,11 @@
+{
+  "customReactState": true,
+  "terminalDomAndInput": true,
+  "browserIframeState": true,
+  "toolbarReset": true,
+  "keyboardMinimize": true,
+  "narrowBounds": true,
+  "pointerHeaderPin": true,
+  "menuSplit": true,
+  "evidenceFieldCorrection": "Renamed fields to match tested script: pointer drop on header; split via menu."
+}

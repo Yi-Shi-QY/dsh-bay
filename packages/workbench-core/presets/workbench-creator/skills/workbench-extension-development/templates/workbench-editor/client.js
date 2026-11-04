@@ -8,6 +8,9 @@ window.__ModuleLoader__.load({
     // The owner object is supplied by Workbench Core. It is the only source
     // of Area, Workspace and Session identity for this editor instance.
     function Editor(owner) {
+      // This example persists edits immediately. Editors with unsaved local
+      // drafts must return false (or ask to save/discard) from this guard.
+      React.useEffect(() => owner.registerCloseGuard?.(() => true), [owner.registerCloseGuard])
       const binding = owner.sessionId === undefined
         ? '等待绑定 Session'
         : `Session ${owner.sessionId}`
@@ -31,6 +34,7 @@ window.__ModuleLoader__.load({
       scope: 'root',
       label: '示例内页',
       requiredBinding: 'none',
+      presentation: { floating: true },
       binding: { requirement: 'none', unbound: 'available', sharing: 'none' },
       state: { schemaVersion: 1, maxBytes: 16 * 1024, restore: 'if-valid', share: 'portable' },
       runtime: { background: 'pause', collapsed: 'dispose', reacquire: 'on-visible' },
@@ -40,7 +44,7 @@ window.__ModuleLoader__.load({
       moduleId: 'workbench.editor-example',
       apiVersion: 1,
       editorIds: ['workbench.example'],
-      coreCompatibility: '0.2.2-alpha.17.2',
+      coreCompatibility: '0.2.2-alpha.17.3',
       dshGeneration: '0.2.1-rc.5',
     }
 

@@ -544,7 +544,7 @@ function TerminalEditor({ owner, ctx }: { owner: AreaProps; ctx: Context }): Rea
   const [recoveryOpen, setRecoveryOpen] = useState(false)
   const [recoveryAttempt, setRecoveryAttempt] = useState(0)
   const [recovery, setRecovery] = useState<{ phase: 'closed' | 'loading' | 'ready' | 'failed'; value?: readonly WebTerminalInfo[]; message?: string }>({ phase: 'closed' })
-  const key = owner.instanceId
+  const key = owner.runtimeIdentity ?? owner.instanceId
   if (sessionId === undefined) return <MissingSession />
   if (ctx.webTerminals === undefined) return <section data-workbench-official-area-state="terminal-unavailable" style={{ padding: 20 }}>当前 DSH 没有提供终端服务。</section>
   const theme = useThemeSnapshot(ctx)
@@ -766,7 +766,7 @@ export function createWorkbenchOfficialAreaEditors(ctx: Context): WorkbenchOffic
   const conversation = createWorkbenchNativeConversationEditors(ctx)
   return {
     files: owner => <NativeSidebarAreaEditor
-      key={`${owner.instanceId}:${owner.sessionId}:${owner.areaClaim}`}
+      key={`${owner.instanceId}:${owner.sessionId}:${owner.runtimeIdentity ? owner.bindingGeneration : owner.areaClaim}`}
       owner={owner}
       ctx={ctx}
       kind="files"
@@ -775,7 +775,7 @@ export function createWorkbenchOfficialAreaEditors(ctx: Context): WorkbenchOffic
       fallback={<WorkspaceFilesEditor owner={owner} ctx={ctx} />}
     />,
     terminal: owner => <NativeSidebarAreaEditor
-      key={`${owner.instanceId}:${owner.sessionId}:${owner.areaClaim}`}
+      key={`${owner.instanceId}:${owner.sessionId}:${owner.runtimeIdentity ? owner.bindingGeneration : owner.areaClaim}`}
       owner={owner}
       ctx={ctx}
       kind="terminal"
@@ -784,7 +784,7 @@ export function createWorkbenchOfficialAreaEditors(ctx: Context): WorkbenchOffic
       fallback={<TerminalEditor owner={owner} ctx={ctx} />}
     />,
     browser: owner => <NativeSidebarAreaEditor
-      key={`${owner.instanceId}:${owner.sessionId}:${owner.areaClaim}`}
+      key={`${owner.instanceId}:${owner.sessionId}:${owner.runtimeIdentity ? owner.bindingGeneration : owner.areaClaim}`}
       owner={owner}
       ctx={ctx}
       kind="browser"
@@ -793,7 +793,7 @@ export function createWorkbenchOfficialAreaEditors(ctx: Context): WorkbenchOffic
       fallback={<BrowserEditor owner={owner} />}
     />,
     documentPreview: owner => <NativeSidebarAreaEditor
-      key={`${owner.instanceId}:${owner.sessionId}:${owner.areaClaim}`}
+      key={`${owner.instanceId}:${owner.sessionId}:${owner.runtimeIdentity ? owner.bindingGeneration : owner.areaClaim}`}
       owner={owner}
       ctx={ctx}
       kind="documentpreview"
@@ -801,11 +801,11 @@ export function createWorkbenchOfficialAreaEditors(ctx: Context): WorkbenchOffic
       entryKey={NATIVE_TAB_ENTRY_KEYS.documentPreview}
       fallback={<section data-workbench-official-area-state="document-preview-unavailable" style={{ padding: 20 }}>当前宿主没有可用的 DSH 原生文件预览。</section>}
     />,
-    changesReview: owner => <NativeSidebarAreaEditor key={`${owner.instanceId}:${owner.sessionId}:${owner.areaClaim}`} owner={owner} ctx={ctx} kind="changes-review" title="变更审查" entryKey={NATIVE_TAB_ENTRY_KEYS.changesReview} fallback={<NativeResourceUnavailable label="变更审查" />} />,
-    plan: owner => <NativeSidebarAreaEditor key={`${owner.instanceId}:${owner.sessionId}:${owner.areaClaim}`} owner={owner} ctx={ctx} kind="plan" title="计划" entryKey={NATIVE_TAB_ENTRY_KEYS.plan} fallback={<NativeResourceUnavailable label="计划" />} />,
-    scheduleTask: owner => <NativeSidebarAreaEditor key={`${owner.instanceId}:${owner.sessionId}:${owner.areaClaim}`} owner={owner} ctx={ctx} kind="schedule-task" title="计划任务" entryKey={NATIVE_TAB_ENTRY_KEYS.scheduleTask} fallback={<NativeResourceUnavailable label="计划任务" />} />,
-    guide: owner => <NativeSidebarAreaEditor key={`${owner.instanceId}:${owner.sessionId}:${owner.areaClaim}`} owner={owner} ctx={ctx} kind="guide" title="功能指南" entryKey={NATIVE_TAB_ENTRY_KEYS.guide} fallback={<NativeResourceUnavailable label="功能指南" />} />,
-    subagentChat: owner => <NativeSidebarAreaEditor key={`${owner.instanceId}:${owner.sessionId}:${owner.areaClaim}`} owner={owner} ctx={ctx} kind="subagent-chat" title="子 Agent 对话" entryKey={NATIVE_TAB_ENTRY_KEYS.subagentChat} fallback={<NativeResourceUnavailable label="子 Agent 对话" />} />,
+    changesReview: owner => <NativeSidebarAreaEditor key={`${owner.instanceId}:${owner.sessionId}:${owner.runtimeIdentity ? owner.bindingGeneration : owner.areaClaim}`} owner={owner} ctx={ctx} kind="changes-review" title="变更审查" entryKey={NATIVE_TAB_ENTRY_KEYS.changesReview} fallback={<NativeResourceUnavailable label="变更审查" />} />,
+    plan: owner => <NativeSidebarAreaEditor key={`${owner.instanceId}:${owner.sessionId}:${owner.runtimeIdentity ? owner.bindingGeneration : owner.areaClaim}`} owner={owner} ctx={ctx} kind="plan" title="计划" entryKey={NATIVE_TAB_ENTRY_KEYS.plan} fallback={<NativeResourceUnavailable label="计划" />} />,
+    scheduleTask: owner => <NativeSidebarAreaEditor key={`${owner.instanceId}:${owner.sessionId}:${owner.runtimeIdentity ? owner.bindingGeneration : owner.areaClaim}`} owner={owner} ctx={ctx} kind="schedule-task" title="计划任务" entryKey={NATIVE_TAB_ENTRY_KEYS.scheduleTask} fallback={<NativeResourceUnavailable label="计划任务" />} />,
+    guide: owner => <NativeSidebarAreaEditor key={`${owner.instanceId}:${owner.sessionId}:${owner.runtimeIdentity ? owner.bindingGeneration : owner.areaClaim}`} owner={owner} ctx={ctx} kind="guide" title="功能指南" entryKey={NATIVE_TAB_ENTRY_KEYS.guide} fallback={<NativeResourceUnavailable label="功能指南" />} />,
+    subagentChat: owner => <NativeSidebarAreaEditor key={`${owner.instanceId}:${owner.sessionId}:${owner.runtimeIdentity ? owner.bindingGeneration : owner.areaClaim}`} owner={owner} ctx={ctx} kind="subagent-chat" title="子 Agent 对话" entryKey={NATIVE_TAB_ENTRY_KEYS.subagentChat} fallback={<NativeResourceUnavailable label="子 Agent 对话" />} />,
     start: conversation.start as unknown as (owner: AreaProps) => ReactNode,
     conversation: conversation.conversation as unknown as (owner: AreaProps) => ReactNode,
     trajectory: conversation.trajectory as unknown as (owner: AreaProps) => ReactNode,

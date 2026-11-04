@@ -124,12 +124,13 @@ function disposeWorkbenchNativeOccurrences(instanceId: string): void {
 }
 
 /** Dispose all persisted native occurrences when the Workbench host unmounts. */
-export function disposeAllWorkbenchNativeOccurrences(): void {
+export function disposeAllWorkbenchNativeOccurrences(retain: ReadonlySet<string> = new Set()): void {
   if (pendingHostDispose !== undefined) {
     globalThis.clearTimeout(pendingHostDispose)
     pendingHostDispose = undefined
   }
   for (const [key, record] of [...nativeOccurrences]) {
+    if (retain.has(record.instanceId)) continue
     nativeOccurrences.delete(key)
     record.occurrence.dispose()
   }
@@ -140,11 +141,11 @@ export function disposeAllWorkbenchNativeOccurrences(): void {
  * running its cleanup and setup back-to-back; the deferred task is cancelled
  * by the new setup so a development replay cannot abort a still-live tab.
  */
-export function scheduleDisposeAllWorkbenchNativeOccurrences(): void {
+export function scheduleDisposeAllWorkbenchNativeOccurrences(retain: ReadonlySet<string> = new Set()): void {
   if (pendingHostDispose !== undefined) globalThis.clearTimeout(pendingHostDispose)
   pendingHostDispose = globalThis.setTimeout(() => {
     pendingHostDispose = undefined
-    disposeAllWorkbenchNativeOccurrences()
+    disposeAllWorkbenchNativeOccurrences(retain)
   }, 0)
 }
 
@@ -247,11 +248,12 @@ export function NativeSidebarAreaEditor({
   owner, ctx, entryKey, kind, title, contentId = `workbench://${kind}/${owner.instanceId}`,
   fallback = null, children, onOpenResource, onOpenTab, onClose,
 }: NativeSidebarAreaEditorProps): ReactNode {
+  const nativeInstanceId = owner.runtimeIdentity ?? owner.instanceId
   const nativeDefinition = workbenchNativeSidebarForKind(kind)
   const resourceOnly = nativeDefinition?.resourceOnly === true
   const sessionId = owner.sessionId
-  const areaId = owner.areaId
-  const claim = owner.areaClaim
+  const areaId = owner.runtimeIdentity ?? owner.areaId
+  const claim = owner.runtimeIdentity ? `${owner.runtimeIdentity}:${owner.bindingGeneration ?? 0}` : owner.areaClaim
   const areaVisible = owner.lifecycle?.visibility === undefined || owner.lifecycle.visibility === 'visible'
   const areaFocused = owner.lifecycle?.focused === true
   const callbacks = useRef<{
@@ -279,15 +281,15 @@ export function NativeSidebarAreaEditor({
       && workbenchNativeSidebarForResourceAddress(nativeContentId)?.kind === kind)
   const openNativeTab = useCallback((nextKind: string, placement?: Record<string, unknown>): boolean | void => {
     const replaceTab = placement?.replaceTab
-    const replacesCurrent = replaceTab === owner.instanceId
+    const replacesCurrent = replaceTab === nativeInstanceId
       || (kind === 'terminal' && nativeContentId !== undefined
-        && replaceTab === workbenchTerminalControllerTabId(owner.instanceId, nativeContentId))
+        && replaceTab === workbenchTerminalControllerTabId(nativeInstanceId, nativeContentId))
     return callbacks.current.onOpenTab?.(nextKind, {
       ...(placement ?? {}),
       ...(replacesCurrent ? { replaceTab: true } : {}),
       ...(typeof replaceTab === 'string' && !replacesCurrent ? { replaceTab: undefined } : {}),
     })
-  }, [kind, nativeContentId, owner.instanceId])
+  }, [kind, nativeContentId, nativeInstanceId])
   const closeNativeTerminal = useCallback(() => {
     if (kind !== 'terminal' || sessionId === undefined) return
     const service = (ctx as unknown as {
@@ -298,8 +300,8 @@ export function NativeSidebarAreaEditor({
       && 'terminalId' in nativeParams
       ? (nativeParams as { readonly terminalId?: unknown }).terminalId
       : undefined
-    service.close(sessionId, workbenchTerminalControllerTabId(owner.instanceId, nativeContentId), nativeContentId, terminalId)
-  }, [ctx, kind, nativeContentId, nativeParams, owner.instanceId, sessionId])
+    service.close(sessionId, workbenchTerminalControllerTabId(nativeInstanceId, nativeContentId), nativeContentId, terminalId)
+  }, [ctx, kind, nativeContentId, nativeParams, nativeInstanceId, sessionId])
   const [preview, setPreview] = useState<{
     readonly address: string
     readonly entryKey: string
@@ -333,7 +335,7 @@ export function NativeSidebarAreaEditor({
         resourceAddress: address,
         ...(declaredResource === undefined ? {} : { resourceType: declaredResource.resourceType, editorId: declaredResource.editorId }),
         ...(options?.params === undefined ? {} : { params: options.params }),
-        ...(replaceTab === true || replaceTab === owner.instanceId ? { replaceTab: true } : {}),
+        ...(replaceTab === true || replaceTab === nativeInstanceId ? { replaceTab: true } : {}),
         ...(options?.revealIfOpened === undefined ? {} : { revealIfOpened: options.revealIfOpened }),
       }
       // Resource-backed DSH bodies (Plan, Changes Review, Schedule, Guide and
@@ -341,6 +343,8 @@ export function NativeSidebarAreaEditor({
       // A pending adapter must not be disguised as a file preview.
       if (resourceKind !== undefined && openTab(resourceKind, placement) !== false) return
       if (resourceKind === undefined && openTab('documentpreview', placement) !== false) return
+      // A managed instance must never bypass the coordinator after rejection.
+      if (owner.runtimeIdentity) return
     }
     if (sessionId === undefined || areaId === undefined) return
     try {
@@ -359,7 +363,7 @@ export function NativeSidebarAreaEditor({
           sidebar: { expanded: true, fullscreen: false },
           panel: { id: areaId as never },
           tab: {
-            id: `${owner.instanceId}:resource` as never,
+            id: `${nativeInstanceId}:resource` as never,
             kind: nextClaim.kind,
             contentId: nextClaim.contentId,
             title: nextClaim.title,
@@ -379,13 +383,13 @@ export function NativeSidebarAreaEditor({
       // throw out of the Area render tree. The native body keeps its own error
       // surface, just as it does in DSH's official Sidebar.
     }
-  }, [areaId, closePreview, ctx, openNativeTab, owner.instanceId, sessionId])
+  }, [areaId, closePreview, ctx, openNativeTab, nativeInstanceId, sessionId])
   const occurrenceLease = useMemo(() => {
     if (!resourceReady || nativeContentId === undefined || sessionId === undefined || areaId === undefined || claim === undefined) return undefined
     return retainNativeOccurrence({
       sessionId: sessionId as SessionId,
       areaId,
-      instanceId: owner.instanceId,
+      instanceId: nativeInstanceId,
       kind,
       claim,
       contentId: nativeContentId,
@@ -401,7 +405,7 @@ export function NativeSidebarAreaEditor({
   // The occurrence identity follows the tab instance and exact Area binding.
   // Updating callbacks is intentionally handled through the ref above so a
   // render does not tear down a native Browser/Terminal controller.
-  }, [areaId, claim, ctx, kind, nativeContentId, nativeParams, openNativeTab, openResourcePreview, owner.instanceId, resourceReady, sessionId])
+  }, [areaId, claim, ctx, kind, nativeContentId, nativeParams, openNativeTab, openResourcePreview, nativeInstanceId, resourceReady, sessionId])
   const occurrence = occurrenceLease?.occurrence
 
   // The lease only follows the mounted React view.  The occurrence itself is
@@ -443,7 +447,7 @@ export function NativeSidebarAreaEditor({
     return createWorkbenchNativeTabOccurrence({
       sessionId: sessionId as SessionId,
       areaId,
-      instanceId: `${owner.instanceId}:resource`,
+      instanceId: `${nativeInstanceId}:resource`,
       kind: preview.info.tab.kind,
       contentId: preview.info.tab.contentId,
       title: preview.info.tab.title,
@@ -454,7 +458,7 @@ export function NativeSidebarAreaEditor({
       onOpenTab: openNativeTab,
       onClose: closePreview,
     })
-  }, [areaId, closePreview, ctx, openNativeTab, openResourcePreview, owner.instanceId, preview, sessionId])
+  }, [areaId, closePreview, ctx, openNativeTab, openResourcePreview, nativeInstanceId, preview, sessionId])
 
   useEffect(() => {
     if (nativeContentId === undefined) {
@@ -510,7 +514,7 @@ export function NativeSidebarAreaEditor({
       renderer = createWorkbenchNativeAreaSlotRenderer(ctx, sessionId, {}, {
         sessionReference: reference,
         areaOccurrence: occurrence,
-        scopeKey: `${areaId}:${owner.instanceId}:${entryKey}`,
+        scopeKey: `${areaId}:${nativeInstanceId}:${entryKey}`,
       })
       setAvailable(renderer.hasEntry('sidebar.right.pane.tab', entryKey))
       setNative(renderer)
@@ -523,14 +527,14 @@ export function NativeSidebarAreaEditor({
       setNative(undefined)
       lease.release()
     }
-  }, [areaId, claim, ctx, entryKey, occurrence, owner.instanceId, registrationRevision, resourceReady, sessionId])
+  }, [areaId, claim, ctx, entryKey, occurrence, nativeInstanceId, registrationRevision, resourceReady, sessionId])
   useEffect(() => {
     if (!resourceReady || available !== true || kind !== 'terminal' || nativeContentId === undefined) return
-    const releaseClose = registerWorkbenchNativeClose(owner.instanceId, closeNativeTerminal)
+    const releaseClose = registerWorkbenchNativeClose(nativeInstanceId, closeNativeTerminal)
     if (sessionId === undefined) return releaseClose
     const releaseRetention = retainWorkbenchTerminalTab(ctx, {
-      instanceId: owner.instanceId,
-      tabId: workbenchTerminalControllerTabId(owner.instanceId, nativeContentId),
+      instanceId: nativeInstanceId,
+      tabId: workbenchTerminalControllerTabId(nativeInstanceId, nativeContentId),
       sessionId,
       contentId: nativeContentId,
     })
@@ -538,15 +542,15 @@ export function NativeSidebarAreaEditor({
       releaseRetention()
       releaseClose()
     }
-  }, [available, closeNativeTerminal, ctx, kind, nativeContentId, owner.instanceId, resourceReady, sessionId])
+  }, [available, closeNativeTerminal, ctx, kind, nativeContentId, nativeInstanceId, resourceReady, sessionId])
   useEffect(() => {
     if (!resourceReady || available !== true || native === undefined || occurrence === undefined) return
-    return registerWorkbenchNativeTabTitle(owner.instanceId, () => native.render('sidebar.right.pane.tab.title', {}, {
+    return registerWorkbenchNativeTabTitle(nativeInstanceId, () => native.render('sidebar.right.pane.tab.title', {}, {
       entryKey,
       hookContext: occurrence,
       fallback: null,
     }))
-  }, [available, entryKey, native, occurrence, owner.instanceId, resourceReady])
+  }, [available, entryKey, native, occurrence, nativeInstanceId, resourceReady])
   // The occurrence is intentionally not aborted when this editor body unmounts:
   // switching Workbench tabs is a view change, not a tab close.  Its signal is
   // disposed by closeWorkbenchNative when the layout record is actually gone.

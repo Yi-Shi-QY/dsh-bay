@@ -1,13 +1,13 @@
 // @vitest-environment jsdom
 import React from 'react'
-import { cleanup, fireEvent, render } from '@testing-library/react'
+import { cleanup, fireEvent, render, waitFor } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { WorkbenchWindowRoot } from '../src/foundation/WorkbenchWindowRoot.tsx'
 import { SlotCore } from '@deepseek-ai/dsh-client-ui-slots'
 
 afterEach(() => { cleanup(); vi.restoreAllMocks() })
 
-it('locks the browser workbench after reclaim and offers a close action only after confirmation', () => {
+it('locks the browser workbench after reclaim and offers a close action only after confirmation', async () => {
   const close = vi.spyOn(window, 'close').mockImplementation(() => {})
   const view = render(<WorkbenchWindowRoot renderSlot={() => <button type="button">工作台编辑器</button>} />)
   fireEvent(window, new CustomEvent('workbench-browser-reclaim', { detail: { state: 'requested' } }))
@@ -20,7 +20,7 @@ it('locks the browser workbench after reclaim and offers a close action only aft
   fireEvent(window, new CustomEvent('workbench-browser-reclaim', { detail: { state: 'reclaimed' } }))
   expect(view.getByRole('alertdialog').textContent).toContain('工作台已收回到 DSH 客户端')
   fireEvent.click(view.getByRole('button', { name: '关闭此页面' }))
-  expect(close).toHaveBeenCalledOnce()
+  await waitFor(() => expect(close).toHaveBeenCalledOnce())
 })
 
 it('uses the public root slot priority contract for the dedicated document', () => {

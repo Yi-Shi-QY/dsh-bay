@@ -10,6 +10,7 @@ import { workbenchWindowEndpointForRpc } from './workbench-window-rpc.ts'
 import { createWorkbenchShareSessionManager } from './host-workbench-share-session.ts'
 import { createWorkbenchShareGateway, type WorkbenchShareGatewayV1 } from './host-workbench-share-gateway.ts'
 import { createWorkbenchSharePresenceBroker } from './host-workbench-share-presence.ts'
+import { decodeFloatingHandoff, type FloatingHandoffV1 } from './floating-handoff.ts'
 
 const TICKET_TTL_MS = 2 * 60_000
 const TERMINAL_TTL_MS = 5 * 60_000
@@ -46,6 +47,8 @@ interface ViewRecord {
   failureCode?: string
   browserUrl?: string
   shared?: boolean
+  floating?: FloatingHandoffV1
+  floatingReturned?: boolean
 }
 
 function isLoopback(hostname: string): boolean {
@@ -234,6 +237,27 @@ export function createHostBrowserWindowController(options: HostBrowserWindowCont
     if (endpoint === 'prepare-shared') return prepare(payload, true)
     if (body === undefined) return fail('invalid-request')
 
+    if (endpoint === 'floating-stage' || endpoint === 'floating-read') {
+      if (Object.keys(body).some(key => !['windowId', 'closeToken', 'snapshot'].includes(key)) || typeof body.windowId !== 'string') return fail('invalid-request')
+      const view = views.get(body.windowId)
+      if (!view || view.shared) return fail('floating-handoff-unauthorized')
+      if (endpoint === 'floating-stage') {
+        if (view.status !== 'prepared') return fail('floating-handoff-not-prepared')
+        const snapshot = decodeFloatingHandoff(body.snapshot)
+        if (!snapshot) return fail('invalid-floating-handoff')
+        view.floating = snapshot
+        return ok({ status: 'staged' })
+      }
+      const terminal = view.status === 'reclaimed' || view.status === 'closed'
+      if (!terminal && (typeof body.closeToken !== 'string' || ticketDigest(body.closeToken) !== view.closeTokenHash)) return fail('floating-handoff-unauthorized')
+      if (!terminal && !['redeemed', 'ready', 'reclaim-requested'].includes(view.status)) return fail('floating-handoff-not-ready')
+      if (terminal) return ok({ snapshot: view.floatingReturned ? view.floating ?? null : null,
+        incomplete: !!view.floating && !view.floatingReturned })
+      // A reload must not replay the outgoing snapshot and resurrect closed tabs.
+      const snapshot = view.status === 'redeemed' ? view.floating ?? null : null
+      return ok({ snapshot })
+    }
+
     if (endpoint === 'redeem') {
       if (Object.keys(body).some(key => key !== 'ticket')
         || typeof body.ticket !== 'string' || !/^[A-Za-z0-9_-]{40,64}$/u.test(body.ticket)) return fail('invalid-ticket')
@@ -301,15 +325,25 @@ export function createHostBrowserWindowController(options: HostBrowserWindowCont
     }
 
     if (endpoint === 'reclaimed') {
-      if (Object.keys(body).some(key => key !== 'closeToken') || typeof body.closeToken !== 'string'
+      if (Object.keys(body).some(key => !['closeToken', 'floating'].includes(key)) || typeof body.closeToken !== 'string'
         || !/^[A-Za-z0-9_-]{40,64}$/u.test(body.closeToken)) return fail('invalid-close-token')
       const hash = ticketDigest(body.closeToken)
       const view = closeTokens.get(hash)
+      if (view?.status === 'reclaimed' && view.closeTokenHash === hash) {
+        return JSON.stringify(body.floating === undefined ? undefined : decodeFloatingHandoff(body.floating)) === JSON.stringify(view.floating) ? ok({ status: 'reclaimed' }) : fail('floating-handoff-already-returned')
+      }
       if (view === undefined || view.closeTokenHash !== hash || view.status !== 'reclaim-requested') {
         return fail('browser-view-reclaim-unauthorized')
       }
-      closeTokens.delete(hash)
-      delete view.closeTokenHash
+      if (view.shared) return fail('floating-handoff-unauthorized')
+      if (view.floating && body.floating === undefined) return fail('floating-handoff-required')
+      if (body.floating !== undefined) {
+        const snapshot = decodeFloatingHandoff(body.floating)
+        if (!snapshot) return fail('invalid-floating-handoff')
+        view.floating = snapshot
+        view.floatingReturned = true
+      }
+      // Retain the receipt until normal expiry so a lost response can be retried.
       view.status = 'reclaimed'
       view.updatedAt = now()
       releaseActive(view)
@@ -330,11 +364,18 @@ export function createHostBrowserWindowController(options: HostBrowserWindowCont
     }
 
     if (endpoint === 'closed') {
-      if (Object.keys(body).some(key => key !== 'closeToken') || typeof body.closeToken !== 'string'
+      if (Object.keys(body).some(key => !['closeToken', 'floating'].includes(key)) || typeof body.closeToken !== 'string'
         || !/^[A-Za-z0-9_-]{40,64}$/u.test(body.closeToken)) return fail('invalid-close-token')
       const hash = ticketDigest(body.closeToken)
       const view = closeTokens.get(hash)
       if (view === undefined || view.closeTokenHash !== hash) return fail('browser-view-close-unauthorized')
+      if (body.floating !== undefined) {
+        if (view.shared || view.status === 'reclaimed') return fail('floating-handoff-unauthorized')
+        const snapshot = decodeFloatingHandoff(body.floating)
+        if (!snapshot) return fail('invalid-floating-handoff')
+        view.floating = snapshot
+        view.floatingReturned = true
+      }
       closeTokens.delete(hash)
       delete view.closeTokenHash
       if (view.status === 'prepared' || view.status === 'requested' || view.status === 'redeemed'
@@ -588,6 +629,7 @@ export function createWorkbenchDocumentHandler(
 
 const BROWSER_WINDOW_RPC_ACTIONS = [
   'prepare', 'launch', 'redeem', 'opened', 'ready', 'failed', 'status', 'heartbeat', 'reclaim', 'reclaimed', 'metrics',
+  'floating-stage', 'floating-read',
 ] as const
 
 const BROWSER_SHARE_ENDPOINTS = ['start', 'stop', 'status', 'presence', 'guest-rename', 'guest-kick'] as const

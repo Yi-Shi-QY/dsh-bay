@@ -1,3 +1,4 @@
+import { installFloatingExitGuard } from '../client/floating-exit-guard.ts'
 import { createDistributionClient } from '../distribution-contract.ts'
 import { createWorkbenchPackageService } from './workbench-package-service.ts'
 import { createWorkbenchLayoutPackageService } from './layout-package-service.ts'
@@ -10,6 +11,10 @@ import { scopeSettingsSnapshot, settingsTargetWritable, DESKTOP_SETTINGS_CONTEXT
  */
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-connection/client'
+import { createFloatingWorkspaceRuntime } from '../client/floating-workspace-runtime.ts'
+import { connectFloatingUiPreferences } from '../client/floating-ui-preferences.ts'
+import { installNativeAutomaticIsolation } from '../client/native-automatic-isolation.tsx'
+import { closeWorkbenchNative } from '../client/native-sidebar-area-editor.tsx'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type {} from '@deepseek-ai/dsh-api-session-controller/client'
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
@@ -64,7 +69,7 @@ import { createWorkbenchShareController } from '../client/workbench-share-contro
 import { isWorkbenchShareGuestPage } from '../client/workbench-share-guest.ts'
 
 export const inject = [
-  'connection', 'slots', 'layout', 'sessions', 'workspaces', 'uiWorkspace', 'uiSession', 'configForms', 'modules', 'locale',
+  'connection', 'slots', 'layout', 'sessions', 'workspaces', 'uiWorkspace', 'uiSession', 'configForms', 'modules', 'locale', 'conversation',
   'remote', 'remote.session', 'remote.settings', 'remote.agentPresets', 'remote.pluginInventory', 'remote.pluginManager', 'remote.workspaceFiles', 'webTerminals', 'sidebarRight', 'sidebarRightTabs', 'shortcuts', 'resources', 'theme', 'uiConversation', 'cordisInspect',
 ] as const
 
@@ -130,8 +135,11 @@ export function applyWorkbenchCoreFoundation(
   modeController: WorkbenchModeControllerV1 = createWorkbenchModeController(),
   moduleManager?: WorkbenchModuleManagerV1,
   runtime?: WorkbenchCoreRuntimeV1,
-): { flush: () => Promise<boolean>; runtimeMetrics: { getSnapshot(): WorkbenchRuntimeMetricsSnapshotV1 } } {
+): { flush: () => Promise<boolean>; runtimeMetrics: { getSnapshot(): WorkbenchRuntimeMetricsSnapshotV1 }; floatingRuntime: ReturnType<typeof createFloatingWorkspaceRuntime> } {
   const runtimeMetrics = createWorkbenchRuntimeMetrics()
+  const floatingRuntime = createFloatingWorkspaceRuntime()
+  if (!isWorkbenchShareGuestPage()) ctx.effect(() => installNativeAutomaticIsolation(ctx, modeController), 'workbench: automatic review isolation')
+  floatingRuntime.setCleanup(closeWorkbenchNative)
   const decode = (value: unknown): WorkbenchSettingsV4 | undefined => {
     const currentSessionId = Object.values(ctx.sessions.list.getSnapshot().byId).find(row => (row.retainedBy.mainView ?? 0) > 0)?.id
     return decodeWorkbenchSettingsV4(value, {
@@ -194,6 +202,17 @@ export function applyWorkbenchCoreFoundation(
       mutate: (ops, expectedRevision) => configForm.mutate(ops, expectedRevision),
     }
   const settings = createWorkbenchSettingsScope(sourceSettings, ctx.remote, () => undefined)
+  floatingRuntime.policy = () => sourceSettings.getSnapshot().value?.interactionPolicy
+  ctx.effect(() => {
+    let pending = false
+    const migrate = () => {
+      const snapshot = sourceSettings.getSnapshot(), raw = configForm?.getSnapshot().value as { interactionPolicy?: { version?: number } } | undefined
+      if (pending || !configForm || snapshot.status !== 'ready' || !snapshot.writable || snapshot.revision === undefined || raw?.interactionPolicy?.version === 2 || !snapshot.value?.interactionPolicy) return
+      pending = true
+      void settings.patch({ operation: 'set', path: ['interactionPolicy'], value: snapshot.value.interactionPolicy, expectedRevision: snapshot.revision }).finally(() => { pending = false })
+    }
+    const off = sourceSettings.subscribe(migrate); migrate(); return off
+  }, 'workbench: interaction preference migration')
   const suppliedToolGateway = (ctx as unknown as { get?: (name: string, strict?: boolean) => unknown }).get?.('workbenchToolGateway') as WorkbenchToolGatewayManagerV1 | undefined
   const toolGateway = suppliedToolGateway ?? createWorkbenchToolGatewayManager({
     activeWorkbenchId: () => ((settings.getSnapshot().value as WorkbenchSettingsV4 | undefined)?.activeWorkbenchId ?? 'main'),
@@ -240,6 +259,8 @@ export function applyWorkbenchCoreFoundation(
   const browserController = suppliedWindowController === undefined
     ? createBrowserWindowController({
       rpc: connectionRpc,
+      floating: { snapshot: id => floatingRuntime.snapshotHandoff(id), restore: (id, value) => floatingRuntime.restoreHandoff(id, value),
+        incomplete: id => floatingRuntime.patch(id, { error: '浏览器未完成临时标签交接，已保留此端原有内容。请使用“收回到 DSH 客户端”完成交接。', expanded: true }) },
     }) : undefined
   if (browserController !== undefined) {
     ctx.effect(() => {
@@ -251,8 +272,37 @@ export function applyWorkbenchCoreFoundation(
   }
   const windowController = resolveWorkbenchWindowController(suppliedWindowController ?? browserController)
   const windowView = readWorkbenchWindowView()
+  let companionControl = true
+  if (windowView) ctx.effect(() => {
+    const revoke = (event: Event) => {
+      const state = (event as CustomEvent<{ state?: string }>).detail?.state
+      if (state === 'requested' || state === 'reclaimed') { companionControl = false; floatingRuntime.setSurface(false) }
+    }
+    window.addEventListener('workbench-browser-reclaim', revoke)
+    return () => window.removeEventListener('workbench-browser-reclaim', revoke)
+  }, 'workbench: suspend temporary interactions on control handoff')
+  floatingRuntime.hasControl = id => windowView ? companionControl && windowView.workbenchId === id : settingsTargetWritable(DESKTOP_SETTINGS_CONTEXT, id, windowController)
+  floatingRuntime.validBinding = binding => {
+    const sessions = ctx.sessions.list.getSnapshot().byId
+    const workspaces = ctx.workspaces.list.getSnapshot()
+    return !!sessions[binding.sessionId as keyof typeof sessions] && !workspaces.archivedSessionIds.includes(binding.sessionId as never)
+      && (!binding.workspaceId || workspaces.items.some(row => row.workspaceId === binding.workspaceId && row.sessionIds.includes(binding.sessionId as never)))
+  }
+  if (!shareGuest) ctx.effect(() => connectFloatingUiPreferences(floatingRuntime, windowView !== undefined), 'workbench: floating UI preferences')
   const { settings: frameSettings, directory } = createProjectNeutralFrameSettings(settings,
     windowView === undefined ? { isBrowserOwned: id => !settingsTargetWritable(DESKTOP_SETTINGS_CONTEXT, id, windowController) } : { workbenchId: windowView.workbenchId })
+  for (const operation of ['archive', 'remove'] as const) {
+    const original = directory[operation].bind(directory)
+    directory[operation] = async id => {
+      const temporary = [...floatingRuntime.instances.values()].filter(row => row.workbenchId === id && row.location === 'floating')
+      if (!await floatingRuntime.guardWorkbench(id)) return { status: 'unavailable' }
+      if (temporary.length && !globalThis.confirm('此工作台还有 ' + temporary.length + ' 个临时内页。继续后将关闭，重启无法恢复；未接入保存保护的扩展可能有未保存内容。是否继续？')) return { status: 'unavailable' }
+      const result = await original(id)
+      if (result.status === 'committed') floatingRuntime.disposeWorkbench(id)
+      return result
+    }
+  }
+  ctx.effect(() => installFloatingExitGuard(floatingRuntime), 'workbench: temporary content exit protection')
   const slotEditorCatalog = editorCatalogFor(ctx)
   const extensionRegistry = createWorkbenchExtensionRegistryV1({
     catalog: slotEditorCatalog,
@@ -274,6 +324,11 @@ export function applyWorkbenchCoreFoundation(
   })
   ctx.effect(() => () => extensionRegistry.dispose(), 'workbench: extension registry')
   const editorCatalog = extensionRegistry.catalog
+  floatingRuntime.canUseEditor = (id, editorId) => {
+    const row = directory.getSnapshot().rows.find(row => row.workbenchId === id)
+    return !!row && row.archivedAt === undefined && editorCatalog.getSnapshot().some(editor => editor.id === editorId)
+  }
+  ctx.effect(() => extensionRegistry.subscribe(floatingRuntime.invalidate), 'workbench: retained editor authorization')
   const nativePluginsPanelVisible = createNativePluginsPanelVisibility()
   const panelInfo = (ctx as unknown as {
     layout?: { panelInfo?: HostObservable<{ readonly activePanelId: MainPanelId | null }> }
@@ -382,6 +437,7 @@ export function applyWorkbenchCoreFoundation(
     },
     inject: (): WorkbenchCoreInnerPageInjection => ({
       modeController,
+      floatingRuntime,
       toolGateway,
       ...(suppliedToolUsageService === undefined ? {} : { toolUsageService: suppliedToolUsageService }),
       extensionRegistry,
@@ -445,6 +501,7 @@ export function applyWorkbenchCoreFoundation(
     }),
   }, WorkbenchCoreSettingsSection))
   return {
+    floatingRuntime,
     flush: () => directory.flushBeforeLifecycleTransition!(),
     runtimeMetrics: Object.freeze({ getSnapshot: runtimeMetrics.getSnapshot }),
   }

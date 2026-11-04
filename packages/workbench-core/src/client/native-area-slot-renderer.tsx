@@ -1,4 +1,5 @@
-import { createElement, useSyncExternalStore, type ComponentType, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
+import { createElement, useEffect, useSyncExternalStore, type ComponentType, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
+import { originalWorkbenchAutomaticEntry } from './native-automatic-isolation.tsx'
 import type { Context } from '@deepseek-ai/cordis'
 import type { SessionReference } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { SidebarRightTabInfo } from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
@@ -138,6 +139,7 @@ export function createWorkbenchNativeAreaSlotRenderer(
     onSelectAgentPreset?: (presetId: string) => void | Promise<void>
     /** Route the native Tool/Inspect action to the owning Workbench Area. */
     onInspectCall?: (callId: string) => void
+    readInspectCallId?: () => string | undefined
     /** Route DSH conversation resources into this Area instead of the official Sidebar. */
     onOpenResource?: (address: string, options?: Record<string, unknown>, source?: WorkbenchResourceSourceV1) => WorkbenchResourceRouteResult | boolean | void
     /** Route DSH Markdown HTTP(S) links into the same Area resource path. */
@@ -200,6 +202,7 @@ export function createWorkbenchNativeAreaSlotRenderer(
     placement?: Record<string, unknown>,
     sourceSessionId?: string,
   ): WorkbenchResourceRouteResult => {
+    if (!live) return 'rejected'
     if (options.onOpenResource === undefined) return 'native-fallback'
     const child = sourceSessionId === undefined
       ? undefined
@@ -281,7 +284,7 @@ export function createWorkbenchNativeAreaSlotRenderer(
       : projectedBinding(reference),
     renderArea: (_binding: unknown, props: { children: ReactNode; empty?: () => ReactNode }) => live ? props.children : props.empty?.() ?? null,
   }
-  const forbidden = new Set(['root', 'main', 'main.conversation', 'layout.frame', 'sidebar', 'conversation', 'details', 'shell.overlay'])
+  const forbidden = new Set(['root', 'main', 'main.conversation', 'layout.frame', 'sidebar', 'rightbar.session', 'conversation', 'details', 'shell.overlay'])
 
   /**
    * DSH rc5's official entry-customization plugin registers its More menu
@@ -299,11 +302,15 @@ export function createWorkbenchNativeAreaSlotRenderer(
     }
     return value
   }
+  // A native header toggle shares the rightbar owner's store. Creating that
+  // store adopts it globally, even when the toggle itself is visually hidden.
+  const ownsNativeSidebar = (entry: StoredEntry): boolean => entry.store !== undefined
+    && ctx.slots.entriesOfSlot('rightbar.session').some(owner => owner.store === entry.store)
   const entries = (slot: string, winners: boolean): readonly StoredEntry[] => {
     if (!live || forbidden.has(slot)) return []
     const values = winners ? ctx.slots.entriesOfSlot(keyOf(slot)) : ctx.slots.entries(keyOf(slot))
     const projected = values
-      .filter(entry => !isDeferredOfficialMoreRegistration(slot, entry.options))
+      .filter(entry => !ownsNativeSidebar(entry) && !isDeferredOfficialMoreRegistration(slot, entry.options))
       .map(entry => slot === 'conversation.hero.agentPreset'
         ? adaptAgentPresetEntry(entry)
         : adaptAreaEntry(entry, slot))
@@ -522,6 +529,7 @@ export function createWorkbenchNativeAreaSlotRenderer(
    * native inject faces and therefore do not enter this path.
    */
   function adaptAreaEntry(entry: StoredEntry, slot: string): StoredEntry {
+    entry = originalWorkbenchAutomaticEntry(entry)
     const isTerminal = entry.options.key === '@deepseek-ai/dsh-client-ui-sidebar-terminal'
     const isBrowser = entry.options.key === '@deepseek-ai/dsh-client-ui-sidebar-browser'
     // DSH 0.2 registers session-scoped conversation entries with `id`, while
@@ -532,6 +540,16 @@ export function createWorkbenchNativeAreaSlotRenderer(
     const isChat = slot === 'conversation.view' && (
       conversationIdentity === '@deepseek-ai/dsh-client-ui-chat' || conversationIdentity === 'chat'
     )
+    if (slot === 'conversation.view' && conversationIdentity === 'trajectory' && options.readInspectCallId) {
+      const existing = adaptedAreaEntries.get(entry)
+      if (existing) return existing
+      const Component = entry.component as ComponentType<Record<string, unknown>>
+      const value = { ...copy(entry), component: (props: Record<string, unknown>) => {
+        const callId = options.readInspectCallId?.()
+        return createElement(Component, { ...props, ...(callId ? { viewRequest: { view: 'trajectory', focus: callId }, completeViewRequest: () => {} } : {}) })
+      } }
+      adaptedAreaEntries.set(entry, value); return value
+    }
     const isDeliverables = slot === 'conversation.chat.turnTail' && conversationIdentity === '@deepseek-ai/dsh-client-ui-deliverables'
     const isPlan = slot === 'conversation.chat.turnTail' && conversationIdentity === '@deepseek-ai/dsh-client-ui-plan'
     const isPlanReview = slot === 'conversation.plan-review.actions' && conversationIdentity === '@deepseek-ai/dsh-client-ui-plan'
@@ -554,6 +572,18 @@ export function createWorkbenchNativeAreaSlotRenderer(
       const Component = entry.component as ComponentType<Record<string, unknown>>
       const value: StoredEntry = {
         ...copy(entry),
+        ...(isPlanReview ? { component: (props: Record<string, unknown>) => {
+          const review = props.review as { callId?: string; plan?: string }, requestKey = String(props.requestKey)
+          const identity = review.callId === undefined ? 'review:' + requestKey : 'call:' + review.callId
+          const open = props.openReview as (review: unknown, key: string, automatic?: boolean) => boolean
+          const useStore = props.useStore as ((selector: (state: { opened: Record<string, boolean> }) => boolean) => boolean) | undefined
+          const opened = useStore?.(state => state.opened[identity] === true) ?? false
+          useEffect(() => {
+            if (!opened && open(review, requestKey, true)) (props.actions as { markOpened?: (key: string) => void })?.markOpened?.(identity)
+          }, [identity, open, opened])
+          const useUnmounted = (selector: (value: unknown) => unknown) => selector(undefined)
+          return createElement(Component, { ...props, useSidebarMounted: useUnmounted })
+        } } : {}),
         ...(isChat ? {
           component: (props: Record<string, unknown>) => {
             const onClickCapture = (event: ReactMouseEvent<HTMLDivElement>) => {
@@ -628,12 +658,13 @@ export function createWorkbenchNativeAreaSlotRenderer(
           if (isPlanReview) {
             const originalOpenReview = original.openReview
             const openReview = typeof originalOpenReview === 'function'
-              ? (review: { readonly callId?: unknown }, requestKey: string) => {
+              ? (review: { readonly callId?: unknown; readonly plan?: string }, requestKey: string, automatic = false) => {
                 const address = review.callId === undefined
                   ? `dsh-resource://plan-review/${encodeURIComponent(upstreamSessionId)}/${encodeURIComponent(requestKey)}`
                   : `dsh-resource://plan/${encodeURIComponent(upstreamSessionId)}/${encodeURIComponent(String(review.callId))}`
-                const routed = routeResource(address, undefined, upstreamSessionId)
-                if (routed === 'handled' || routed === 'rejected') return
+                const routed = routeResource(address, { trigger: automatic ? 'automatic' : 'active', eventId: requestKey,
+                  ...(review.callId === undefined ? { params: { planReview: { markdown: review.plan ?? '', title: (review.plan ?? '').split('\n').find(line => line.trim())?.replace(/^#+\s*/u, '') ?? '计划审阅' } } } : {}) }, upstreamSessionId)
+                if (routed === 'handled' || routed === 'rejected') return routed === 'handled'
                 if (!workbenchResourceMatchesSession(address, upstreamSessionId)) return
                 return originalOpenReview(review, requestKey)
               }
@@ -866,7 +897,7 @@ export function createWorkbenchNativeAreaSlotRenderer(
       specOf: key => key === 'root' ? { kind: 'single', scope: 'root' } : key === slot ? spec : ctx.slots.spec(keyOf(key)),
       isLive: entry => live && (entry === root || authorizedEntries.has(entry)),
       storeOf: entry => {
-        if (!entry.store) return undefined
+        if (!entry.store || ownsNativeSidebar(entry)) return undefined
         const retained = stores.get(entry)
         if (retained !== undefined) return retained.instance
         const handle = entry.store as NativeStoreHandle
@@ -922,7 +953,7 @@ export function createWorkbenchNativeAreaSlotRenderer(
       if (!live || forbidden.has(slot)) return false
       const declared = ctx.slots.spec(keyOf(slot))
       if (declared === undefined) return false
-      return ctx.slots.entriesOfSlot(keyOf(slot)).some(entry => !isDeferredOfficialMoreRegistration(slot, entry.options)
+      return ctx.slots.entriesOfSlot(keyOf(slot)).some(entry => !ownsNativeSidebar(entry) && !isDeferredOfficialMoreRegistration(slot, entry.options)
         && (entry.options.key === entryKey || entry.options.id === entryKey))
     },
     hasFactorySlot(name: string, slot: string): boolean {

@@ -2,7 +2,7 @@
 
 更新时间：2026-10-22  
 规范版本：1.0  
-适用基线：Workbench Core `0.2.2-alpha.17.2`、DSH `0.2.1-rc.5`（commit `b830ec950faba0a46dda564be3e2d854afed94f1`）
+适用基线：Workbench Core `0.2.2-alpha.17.3`、DSH `0.2.1-rc.5`（commit `b830ec950faba0a46dda564be3e2d854afed94f1`）
 状态：**Core 接口与自动化合同说明；正式桌面扩展生命周期验收仍未完成**
 
 本文是开发新的 Workbench 容器内页扩展时的主规范。模板位于 `packages/workbench-core/presets/workbench-creator/skills/workbench-extension-development/templates/workbench-editor/`。若模板与本文不一致，以对应目标 Core/DSH 版本的公开导出、类型、测试和锁定文件为准；不要复制本文以外版本的 Slot 参数或 API。
@@ -98,7 +98,7 @@ my-workbench-extension/
       "kind": "extension",
       "delivery": "direct-source",
       "version": "1.0.0",
-      "coreCompatibility": "0.2.2-alpha.17.2",
+      "coreCompatibility": "0.2.2-alpha.17.3",
       "dshGeneration": "0.2.1-rc.5",
       "activation": "restart-only",
       "scope": "root",
@@ -137,7 +137,7 @@ const extension = {
   moduleId: 'example.my-extension',
   apiVersion: 1,
   editorIds: ['example.my-extension.main'],
-  coreCompatibility: '0.2.2-alpha.17.2',
+  coreCompatibility: '0.2.2-alpha.17.3',
   dshGeneration: '0.2.1-rc.5',
 }
 
@@ -443,3 +443,10 @@ Known unsupported/unverified behavior:
 inject 返回的 workbenchEditor 同时提供 portability.exportState/importState 与 distribution；Host 根据原生清单和文件校验补充 provenance。仅处理器输出的受限 JSON 可迁移，无状态内页使用明确空投影。配置恢复须精确匹配包名、版本、运行摘要、editor ID、scope 和授权，缺失项保留 Host 待恢复数据。
 
 新安装和启用后必须重启；实际注册通过才恢复配置并提交工作台。协议不会迁移 Session、模型、工作目录、凭据或整个 Profile。签名不是沙箱，静态闭包检查不是任意代码安全证明。
+# 17.3 浮动展示补充契约
+
+17.3 维持 Settings V4、布局与分发格式。所有内页共用 owner 绑定/权限/状态校验。新增可选 `presentation.floating`（false 禁止浮窗）、`owner.presentation`、稳定 `owner.runtimeIdentity`、`registerCloseGuard`。位置不是实例身份；浮窗固定到 Area 不能重建任务或原生 occurrence。
+
+生命周期隐藏必须撤销焦点，pause 仅暂停展示工作，dispose 仅释放可恢复视图；不得取消底层任务。未保存内容必须注册关闭保护。Core 的关闭、删除/归档和受控刷新/关闭流程等待该保护；操作系统强杀、崩溃及原生未提供异步拦截的退出只能提示，无法保证恢复。
+
+资源通过 owner 打开接口接入；不允许借用原生全局侧栏 owner。需要真实 Area 几何或没有完整绑定/生命周期契约的内页应声明禁止浮窗。完整示例及验收清单见模板 README 的“17.3 展示位置与实例生命周期”。

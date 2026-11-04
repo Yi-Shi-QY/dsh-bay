@@ -1,4 +1,5 @@
 import { installLayoutImportJournalRoute } from './host-layout-import-journal.ts'
+import { installFloatingUiSettings } from './host-floating-ui-settings.ts'
 import { installDistributionRoutes } from './host-distribution-route.ts'
 export * from './module-contract.ts'
 export {
@@ -115,6 +116,7 @@ export function apply(ctx: WorkbenchCoreHostContextV1): void {
     const disposeIdentity = installWorkbenchModuleIdentityRoute(routeContext as never)
     const disposeCenter = installWorkbenchModuleCenterRoutes(routeContext as never)
     const disposeLayoutJournal = installLayoutImportJournalRoute(routeContext as never)
+    const disposeFloatingUi = installFloatingUiSettings(routeContext as never)
     const disposeDistribution = installDistributionRoutes(routeContext as never)
     const disposeOffline = installWorkbenchOfflineImportRoutes(routeContext as never)
     const disposeDirectSource = installWorkbenchHostDirectSourceInstallRoute(routeContext as never)
@@ -125,6 +127,7 @@ export function apply(ctx: WorkbenchCoreHostContextV1): void {
       disposeNativeOfflineBundle?.()
       disposeDirectSource?.()
       disposeLayoutJournal?.()
+      void disposeFloatingUi?.()
       disposeDistribution?.()
       disposeOffline?.()
       disposeCenter?.()

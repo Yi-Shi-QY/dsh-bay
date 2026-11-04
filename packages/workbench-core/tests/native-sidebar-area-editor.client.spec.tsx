@@ -3,6 +3,7 @@ import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
 import { createWorkbenchOfficialAreaEditors } from '../src/client/official-area-editors.tsx'
+import { closeWorkbenchNative } from '../src/client/native-sidebar-area-editor.tsx'
 
 function snapshotStore<T>(initial: T) {
   let value = initial
@@ -134,5 +135,28 @@ describe('Workbench native Sidebar Area editor lifecycle', () => {
     // workbench:// identity would throw inside the upstream renderer.
     expect(document.querySelector('[data-workbench-native-resource-state="waiting"]')).toBeTruthy()
     expect(document.querySelector('[data-workbench-native-area="changes-review"]')).toBeNull()
+  })
+
+  it('keeps native occurrences separate for reused layout IDs and stable during relocation', async () => {
+    const fixture = nativeContext(), editors = createWorkbenchOfficialAreaEditors(fixture.context as never)
+    const tabs = new Map<string, unknown>(), snapshots = new Map<string, unknown>()
+    fixture.install({
+      options: { key: '@deepseek-ai/dsh-client-ui-sidebar-browser' },
+      component: ({ useTabInfo }) => {
+        const tab = useTabInfo().tab as unknown as { id: string; signal: AbortSignal }
+        tabs.set(tab.id, tab.signal); snapshots.set(tab.id, tab)
+        return <div data-testid={tab.id}>browser</div>
+      },
+    })
+    const one = JSON.stringify(['one', 'shared']), two = JSON.stringify(['two', 'shared'])
+    const content = (areaId: string) => <>{editors.browser({ ...owner(), instanceId: 'shared', runtimeIdentity: one, areaId, bindingGeneration: 0 } as never)}{editors.browser({ ...owner(), instanceId: 'shared', runtimeIdentity: two, areaId: 'second', bindingGeneration: 0 } as never)}</>
+    const view = render(content('floating'))
+    await waitFor(() => expect(tabs.size).toBe(2))
+    const signal = tabs.get(one) as AbortSignal, other = tabs.get(two) as AbortSignal
+    view.rerender(content('area'))
+    await waitFor(() => expect(tabs.get(one)).toBe(signal))
+    act(() => closeWorkbenchNative(one))
+    expect(signal.aborted).toBe(true); expect(other.aborted).toBe(false)
+    act(() => closeWorkbenchNative(two))
   })
 })

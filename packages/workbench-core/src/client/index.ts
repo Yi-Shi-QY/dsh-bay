@@ -71,7 +71,7 @@ export type {
 
 /** Core uses the same injected DSH faces as the frozen Workbench Frame. */
 export const inject = [
-  'connection', 'slots', 'layout', 'sessions', 'workspaces', 'uiWorkspace', 'uiSession', 'configForms', 'modules', 'locale',
+  'connection', 'slots', 'layout', 'sessions', 'workspaces', 'uiWorkspace', 'uiSession', 'configForms', 'modules', 'locale', 'conversation',
   'remote', 'remote.session', 'remote.settings', 'remote.agentPresets', 'remote.pluginInventory', 'remote.pluginManager', 'remote.workspaceFiles', 'webTerminals', 'sidebarRight', 'sidebarRightTabs', 'shortcuts', 'resources', 'theme', 'uiConversation', 'cordisInspect',
 ] as const
 
@@ -174,7 +174,8 @@ export async function apply(ctx: WorkbenchCoreClientContextV1): Promise<void> {
           stopShareLifecycle()
           stopShareGuestHeartbeat()
           stopRuntimeMetrics()
-          if (!reclaimed) reportBrowserWorkbenchClosed(ctx as never, windowView)
+          if (!reclaimed) reportBrowserWorkbenchClosed(ctx as never, windowView,
+            isWorkbenchShareGuestPage() ? undefined : () => foundation.floatingRuntime.snapshotHandoff(windowView.workbenchId))
         }
       }
       window.addEventListener('pagehide', closeView)
@@ -198,6 +199,14 @@ export async function apply(ctx: WorkbenchCoreClientContextV1): Promise<void> {
           }, AbortSignal.timeout(5_000)).catch(() => {})
           return
         }
+        if (!isWorkbenchShareGuestPage() && ctx.connection?.rpc) {
+          const result = await ctx.connection.rpc.call(WORKBENCH_WINDOW_RPC_CHANNEL, workbenchWindowRpcEndpoint('floating-read'), {
+            windowId: windowView.windowId, closeToken: windowView.closeToken,
+          }, AbortSignal.timeout(8_000))
+          if (!result.ok) throw new Error('floating-handoff-read-failed')
+          const snapshot = (result.value as { snapshot?: unknown }).snapshot
+          if (snapshot != null) foundation.floatingRuntime.restoreHandoff(windowView.workbenchId, snapshot)
+        }
         const ready = await reportBrowserWorkbenchReady(ctx as never, windowView)
         if (!ready) {
           mountBrowserWorkbenchStatusShell('DSH Host 未确认此工作台视图，页面已锁定。请返回客户端重新打开工作台。')
@@ -206,7 +215,7 @@ export async function apply(ctx: WorkbenchCoreClientContextV1): Promise<void> {
         if (!stopped) stopHeartbeat = startBrowserWorkbenchHeartbeat(ctx as never, windowView, state => {
           if (state === 'reclaimed') reclaimed = true
           window.dispatchEvent(new CustomEvent('workbench-browser-reclaim', { detail: { state } }))
-        })
+        }, isWorkbenchShareGuestPage() ? undefined : () => foundation.floatingRuntime.snapshotHandoff(windowView.workbenchId))
         if (!stopped && ctx.connection?.rpc !== undefined) {
           let pendingMetrics = false
           const reportMetrics = async () => {

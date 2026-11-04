@@ -95,7 +95,7 @@ describe('Core additive browser foundation', () => {
   })
   it('declares only the official services it reads', () => {
     expect(inject).toEqual([
-      'connection', 'slots', 'layout', 'sessions', 'workspaces', 'uiWorkspace', 'uiSession', 'configForms', 'modules', 'locale',
+      'connection', 'slots', 'layout', 'sessions', 'workspaces', 'uiWorkspace', 'uiSession', 'configForms', 'modules', 'locale', 'conversation',
       'remote', 'remote.session', 'remote.settings', 'remote.agentPresets', 'remote.pluginInventory', 'remote.pluginManager', 'remote.workspaceFiles', 'webTerminals', 'sidebarRight', 'sidebarRightTabs', 'shortcuts', 'resources', 'theme', 'uiConversation', 'cordisInspect',
     ])
   })

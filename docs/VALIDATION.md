@@ -1,4 +1,16 @@
-# Alpha.17.2 validation record
+# DSH Bay validation records
+
+## Alpha.17.3 source spacing follow-up — 2026-11-05
+
+Current private artifact: releases/alpha17.3-source-spacing-private/dsh-workbench-core-0.2.2-alpha.17.3-source-spacing-3eb91ce661f9.tgz. Revision r14 retains r13 and changes only WorkbenchFloatingWorkspace.module.css among build inputs: project names use intrinsic width with a 38% cap, instead of reserving 38% of the source row. Project, separator and conversation now remain adjacent, with ellipsis for long names.
+
+Five focused client tests and build passed. Installed Web/Edge checks covered 720px/360px floating windows, long/short labels, dark/light themes and closing after resize; no overflow, page errors or failed requests. All 277 installed package files matched the archive, and build-input hashes matched current sources. Full r13 evidence and known limitations below remain applicable; formal typecheck remains blocked by 112 existing generated/upstream errors. Package identity and spacing measurements are in releases/alpha17.3-source-spacing-private/candidate.json and spacing.json.
+
+Pre-merge verification on the complete r14 source passed on 2026-11-05: pnpm verify completed RC5 checks, 119 test files / 738 tests, and the build. The existing typecheck baseline remains a separate formal-release blocker; it is not included in pnpm verify. Local log: %TEMP%/dsh-bay-173-merge-verify.log.
+
+## Alpha.17.3 floating workspace feedback fixes — 2026-11-05
+
+See [17.3 validation record](VALIDATION-17.3.zh-CN.md). Current candidate r13: 738 tests across 119 files passed, RC5 identity/build passed; 112 existing type errors match the normalized baseline and hold the formal release gate. Fixes include close guards, source labels, header-only floating drops, valid pending bindings on pin/merge, and temporary tabs following trusted browser control handoff. The installed r13 passed 18 Electron merge rounds and both Web and Electron-to-separate-Edge return flows. The latter uses a test-controlled URL launcher; it does not exercise the default browser association. An earlier distinct intermittent blank page remains unresolved. The exact tested archive, 2026-11-05 01:49:45 +08:00 packing time, SHA-256 and evidence are recorded in releases/alpha17.3-private/candidate.json; r8 remains historical only.
 
 ## Area tab top scrollbar and wheel navigation — 2026-11-04
 

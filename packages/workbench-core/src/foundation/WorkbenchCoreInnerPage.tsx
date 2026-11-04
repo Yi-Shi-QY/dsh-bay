@@ -1,5 +1,7 @@
+import { createFloatingWorkspaceRuntime } from '../client/floating-workspace-runtime.ts'
+import { FloatingWorkspaceContext, FloatingInstanceHost } from './FloatingWorkspaceContext.tsx'
 import type { WorkbenchSettingsOpenOptionsV1 } from './settings-context.ts'
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { IconSettingsOutlineMedium } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { HostObservable, PropsRenderSlots, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
@@ -84,7 +86,7 @@ function useWorkbenchDesktopGeometry(): WorkbenchDesktopGeometryV1 {
 
 export type WorkbenchCoreInnerPageInjection =
   Pick<WorkbenchFrameProps,
-    'settings' | 'editorCatalog' | 'extensionRegistry' | 'sidebarCompatibility' | 'workbenchDirectory' | 'runtimeMetrics'
+    'settings' | 'editorCatalog' | 'extensionRegistry' | 'sidebarCompatibility' | 'workbenchDirectory' | 'runtimeMetrics' | 'floatingRuntime'
      | 'connectWorkspace' | 'createWorkspaceSession' | 'createWorkspace' | 'pickDirectory' | 'openOfficialSession' | 'windowController' | 'browserView' | 'browserWorkbenchId' | 'requestBrowserReclaim' | 'toolGateway' | 'shareController'>
   & {
     modeController: WorkbenchModeControllerV1
@@ -108,6 +110,11 @@ export type WorkbenchCoreInnerPageProps =
  * mounted and untouched until the user explicitly enters Workbench mode.
  */
 export function WorkbenchCoreInnerPage(props: WorkbenchCoreInnerPageProps): ReactNode {
+  const fallbackRuntime = useMemo(() => createFloatingWorkspaceRuntime(), [])
+  const runtime = props.floatingRuntime ?? fallbackRuntime
+  return <FloatingWorkspaceContext.Provider value={runtime}><WorkbenchCoreInnerPageView {...props} floatingRuntime={runtime} /><FloatingInstanceHost runtime={runtime} /></FloatingWorkspaceContext.Provider>
+}
+function WorkbenchCoreInnerPageView(props: WorkbenchCoreInnerPageProps): ReactNode {
   const shareGuest = isWorkbenchShareGuestPage()
   const [exitError, setExitError] = useState<string>()
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -171,6 +178,11 @@ export function WorkbenchCoreInnerPage(props: WorkbenchCoreInnerPageProps): Reac
     props.nativePluginsPanelVisible?.getSnapshot ?? (() => false),
     props.nativePluginsPanelVisible?.getSnapshot ?? (() => false),
   )
+  useLayoutEffect(() => {
+    const id = props.browserWorkbenchId ?? ('activeWorkbenchId' in directorySnapshot ? directorySnapshot.activeWorkbenchId : undefined)
+    const enabled = mode.mode === 'workbench' && !shareGuest && (!props.browserWorkbenchId || props.floatingRuntime?.hasControl?.(props.browserWorkbenchId) !== false)
+    props.floatingRuntime?.setSurface(enabled, enabled && !nativePluginsPanelVisible && surfaceView === 'workbench' ? id : undefined)
+  }, [props.floatingRuntime, props.browserWorkbenchId, mode.mode, surfaceView, directorySnapshot, shareGuest, nativePluginsPanelVisible])
   // A browser Workbench view is its own page surface. It must not inherit the
   // Electron titlebar/sidebar offsets from the DSH desktop document.
   const measuredDesktopGeometry = useWorkbenchDesktopGeometry()
@@ -187,7 +199,7 @@ export function WorkbenchCoreInnerPage(props: WorkbenchCoreInnerPageProps): Reac
     if (mode.mode === 'workbench' || mode.mode === 'entering') {
       cancelScheduledWorkbenchNativeDispose()
     } else {
-      scheduleDisposeAllWorkbenchNativeOccurrences()
+      scheduleDisposeAllWorkbenchNativeOccurrences(new Set(props.floatingRuntime?.instances.keys()))
     }
   }, [mode.mode])
   useEffect(() => { if (mode.mode !== 'workbench') closeSettings() }, [mode.mode, closeSettings])

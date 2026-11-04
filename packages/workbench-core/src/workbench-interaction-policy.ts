@@ -1,5 +1,6 @@
 /** User-controlled routing policy for resources emitted by a DSH Conversation. */
 export type WorkbenchConversationResourcePlacementV1 =
+  | 'floating'
   | 'activate-or-add'
   | 'new-tab'
   | 'replace-current'
@@ -12,25 +13,27 @@ export interface WorkbenchConversationResourceClickPolicyV1 {
 }
 
 export interface WorkbenchConversationInteractionPolicyV1 {
+  readonly version?: 2
   readonly conversationResources: Readonly<Record<string, WorkbenchConversationResourceClickPolicyV1>>
   readonly unknownResource: 'module-default' | 'official-sidebar' | 'disabled'
 }
 
 export const DEFAULT_WORKBENCH_CONVERSATION_INTERACTION_POLICY: WorkbenchConversationInteractionPolicyV1 = Object.freeze({
+  version: 2,
   conversationResources: Object.freeze({
-    file: Object.freeze({ enabled: true, placement: 'activate-or-add' }),
-    'changes-review': Object.freeze({ enabled: true, placement: 'activate-or-add' }),
-    plan: Object.freeze({ enabled: true, placement: 'activate-or-add' }),
-    'subagent-chat': Object.freeze({ enabled: true, placement: 'activate-or-add' }),
-    browser: Object.freeze({ enabled: true, placement: 'activate-or-add' }),
-    'schedule-task': Object.freeze({ enabled: true, placement: 'activate-or-add' }),
-    'trajectory-inspect': Object.freeze({ enabled: true, placement: 'activate-or-add' }),
+    file: Object.freeze({ enabled: true, placement: 'floating' }),
+    'changes-review': Object.freeze({ enabled: true, placement: 'floating' }),
+    plan: Object.freeze({ enabled: true, placement: 'floating' }),
+    'subagent-chat': Object.freeze({ enabled: true, placement: 'floating' }),
+    browser: Object.freeze({ enabled: true, placement: 'floating' }),
+    'schedule-task': Object.freeze({ enabled: true, placement: 'floating' }),
+    'trajectory-inspect': Object.freeze({ enabled: true, placement: 'floating' }),
   }),
   unknownResource: 'module-default',
 })
 
 const placements = new Set<WorkbenchConversationResourcePlacementV1>([
-  'activate-or-add', 'new-tab', 'replace-current', 'official-sidebar', 'disabled',
+  'floating', 'activate-or-add', 'new-tab', 'replace-current', 'official-sidebar', 'disabled',
 ])
 
 export function normalizeWorkbenchConversationInteractionPolicy(value: unknown): WorkbenchConversationInteractionPolicyV1 {
@@ -50,6 +53,7 @@ export function normalizeWorkbenchConversationInteractionPolicy(value: unknown):
       ? candidate.unknownResource
       : undefined
     return {
+      version: 2,
       conversationResources: { ...DEFAULT_WORKBENCH_CONVERSATION_INTERACTION_POLICY.conversationResources, ...result },
       unknownResource: unknownResource ?? DEFAULT_WORKBENCH_CONVERSATION_INTERACTION_POLICY.unknownResource,
     }
@@ -80,14 +84,21 @@ export function conversationResourceActionFor(
     // of a string silently bypass the user's unknown-resource policy.
     if (normalized.unknownResource === 'module-default') return { handled: true }
     if (normalized.unknownResource === 'disabled') return { handled: true, options: { ignoreResource: true } }
-    return { handled: false }
+    return { handled: true, options: { floating: true } }
   }
   // `disabled` is a deliberate no-op and must stop the native callback from
   // opening the same resource in DSH's global Sidebar. `official-sidebar`
-  // remains the explicit escape hatch to the upstream owner.
+  // is legacy input only and now resolves to the floating host.
   if (!configured.enabled || configured.placement === 'disabled') return { handled: true, options: { ignoreResource: true } }
-  if (configured.placement === 'official-sidebar') return { handled: false }
+  if (configured.placement === 'official-sidebar' || configured.placement === 'floating') return { handled: true, options: { floating: true } }
   if (configured.placement === 'new-tab') return { handled: true, options: { revealIfOpened: false } }
   if (configured.placement === 'replace-current') return { handled: true, options: { replaceTab: true } }
   return { handled: true }
+}
+
+/** One-time migration; normalization alone never resets an explicit current preference. */
+export function migrateWorkbenchInteractionPolicy(value: unknown): WorkbenchConversationInteractionPolicyV1 {
+  const policy = normalizeWorkbenchConversationInteractionPolicy(value)
+  if (value && typeof value === 'object' && 'version' in value && value.version === 2) return policy
+  return { version: 2, conversationResources: Object.fromEntries(Object.entries(policy.conversationResources).map(([key, row]) => [key, { ...row, placement: !row.enabled || row.placement === 'disabled' ? 'disabled' : 'floating' }])), unknownResource: policy.unknownResource === 'disabled' ? 'disabled' : 'module-default' }
 }
