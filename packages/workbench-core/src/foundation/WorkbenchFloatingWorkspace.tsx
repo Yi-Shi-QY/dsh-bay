@@ -52,7 +52,7 @@ export function FloatingWorkspaceToolbarButton({ runtime, workbenchId, canvasRef
     onContextMenu={event => { event.preventDefault(); if (!disabled) setMenu(true) }}
     onKeyDown={event => { if (event.key === 'ContextMenu' || event.shiftKey && event.key === 'F10' || event.altKey && event.key === 'ArrowDown') { event.preventDefault(); setMenu(true) } }}><FloatingWorkspaceIcon size={22} /></button>
     {menu ? <WorkbenchFloatingMenu kind="editor" ownerId={'floating-toolbar:' + workbenchId} anchorRef={anchor} surfaceRef={surface} side="bottom" align="end" className={css.toolbarMenu} label="浮动工作区">
-      <button type="button" className={css.menuClose} aria-label="关闭浮动工作区菜单" title="关闭菜单" onClick={() => setMenu(false)}><IconCloseOutlineMedium size={14} /></button>
+      <div className={css.menuHeader}><strong>浮动工作区</strong><button type="button" className={css.menuClose} aria-label="关闭浮动工作区菜单" title="关闭菜单" onClick={() => setMenu(false)}><IconCloseOutlineMedium size={14} /></button></div>
       <button role="menuitem" onClick={() => { runtime.patch(workbenchId, { expanded: true }); setMenu(false) }}>打开浮动工作区</button>
       <button role="menuitem" onClick={() => { const width = canvasRef.current?.clientWidth || 900, height = canvasRef.current?.clientHeight || 600; runtime.patch(workbenchId, { rect: defaultFloatingRect(width, height), launcher: { x: Math.max(0, width - 54), y: Math.max(0, height - 54) }, maximized: false, expanded: true }, true); setMenu(false) }}>重置位置</button>
     </WorkbenchFloatingMenu> : null}</>
@@ -112,6 +112,7 @@ export function WorkbenchFloatingWorkspace(props: Props) {
   }
   const sourceMarker = markerFor(binding ?? (sessionId ? { sessionId } : undefined))
   const launcherMarker = markerFor(props.selectedAreaBinding)
+  const menuTitle = menu === 'add' ? '添加内页' : menu === 'window' ? '浮动工作区' : menu === 'pin' ? '放入区域' : menu === 'tabs' ? '临时内页' : menu === 'binding' ? '绑定来源对话' : undefined
   const notice = (error: string) => runtime.patch(workbenchId, { error })
   const pinReason = (tab: TabDocument, areaId: string, edge: DropEdge) => {
     if (runtime.hasControl?.(workbenchId) === false) return '此页面已失去工作台控制权'
@@ -387,7 +388,7 @@ export function WorkbenchFloatingWorkspace(props: Props) {
       {space.error ? <div className={css.error} role="status">{space.error}<button type="button" title="关闭提示" aria-label="关闭提示" onClick={() => runtime.patch(workbenchId, { error: undefined })}>关闭提示</button></div> : null}
       <div className={css.content}>{rows.map(renderRow)}{!rows.length ? <div className={css.empty}><FloatingWorkspaceIcon size={44} /><p>临时查看，随时放入区域</p><button onClick={() => setMenu('add')}><IconPlusOutlineMedium size={16} /> 添加内页</button><small>临时标签仅在本次运行中保留</small></div> : null}</div>
       {menu ? <div className={css.menu} role={menu === 'binding' ? 'dialog' : 'menu'} aria-label="浮动工作区操作" data-floating-menu-view={menu}>
-        <button type="button" className={css.menuClose} aria-label="关闭浮窗菜单" title="关闭菜单" onClick={() => setMenu(undefined)}><IconCloseOutlineMedium size={14} /></button>
+        <div className={css.menuHeader}><strong>{menuTitle}</strong><button type="button" className={css.menuClose} aria-label="关闭浮窗菜单" title="关闭菜单" onClick={() => setMenu(undefined)}><IconCloseOutlineMedium size={14} /></button></div>
         {menu === 'add' ? <WorkbenchEditorPicker editors={chooser} mode="add" unavailable={unavailable} onSelect={editor => { setMenu(undefined); open(editor, runtime.focusedWorkbenchId === workbenchId ? runtime.focusedBinding : undefined) }} /> : null}
         {menu === 'window' ? <><button disabled={!active || active.busy} onClick={() => setMenu('pin')}>放入区域</button><button onClick={() => setMenu('tabs')}>全部临时内页</button><button disabled={!active} onClick={() => setMenu('binding')}>选择来源对话</button><button onClick={() => { runtime.patch(workbenchId, { rect: defaultFloatingRect(size.width, size.height), launcher: { x: size.width - 54, y: size.height - 54 }, maximized: false }, true); setMenu(undefined) }}>重置位置</button></> : null}
         {menu === 'pin' && active ? groupsOf(props.layout.root).map((group, i) => <div key={group.id}><strong>区域 {i + 1}</strong>{(['center', 'left', 'right', 'top', 'bottom'] as const).map((edge, j) => { const reason = pinReason(active.tab, group.id, edge); return <button key={edge} disabled={active.busy || !!reason} title={reason} onClick={() => void pin(active.tab.id, group.id, edge)}>{['加入标签', '左侧分屏', '右侧分屏', '上方分屏', '下方分屏'][j]}</button> })}</div>) : null}

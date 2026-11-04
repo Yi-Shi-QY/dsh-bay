@@ -243,8 +243,10 @@
 
 .launcher {
   position: absolute;
+  box-sizing: border-box;
   width: 38px;
   height: 38px;
+  padding: 0;
   border: 1px solid var(--dsw-alias-border-l2, #ccc);
   border-radius: 11px;
   background: var(--dsw-alias-bg-base, Canvas);
@@ -288,7 +290,7 @@
   min-width: min(220px, calc(100% - 18px));
   max-height: calc(100% - 52px);
   box-sizing: border-box;
-  padding: 34px 6px 6px;
+  padding: 6px;
   overflow: auto;
   border: 1px solid var(--dsw-alias-border-l2, #ccc);
   border-radius: 8px;
@@ -297,8 +299,30 @@
   box-shadow: var(--dsw-shadow-lv2, 0 8px 24px #0003);
 }
 
+.menuHeader {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex: 0 0 24px;
+  min-width: 0;
+  min-height: 24px;
+  padding: 0 1px 2px 8px;
+  color: var(--dsw-alias-label-secondary, #777);
+  font-size: 11px;
+  line-height: 1;
+}
+
+.menuHeader > strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
 .menu > button:not(.menuClose),
-.menu > div > button {
+.menu > div:not(.menuHeader) > button {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -318,29 +342,29 @@
 
 .menu > button:not(.menuClose):hover:not(:disabled),
 .menu > button:not(.menuClose):focus-visible,
-.menu > div > button:hover:not(:disabled),
-.menu > div > button:focus-visible {
+.menu > div:not(.menuHeader) > button:hover:not(:disabled),
+.menu > div:not(.menuHeader) > button:focus-visible {
   background: var(--dsw-alias-interactive-bg-hover, color-mix(in srgb, currentColor 8%, transparent));
 }
 
 .menu > button:not(.menuClose):focus-visible,
-.menu > div > button:focus-visible {
+.menu > div:not(.menuHeader) > button:focus-visible {
   outline: 2px solid var(--dsw-alias-state-business-primary, #4d6bfe);
   outline-offset: -2px;
 }
 
 .menu > button:not(.menuClose):disabled,
-.menu > div > button:disabled {
+.menu > div:not(.menuHeader) > button:disabled {
   cursor: not-allowed;
   opacity: .45;
 }
 
-.menu > div {
+.menu > div:not(.menuHeader) {
   display: grid;
   gap: 2px;
 }
 
-.menu > div > strong,
+.menu > div:not(.menuHeader) > strong,
 .menu > p {
   display: block;
   margin: 0;
@@ -357,10 +381,9 @@
 }
 
 .menu .menuClose {
-  position: absolute;
-  z-index: 1;
-  top: 5px;
-  right: 6px;
+  position: static;
+  z-index: auto;
+  flex: 0 0 24px;
   width: 24px;
   height: 24px;
   padding: 0;
@@ -503,7 +526,7 @@
 .toolbarMenu {
   min-width: 180px;
   width: min(220px, calc(100vw - 24px));
-  padding: 34px 5px 5px;
+  padding: 6px;
   border: 1px solid var(--dsw-alias-border-l2, #ccc);
   border-radius: 8px;
   background: var(--dsw-alias-bg-layer-2, Canvas);
@@ -511,7 +534,7 @@
   box-shadow: var(--dsw-shadow-lv2, 0 8px 24px #0003);
 }
 
-.toolbarMenu button {
+.toolbarMenu > button {
   display: flex;
   align-items: center;
   width: 100%;
@@ -527,21 +550,20 @@
   cursor: pointer;
 }
 
-.toolbarMenu button:hover,
-.toolbarMenu button:focus-visible {
+.toolbarMenu > button:hover,
+.toolbarMenu > button:focus-visible {
   background: var(--dsw-alias-interactive-bg-hover, color-mix(in srgb, currentColor 8%, transparent));
 }
 
-.toolbarMenu button:focus-visible {
+.toolbarMenu > button:focus-visible {
   outline: 2px solid var(--dsw-alias-state-business-primary, #4d6bfe);
   outline-offset: -2px;
 }
 
 .toolbarMenu .menuClose {
-  position: absolute;
-  z-index: 1;
-  top: 5px;
-  right: 6px;
+  position: static;
+  z-index: auto;
+  flex: 0 0 24px;
   display: inline-flex;
   width: 24px;
   min-width: 24px;
