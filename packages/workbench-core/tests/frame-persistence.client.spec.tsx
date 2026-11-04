@@ -22,6 +22,7 @@ function setup(
   windowController?: WorkbenchWindowControllerV1,
   desktopControls?: { openSettings: () => void },
   browserContext?: {
+    onImportWorkbench?: () => void
     browserView?: boolean
     browserWorkbenchId?: string
     requestBrowserReclaim?: (workbenchId: string) => Promise<boolean>
@@ -198,6 +199,110 @@ function setup(
 async function advance(ms: number) { await act(async () => { await vi.advanceTimersByTimeAsync(ms) }) }
 
 describe('Frame layout persistence', () => {
+  it('scrolls overflowing Area tabs with either wheel axis without selecting a tab', () => {
+    const h = setup(async () => ({ status: 'committed', revision: 2 }), undefined, ['前台内页', '后台内页'])
+    const tabs = h.view.getByRole('tablist', { name: '区域内页' })
+    Object.defineProperties(tabs, { clientWidth: { value: 200 }, scrollWidth: { value: 800 } })
+    const wheel = (target: Element, init: WheelEventInit) => {
+      const event = new WheelEvent('wheel', { bubbles: true, cancelable: true, ...init })
+      fireEvent(target, event)
+      return event
+    }
+    expect(wheel(h.view.getByRole('tab', { name: /当前内页：前台内页/ }), { deltaY: 80 }).defaultPrevented).toBe(true)
+    expect(tabs.scrollLeft).toBe(80)
+    wheel(h.view.getByRole('button', { name: '添加内页标签' }), { deltaY: -20 })
+    expect(tabs.scrollLeft).toBe(60)
+    wheel(tabs, { deltaX: 35, deltaY: 4 })
+    expect(tabs.scrollLeft).toBe(95)
+    wheel(tabs, { deltaY: 2, deltaMode: 1 })
+    expect(tabs.scrollLeft).toBe(127)
+    wheel(tabs, { deltaY: 1, deltaMode: 2 })
+    expect(tabs.scrollLeft).toBe(327)
+    wheel(tabs, { deltaY: 900 })
+    expect(tabs.scrollLeft).toBe(600)
+    wheel(tabs, { deltaY: -900 })
+    expect(tabs.scrollLeft).toBe(0)
+    expect(h.view.getByRole('tab', { name: /当前内页：前台内页/ }).getAttribute('aria-selected')).toBe('true')
+    expect(h.settings.patch).not.toHaveBeenCalled()
+  })
+
+  it('preserves modified wheel input and leaves non-overflowing tabs and Area content alone', () => {
+    const h = setup(async () => ({ status: 'committed', revision: 2 }))
+    const tabs = h.view.getByRole('tablist', { name: '区域内页' })
+    Object.defineProperties(tabs, { clientWidth: { value: 200 }, scrollWidth: { value: 800, configurable: true } })
+    for (const modifier of ['ctrlKey', 'metaKey', 'altKey']) {
+      const event = new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 80, [modifier]: true })
+      fireEvent(tabs, event)
+      expect(event.defaultPrevented).toBe(false)
+      expect(tabs.scrollLeft).toBe(0)
+    }
+    const contentWheel = new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 80 })
+    fireEvent(h.view.getByText('测试内容'), contentWheel)
+    expect(contentWheel.defaultPrevented).toBe(false)
+    expect(tabs.scrollLeft).toBe(0)
+    Object.defineProperty(tabs, 'scrollWidth', { value: 200 })
+    const noOverflowWheel = new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 80 })
+    fireEvent(tabs, noOverflowWheel)
+    expect(noOverflowWheel.defaultPrevented).toBe(false)
+    expect(tabs.scrollLeft).toBe(0)
+  })
+
+  it('detaches the current tab through the narrow Area menu without copying it', async () => {
+    const h = setup(async () => ({ status: 'committed', revision: 2 }), undefined, ['拆出内页', '保留内页'])
+    fireEvent.click(h.view.getByRole('button', { name: '区域操作' }))
+    fireEvent.click(h.view.getByRole('menuitem', { name: '拆出当前内页' }))
+    expect(h.view.container.querySelectorAll('[data-workbench-group]')).toHaveLength(2)
+    expect(h.view.container.querySelectorAll('[data-workbench-area-tab]')).toHaveLength(2)
+    expect(h.view.container.querySelectorAll('[data-workbench-area-tab="test-page-1"]')).toHaveLength(1)
+  })
+
+  it('keeps adding and switching pages reachable through the narrow Area menu', async () => {
+    const h = setup(async () => ({ status: 'committed', revision: 2 }), undefined, ['前台内页', '后台内页'])
+    fireEvent.click(h.view.getByRole('button', { name: '区域操作' }))
+    fireEvent.click(h.view.getByRole('menuitem', { name: '添加内页' }))
+    expect(h.view.getByRole('searchbox', { name: '搜索内页' })).toBeDefined()
+    expect(h.view.getByRole('button', { name: '区域操作' }).getAttribute('aria-expanded')).toBe('true')
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(document.activeElement).toBe(h.view.getByRole('button', { name: '区域操作' }))
+    fireEvent.click(h.view.getByRole('button', { name: '区域操作' }))
+    fireEvent.click(h.view.getByRole('menuitem', { name: '查看全部内页' }))
+    fireEvent.click(h.view.getByRole('option', { name: /后台内页/ }))
+    expect(h.view.getByRole('tab', { name: /当前内页：后台内页/ }).getAttribute('aria-selected')).toBe('true')
+    fireEvent.click(h.view.getByRole('button', { name: '区域操作' }))
+    fireEvent.click(h.view.getByRole('menuitem', { name: '关闭当前视图' }))
+    expect(h.view.queryByRole('tab', { name: /后台内页/ })).toBeNull()
+    expect(h.view.getByRole('tab', { name: /当前内页：前台内页/ })).toBeDefined()
+  })
+
+  it('routes rail import independently of desktop geometry', async () => {
+    const onImportWorkbench = vi.fn()
+    const h = setup(async () => ({ status: 'committed', revision: 2 }), undefined, undefined, undefined, undefined, { onImportWorkbench })
+    fireEvent.click(h.view.getByRole('button', { name: '新建工作台', exact: true }))
+    expect(h.view.queryByText('区域划分')).toBeNull()
+    fireEvent.click(h.view.getByRole('menuitem', { name: '导入工作台包' }))
+    expect(onImportWorkbench).toHaveBeenCalledOnce()
+    expect(h.view.queryByRole('menu')).toBeNull()
+    expect(h.view.queryByRole('dialog')).toBeNull()
+    expect(h.view.getByRole('tab', { name: 'Workbench A' }).getAttribute('aria-selected')).toBe('true')
+  })
+
+  it('opens compact layout icons from the rail, then names the empty workbench', async () => {
+    const h = setup(async () => ({ status: 'committed', revision: 2 }))
+    fireEvent.click(h.view.getByRole('button', { name: '新建工作台', exact: true }))
+    expect(h.view.queryByRole('dialog')).toBeNull()
+    expect(h.view.queryByText('从已保存布局新建')).toBeNull()
+    expect(h.view.getAllByRole('menuitem')).toHaveLength(9)
+    fireEvent.click(h.view.getByRole('menuitem', { name: '四宫格，4 个区域' }))
+    await h.view.findByRole('dialog', { name: '创建工作台' })
+    expect(h.view.getByText('四宫格')).toBeDefined()
+    expect(h.view.queryByRole('combobox')).toBeNull()
+    expect(h.view.queryByRole('button', { name: '下一步' })).toBeNull()
+    fireEvent.change(h.view.getByLabelText('名称'), { target: { value: '区域创建' } })
+    fireEvent.click(h.view.getByRole('button', { name: '取消', exact: true }))
+    expect(h.view.queryByRole('dialog')).toBeNull()
+    expect(h.view.getByRole('tab', { name: 'Workbench A' }).getAttribute('aria-selected')).toBe('true')
+  })
+
   it('locks split resizing across the Workbench while preserving collapse and content actions', async () => {
     const h = setup(async () => ({ status: 'committed', revision: 2 }), undefined, ['区域 A'],
       undefined, undefined, undefined, undefined, true)

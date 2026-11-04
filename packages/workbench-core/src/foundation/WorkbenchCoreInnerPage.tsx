@@ -1,5 +1,5 @@
 import type { WorkbenchSettingsOpenOptionsV1 } from './settings-context.ts'
-import { useCallback, useEffect, useLayoutEffect, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { IconSettingsOutlineMedium } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { HostObservable, PropsRenderSlots, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
@@ -8,6 +8,7 @@ import type { WorkbenchModeControllerV1 } from '../mode-controller.ts'
 import type { WorkbenchSettingsV4 } from './persistence.ts'
 import type { WorkbenchFrameProps } from './WorkbenchFrame.tsx'
 import { WorkbenchFrame } from './WorkbenchFrame.tsx'
+import { WorkbenchHomeCenter } from './WorkbenchHomeCenter.tsx'
 import {
   cancelScheduledWorkbenchNativeDispose,
   scheduleDisposeAllWorkbenchNativeOccurrences,
@@ -31,6 +32,7 @@ interface WorkbenchDesktopGeometryV1 {
 }
 
 const EMPTY_DESKTOP_GEOMETRY: WorkbenchDesktopGeometryV1 = { desktop: false, top: 0, left: 0 }
+const EMPTY_WORKBENCH_DIRECTORY_SNAPSHOT = { openWorkbenchIds: [], rows: [], invalidRows: [], templates: [] } as const
 
 /**
  * Read the official shell geometry without depending on its hashed class names
@@ -110,7 +112,16 @@ export function WorkbenchCoreInnerPage(props: WorkbenchCoreInnerPageProps): Reac
   const [exitError, setExitError] = useState<string>()
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsOptions, setSettingsOptions] = useState<WorkbenchSettingsOpenOptionsV1>()
-  const openSettings = useCallback((options?: WorkbenchSettingsOpenOptionsV1) => { setSettingsOptions(options); setSettingsOpen(true) }, [])
+  const [homeOptions, setHomeOptions] = useState<WorkbenchSettingsOpenOptionsV1>()
+  const homeNavigation = useRef<(options?: WorkbenchSettingsOpenOptionsV1) => void>()
+  const homeLeave = useRef<() => Promise<boolean>>()
+  const registerHomeNavigation = useCallback((navigate: (options?: WorkbenchSettingsOpenOptionsV1) => void) => {
+    homeNavigation.current = navigate; return () => { homeNavigation.current = undefined }
+  }, [])
+  const registerHomeLeave = useCallback((guard: () => Promise<boolean>) => {
+    homeLeave.current = guard; return () => { homeLeave.current = undefined }
+  }, [])
+  const beforeHomeLeave = useCallback(() => homeLeave.current?.() ?? Promise.resolve(true), [])
   const closeSettings = useCallback(() => setSettingsOpen(false), [])
   const mode = useSyncExternalStore(
     props.modeController.subscribe,
@@ -127,6 +138,34 @@ export function WorkbenchCoreInnerPage(props: WorkbenchCoreInnerPageProps): Reac
     props.workbenchSettings.getSnapshot,
     props.workbenchSettings.getSnapshot,
   )
+  const directory = props.workbenchDirectory
+  const directorySnapshot = useSyncExternalStore(
+    directory?.subscribe ?? (() => () => {}),
+    directory?.getSnapshot ?? (() => EMPTY_WORKBENCH_DIRECTORY_SNAPSHOT),
+    directory?.getSnapshot ?? (() => EMPTY_WORKBENCH_DIRECTORY_SNAPSHOT),
+  )
+  const [surfaceView, setSurfaceView] = useState<'home' | 'workbench'>(() => (
+    props.browserView === true || directory === undefined || directorySnapshot.openWorkbenchIds.length > 0 ? 'workbench' : 'home'
+  ))
+  const openSettings = useCallback((options?: WorkbenchSettingsOpenOptionsV1) => {
+    if (props.browserView !== true && directory && (options?.section === 'workbenches' || options?.section === 'sharing')) {
+      void (async () => {
+        if (!(await directory.flushBeforeLifecycleTransition?.() ?? true)) return
+        if (homeNavigation.current) homeNavigation.current(options)
+        else setHomeOptions(options)
+        setSurfaceView('home'); setSettingsOpen(false)
+      })()
+      return
+    }
+    setSettingsOptions(options); setSettingsOpen(true)
+  }, [props.browserView, directory])
+  useEffect(() => {
+    if (props.browserView === true) {
+      setSurfaceView('workbench')
+      return
+    }
+    if (directory !== undefined && directorySnapshot.openWorkbenchIds.length === 0) setSurfaceView('home')
+  }, [directory, directorySnapshot.openWorkbenchIds.length, props.browserView])
   const nativePluginsPanelVisible = useSyncExternalStore(
     props.nativePluginsPanelVisible?.subscribe ?? (() => () => {}),
     props.nativePluginsPanelVisible?.getSnapshot ?? (() => false),
@@ -197,6 +236,33 @@ export function WorkbenchCoreInnerPage(props: WorkbenchCoreInnerPageProps): Reac
     selectSession: () => {},
     projectNeutral: true,
     conversationResourcePolicy: settingsSnapshot.value?.interactionPolicy,
+    surfaceView: props.browserView === true ? 'workbench' : surfaceView,
+    onShowHome: props.browserView === true ? undefined : () => {
+      if (homeNavigation.current) homeNavigation.current()
+      else setHomeOptions(undefined)
+      setSurfaceView('home')
+    },
+    onShowWorkbench: props.browserView === true ? undefined : () => setSurfaceView('workbench'),
+    onImportWorkbench: props.browserView === true || shareGuest ? undefined : () => openSettings({ section: 'sharing', shareMode: 'import' }),
+    onManageEditors: shareGuest ? undefined : () => openSettings({ section: 'pages' }),
+    beforeHomeLeave,
+    renderHome: directory === undefined || props.browserView === true ? null : <WorkbenchHomeCenter
+      {...props.settingsPage}
+      directory={directory}
+      {...(homeOptions ? { openOptions: homeOptions } : {})}
+      workbenchSettings={props.workbenchSettings}
+      useSessions={props.useSessions} useWorkspaces={props.useWorkspaces}
+      registerNavigation={registerHomeNavigation}
+      registerBeforeLeave={registerHomeLeave}
+      onOpenWorkbench={async workbenchId => {
+        const result = await directory.openAndSelect(workbenchId)
+        if (result.status !== 'committed') throw new Error('无法打开工作台')
+        setSurfaceView('workbench')
+      }}
+      onCreated={() => {
+        setSurfaceView('workbench')
+      }}
+    />,
     embeddedDesktop: desktopGeometry.desktop,
     ...((desktopGeometry.desktop || (props.browserView === true && !shareGuest)) ? { desktopControls: {
       openSettings,
@@ -213,7 +279,7 @@ export function WorkbenchCoreInnerPage(props: WorkbenchCoreInnerPageProps): Reac
     <div {...(mode.mode === 'exiting' ? { inert: '' } : {})} style={{ position: 'absolute', inset: 0 }}>
       <WorkbenchFrame {...frameProps} />
     </div>
-    {catalog.length === 0 ? <section data-workbench-core-empty-state style={{
+    {catalog.length === 0 && surfaceView === 'workbench' ? <section data-workbench-core-empty-state style={{
       position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', pointerEvents: 'none',
     }}>
       <div style={{ width: 'min(540px, calc(100% - 48px))', padding: 28, border: '1px solid currentColor', borderRadius: 8, background: 'var(--dsw-alias-bg-layer-1, Canvas)', pointerEvents: 'auto' }}>
@@ -224,6 +290,11 @@ export function WorkbenchCoreInnerPage(props: WorkbenchCoreInnerPageProps): Reac
     </section> : null}
     {settingsOpen && mode.mode === 'workbench' ? <WorkbenchCoreSettingsDialog
       {...props.settingsPage} {...(settingsOptions ? { openOptions: settingsOptions } : {})} workbenchSettings={props.workbenchSettings} onClose={closeSettings}
+      onOpenWorkbench={async id => {
+        const result=await directory?.openAndSelect(id)
+        if(result?.status!=='committed')throw new Error('无法打开工作台，请检查保存状态。')
+        setSurfaceView('workbench');closeSettings()
+      }}
       useSessions={props.useSessions} useWorkspaces={props.useWorkspaces}
     /> : null}
     {mode.mode === 'exiting' ? <div role="status" style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center' }}>正在保存并退出工作台模式…</div> : null}

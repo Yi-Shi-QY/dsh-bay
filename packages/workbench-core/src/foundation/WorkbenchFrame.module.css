@@ -573,104 +573,6 @@
   flex: 0 0 auto;
 }
 
-.createWorkbenchMenu {
-  box-sizing: border-box;
-  position: absolute;
-  z-index: 110;
-  top: calc(100% + 4px);
-  right: auto;
-  left: 0;
-  width: min(240px, calc(100vw - 24px));
-  max-height: min(420px, calc(100vh - 58px));
-  padding: 5px;
-  overflow-y: auto;
-  border: 1px solid var(--dsw-alias-border-l2);
-  border-radius: 7px;
-  background: var(--dsw-alias-bg-layer-1);
-  box-shadow: 0 12px 32px rgb(0 0 0 / 18%);
-}
-
-.createWorkbenchMenu > button {
-  display: grid;
-  width: 100%;
-  min-height: 46px;
-  grid-template-columns: 28px minmax(0, 1fr);
-  align-items: center;
-  gap: 8px;
-  padding: 6px 8px;
-  border: 0;
-  border-radius: 5px;
-  color: var(--dsw-alias-label-primary);
-  background: transparent;
-  cursor: pointer;
-  text-align: left;
-}
-
-.createWorkbenchMenu > button:hover,
-.createWorkbenchMenu > button:focus-visible {
-  outline: none;
-  background: var(--dsw-alias-interactive-bg-hover);
-}
-
-.createWorkbenchMenu > button > span:last-child {
-  display: grid;
-  min-width: 0;
-  gap: 2px;
-}
-
-.createWorkbenchMenu strong,
-.createWorkbenchMenu small {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.createWorkbenchMenu strong {
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.createWorkbenchMenu small,
-.createMenuEmpty,
-.createMenuSection {
-  color: var(--dsw-alias-label-secondary);
-  font-size: 10px;
-}
-
-.createMenuIcon,
-.createMenuTemplateIcon {
-  display: grid;
-  width: 25px;
-  height: 25px;
-  place-items: center;
-  border: 1px solid var(--dsw-alias-border-l2);
-  border-radius: 5px;
-  color: var(--dsw-alias-label-secondary);
-  font-size: 17px;
-}
-
-.createMenuTemplateIcon svg {
-  width: 14px;
-  height: 14px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.6;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.createMenuSection {
-  margin: 4px 5px 2px;
-  padding-top: 6px;
-  border-top: 1px solid var(--dsw-alias-border-l2);
-  font-weight: 600;
-}
-
-.createMenuEmpty {
-  margin: 0;
-  padding: 9px 8px 10px 41px;
-}
-
 .createWorkbenchButton:hover:not(:disabled) {
   color: var(--dsw-alias-label-primary);
   background: var(--dsw-alias-interactive-bg-hover);
@@ -6836,7 +6738,45 @@
   overflow-y: hidden;
   scrollbar-width: thin;
   overscroll-behavior-inline: contain;
-  scroll-behavior: smooth;
+  scroll-behavior: auto;
+}
+
+/* Put the native horizontal scrollbar above the labels. Counter-flip each
+   tab to keep its content upright; collapsed rails retain their own layout. */
+.group:not([data-area-collapsed]) > .areaHeader .areaTabs {
+  transform: scaleY(-1);
+  scrollbar-width: auto;
+}
+
+.group:not([data-area-collapsed]) > .areaHeader .areaTabs::-webkit-scrollbar {
+  height: 4px;
+}
+
+.group:not([data-area-collapsed]) > .areaHeader .areaTabs::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.group:not([data-area-collapsed]) > .areaHeader .areaTabs::-webkit-scrollbar-thumb {
+  border-radius: 4px;
+  background: var(--dsw-alias-scrollbar-bg-l2);
+}
+
+.group:not([data-area-collapsed]) > .areaHeader .areaTabs::-webkit-scrollbar-thumb:hover {
+  background: var(--dsw-alias-scrollbar-hover-l2);
+}
+
+.group:not([data-area-collapsed]) > .areaHeader .areaTabs > .areaTab {
+  transform: scaleY(-1);
+  height: 26px;
+}
+
+.group:not([data-area-collapsed]) > .areaHeader .areaTabSelect,
+.group:not([data-area-collapsed]) > .areaHeader .areaTabClose,
+.group:not([data-area-collapsed]) > .areaHeader .areaTabDetach {
+  box-sizing: border-box;
+  height: 24px;
+  min-height: 24px;
+  padding-block: 0;
 }
 
 .areaTabScroll {
@@ -7602,6 +7542,60 @@
   .group[data-area-collapsed][data-collapse-edge='down'] .areaActions .areaTabOverviewTrigger {
     display: none;
   }
+}
+
+/* Expanded headers reserve real hit targets before giving the remainder to
+   tabs. Keep this after the legacy chrome rules so controls cannot shrink
+   beneath their SVGs. Collapsed rails keep their independent geometry. */
+.group:not([data-area-collapsed]) > .areaHeader .bindingControl { flex-shrink: 0; max-width: 28%; }
+.group:not([data-area-collapsed]) > .areaHeader .bindingChip { flex-shrink: 0; min-width: 28px; max-width: 100%; box-sizing: border-box; overflow: hidden; }
+.group:not([data-area-collapsed]) > .areaHeader .areaActions { flex: 0 0 auto; }
+.group:not([data-area-collapsed]) > .areaHeader .areaActions > button { flex-shrink: 0; box-sizing: border-box; }
+.group:not([data-area-collapsed]) > .areaHeader .areaTab { flex: 0 0 auto; min-width: 34px; box-sizing: border-box; }
+.group:not([data-area-collapsed]) > .areaHeader .areaTabSelect { flex: 1 1 auto; min-width: 32px; overflow: hidden; box-sizing: border-box; }
+.group:not([data-area-collapsed]) > .areaHeader .areaTabDetach,
+.group:not([data-area-collapsed]) > .areaHeader .areaTabClose { flex-shrink: 0; }
+.group:not([data-area-collapsed]) > .areaHeader .areaTabsEmpty { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.group:not([data-area-collapsed]) > .areaHeader .areaTabs:empty { flex: 0 0 0; }
+.group:not([data-area-collapsed]) > .areaHeader .areaTabOverviewTrigger { width: auto; min-width: 48px; }
+
+@container workbench-area (max-width: 400px) {
+  .group:not([data-area-collapsed]) > .areaHeader .bindingControl { flex: 0 0 28px; max-width: 28px; }
+  .group:not([data-area-collapsed]) > .areaHeader .bindingChip { width: 28px; padding-inline: 2px; justify-content: center; }
+  .group:not([data-area-collapsed]) > .areaHeader .bindingTitle,
+  .group:not([data-area-collapsed]) > .areaHeader .bindingRunning,
+  .group:not([data-area-collapsed]) > .areaHeader .areaTabDetach,
+  .group:not([data-area-collapsed]) > .areaHeader .areaTabOverviewCount { display: none; }
+  .group:not([data-area-collapsed]) > .areaHeader .areaTabOverviewTrigger { width: 28px; min-width: 28px; padding: 0; }
+  .group:not([data-area-collapsed]) > .areaHeader .areaTabSelect { max-width: 120px; }
+  .group:not([data-area-collapsed]) > .areaHeader .areaTab:not([data-active='true']) .editorGlyph { display: inline-flex; }
+  .group:not([data-area-collapsed]) > .areaHeader .areaTab:not([data-active='true']) .areaTabStatusDot { display: none; }
+}
+
+@container workbench-area (max-width: 319px) {
+  .group:not([data-area-collapsed]) > .areaHeader .areaTab:not([data-active='true']),
+  .group:not([data-area-collapsed]) > .areaHeader .areaTabClose,
+  .group:not([data-area-collapsed]) > .areaHeader .areaTabScroll { display: none; }
+  .group:not([data-area-collapsed]) > .areaHeader .areaTabStrip { flex: 1 1 0; }
+  .group:not([data-area-collapsed]) > .areaHeader .areaTabs { flex: 1 1 0; overflow: hidden; scrollbar-width: none; }
+  .group:not([data-area-collapsed]) > .areaHeader .areaTab[data-active='true'] { flex: 0 1 auto; max-width: 100%; }
+  .group:not([data-area-collapsed]) > .areaHeader .areaTabSelect { max-width: 100%; gap: 4px; padding-inline: 5px; }
+  .group:not([data-area-collapsed]) > .areaHeader .areaTabStatusDot { display: none; }
+}
+
+@container workbench-area (max-width: 239px) {
+  .group:not([data-area-collapsed]) > .areaHeader .areaTabOverviewTrigger { display: none; }
+  .group:not([data-area-collapsed]) > .areaHeader .areaTabLabel { display: none; }
+}
+
+@container workbench-area (max-width: 179px) {
+  .group:not([data-area-collapsed]) > .areaHeader .areaTabAdd,
+  .group:not([data-area-collapsed]) > .areaHeader [data-area-collapse-toggle] { display: none; }
+}
+
+@container workbench-area (max-width: 119px) {
+  .group:not([data-area-collapsed]) > .areaHeader { padding-inline: 2px; gap: 2px; }
+  .group:not([data-area-collapsed]) > .areaHeader .areaTabStrip { display: none; }
 }
 
 @media (forced-colors: active) {

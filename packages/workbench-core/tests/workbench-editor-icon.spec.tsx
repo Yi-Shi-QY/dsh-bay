@@ -5,6 +5,18 @@ import { WorkbenchEditorIcon } from '../src/foundation/WorkbenchEditorIcon.tsx'
 import { WORKBENCH_EDITOR_ICON_NAMES } from '../src/foundation/catalog.ts'
 
 describe('Workbench editor icon set', () => {
+  it('renders validated editor-owned paths with the shared theme and sizing contract', () => {
+    const markup = renderToStaticMarkup(createElement(WorkbenchEditorIcon, {
+      name: 'extension', iconSvg: { version: 1, paths: ['M4 4h16v16H4Z', 'M8 8h8'] },
+    }))
+    expect(markup).toContain('d="M4 4h16v16H4Z"')
+    expect(markup).toContain('d="M8 8h8"')
+    expect(markup).toContain('viewBox="0 0 24 24"')
+    expect(markup).toContain('stroke="currentColor"')
+    expect(markup).not.toContain('href')
+    expect(markup).not.toContain('<image')
+  })
+
   it('renders every semantic glyph as an accessible-size theme-inheriting outline SVG', () => {
     for (const name of WORKBENCH_EDITOR_ICON_NAMES) {
       const markup = renderToStaticMarkup(createElement(WorkbenchEditorIcon, { name }))

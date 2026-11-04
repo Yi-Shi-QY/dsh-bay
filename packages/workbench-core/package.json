@@ -1,7 +1,7 @@
 {
   "name": "@dsh-workbench/core",
   "description": "Workbench Core lifecycle, module registry and composition installer",
-  "version": "0.2.2-alpha.17",
+  "version": "0.2.2-alpha.17.2",
   "private": false,
   "type": "module",
   "main": "lib/index.js",
@@ -67,7 +67,10 @@
     "@deepseek-ai/dsh-tool-cordis": "0.2.1-rc.5",
     "@deepseek-ai/dsh-skill-filesystem": "0.2.1-rc.5",
     "@deepseek-ai/dsh-skill": "0.2.1-rc.5",
-    "@deepseek-ai/cordis-plugin-loader": "~1.0.6"
+    "@deepseek-ai/cordis-plugin-loader": "~1.0.6",
+    "@deepseek-ai/dsh-credentials": "0.2.1-rc.5",
+    "@deepseek-ai/dsh-atomic-write": "0.2.1-rc.5",
+    "@deepseek-ai/dsh-app-boot": "0.2.1-rc.5"
   },
   "devDependencies": {
     "@xterm/addon-fit": "0.11.0",
@@ -88,11 +91,11 @@
       "moduleId": "workbench.core",
       "kind": "official-builtin",
       "delivery": "core-bundled",
-      "coreCompatibility": "0.2.2-alpha.17",
+      "coreCompatibility": "0.2.2-alpha.17.2",
       "activation": "restart-only",
       "dshGeneration": "0.2.1-rc.5",
-      "candidateId": "dsh-bay-0.2.2-alpha.17-dsh-0.2.1-rc.5",
-      "productLine": "DSH Bay 0.2.2-alpha.17",
+      "candidateId": "dsh-bay-0.2.2-alpha.17.2-dsh-0.2.1-rc.5",
+      "productLine": "DSH Bay 0.2.2-alpha.17.2",
       "upstreamCommit": "b830ec950faba0a46dda564be3e2d854afed94f1",
       "morePolicy": "deferred-official-only",
       "defaultInstall": [

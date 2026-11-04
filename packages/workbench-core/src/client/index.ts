@@ -1,6 +1,9 @@
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-client-connection/client'
 export type { WorkbenchEditorOwnerProps } from './editor-slots.ts'
+export type { WorkbenchEditorSvgIconV1 } from '../foundation/workbench-editor-icons.ts'
+export { normalizeWorkbenchEditorSvgIcon } from '../foundation/workbench-editor-icons.ts'
+export type { WorkbenchEditorRegistrationMetadataV1 } from './workbench-editor-slot-catalog.ts'
 export type {
   WorkbenchEditorBackgroundRuntimeV1,
   WorkbenchEditorBindingPolicyV1,

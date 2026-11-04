@@ -1,0 +1,171 @@
+{
+  "version": "0.2.2-alpha.17.2",
+  "filename": "dsh-workbench-core-0.2.2-alpha.17.2-empty-area-92ad5c51395e.tgz",
+  "sha256": "92ad5c51395e551a31ccc6e6dbd84a3b7f2392b4b638d1184ed83328d2deeaaa",
+  "bytes": 1005672,
+  "createdAt": "2026-11-04T10:57:10.369Z",
+  "status": "experimental private trial; strict release gate held",
+  "validation": {
+    "tests": "111 files / 691 tests passed",
+    "build": "passed",
+    "rc5Identity": "passed",
+    "typecheck": "112 existing RC5 generated Sidebar/Workspace errors; zero new errors",
+    "inputChecks": 373,
+    "artifact": "extracted archive, source input hashes, Creator files and actual installed Host/Client bytes verified",
+    "ui": {
+      "title": "DeepSeek Harness",
+      "url": "http://127.0.0.1:19274",
+      "browser": "Edge headless; Browser plugin not available",
+      "profile": "isolated dsh-bay-172-home",
+      "large": [
+        {
+          "width": 568,
+          "height": 435,
+          "visibleLabels": 6,
+          "visibleButtons": 6,
+          "scrollX": false,
+          "scrollY": false
+        },
+        {
+          "width": 568,
+          "height": 435,
+          "visibleLabels": 6,
+          "visibleButtons": 6,
+          "scrollX": false,
+          "scrollY": false
+        },
+        {
+          "width": 568,
+          "height": 435,
+          "visibleLabels": 6,
+          "visibleButtons": 6,
+          "scrollX": false,
+          "scrollY": false
+        },
+        {
+          "width": 568,
+          "height": 435,
+          "visibleLabels": 6,
+          "visibleButtons": 6,
+          "scrollX": false,
+          "scrollY": false
+        }
+      ],
+      "compact": [
+        {
+          "width": 320,
+          "height": 225,
+          "visibleLabels": 0,
+          "visibleButtons": 6,
+          "scrollX": false,
+          "scrollY": false
+        },
+        {
+          "width": 320,
+          "height": 225,
+          "visibleLabels": 0,
+          "visibleButtons": 6,
+          "scrollX": false,
+          "scrollY": false
+        },
+        {
+          "width": 320,
+          "height": 225,
+          "visibleLabels": 0,
+          "visibleButtons": 6,
+          "scrollX": false,
+          "scrollY": false
+        },
+        {
+          "width": 320,
+          "height": 225,
+          "visibleLabels": 0,
+          "visibleButtons": 6,
+          "scrollX": false,
+          "scrollY": false
+        }
+      ],
+      "short": [
+        {
+          "width": 568,
+          "height": 135,
+          "visibleLabels": 0,
+          "visibleButtons": 6,
+          "scrollX": false,
+          "scrollY": false
+        },
+        {
+          "width": 568,
+          "height": 135,
+          "visibleLabels": 0,
+          "visibleButtons": 6,
+          "scrollX": false,
+          "scrollY": false
+        },
+        {
+          "width": 568,
+          "height": 135,
+          "visibleLabels": 0,
+          "visibleButtons": 6,
+          "scrollX": false,
+          "scrollY": false
+        },
+        {
+          "width": 568,
+          "height": 135,
+          "visibleLabels": 0,
+          "visibleButtons": 6,
+          "scrollX": false,
+          "scrollY": false
+        }
+      ],
+      "tiny": [
+        {
+          "width": 568,
+          "height": 45,
+          "visibleLabels": 0,
+          "visibleButtons": 1,
+          "scrollX": false,
+          "scrollY": false
+        },
+        {
+          "width": 568,
+          "height": 45,
+          "visibleLabels": 0,
+          "visibleButtons": 1,
+          "scrollX": false,
+          "scrollY": false
+        },
+        {
+          "width": 568,
+          "height": 45,
+          "visibleLabels": 0,
+          "visibleButtons": 1,
+          "scrollX": false,
+          "scrollY": false
+        },
+        {
+          "width": 568,
+          "height": 45,
+          "visibleLabels": 0,
+          "visibleButtons": 1,
+          "scrollX": false,
+          "scrollY": false
+        }
+      ],
+      "checks": [
+        "compact icons retain hover/focus name and accessible labels",
+        "390px viewport retains icon-only Areas with on-screen picker",
+        "extreme height retains browse-only action",
+        "tiny browse icon opens full searchable picker",
+        "root editor opens only in target Area; Session editor remains pending",
+        "layout and custom icon survive reload",
+        "custom icon consistent across picker, tab, Settings and Home preview"
+      ],
+      "errors": [],
+      "fixture": "@local/empty-area-icon-qa@0.1.0 installed from updated Creator template, then allowed through UI"
+    },
+    "remaining": "Native Electron, real Browser Companion/LAN and two-Profile private extension migration were not rerun for this visual follow-up; previous acceptance retained"
+  },
+  "evidenceDirectory": "C:\\Users\\WeChenXC000\\AppData\\Local\\Temp\\dsh-bay-empty-area"
+}

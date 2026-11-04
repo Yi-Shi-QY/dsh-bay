@@ -498,9 +498,19 @@ function decodeSettingsV4(value: unknown): WorkbenchSettingsV4 | undefined {
   if (requestedOpen.length !== value.openWorkbenchIds.length || new Set(requestedOpen).size !== requestedOpen.length) return undefined
   const open = requestedOpen.filter(id => workbenches[id] !== undefined && workbenches[id].archivedAt === undefined)
   let activeWorkbenchId = value.activeWorkbenchId
+  const runnable = Object.values(workbenches)
+    .filter(record => record.archivedAt === undefined)
+    .sort((left, right) => right.updatedAt - left.updatedAt)
+  // An empty open list is the persisted Workbench Home state. Keep the last
+  // selected runnable id as a resumable reference without opening it.
+  if (requestedOpen.length === 0) {
+    if (workbenches[activeWorkbenchId]?.archivedAt !== undefined || workbenches[activeWorkbenchId] === undefined) {
+      migrationRequired = true
+      activeWorkbenchId = runnable[0]?.workbenchId ?? ''
+    }
   // Preserve unreadable records while recovering a runnable selection. Returning
   // undefined lets the Settings mirror retain stale decoded data at a new revision.
-  if (open.length !== requestedOpen.length || !open.includes(activeWorkbenchId)) {
+  } else if (open.length !== requestedOpen.length || !open.includes(activeWorkbenchId)) {
     migrationRequired = true
     if (!open.includes(activeWorkbenchId)) activeWorkbenchId = open[0] ?? Object.keys(workbenches).find(id => workbenches[id]?.archivedAt === undefined) ?? ''
     if (activeWorkbenchId === '') {

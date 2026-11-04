@@ -1,0 +1,1 @@
+5a81e11c7e8155ae8822a63afef8f5ccdad31c10bd71339a393a562565b78e53  dsh-workbench-core-0.2.2-alpha.17.2-area-presets-5a81e11c7e81.tgz

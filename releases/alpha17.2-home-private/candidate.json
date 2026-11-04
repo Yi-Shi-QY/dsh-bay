@@ -1,0 +1,25 @@
+{
+  "version": "0.2.2-alpha.17.2",
+  "filename": "dsh-workbench-core-0.2.2-alpha.17.2-home-2cc0def53672.tgz",
+  "sha256": "2cc0def5367214252133f127f8c20d154f68d3ee2665b5a641e75fd91d769fa5",
+  "bytes": 996611,
+  "createdAt": "2026-11-04T08:39:44.474Z",
+  "status": "experimental private trial; strict release gate held",
+  "validation": {
+    "fullSuite": "108 files / 647 tests passed before final presentation corrections",
+    "finalFocused": "8 files / 87 tests passed after final corrections",
+    "build": "passed",
+    "rc5Identity": "passed",
+    "typecheck": "112 existing RC5 declaration errors; zero new errors",
+    "artifact": "extracted; manifest, Creator, all build inputs, runtime and installed Profile runtime bytes verified",
+    "ui": "independent DSH Profile; archive/restore/delete only workbench, dirty guard, empty after service restart, create, settings navigation, export/import roundtrip and explicit open passed",
+    "viewports": [
+      "1440x1000",
+      "640x900"
+    ],
+    "consoleErrors": 0,
+    "privateExtensions": "prior 17.2 two-Profile acceptance retained; not rerun for this UI/lifecycle change",
+    "remaining": "Native Electron desktop/Browser Companion real interaction not rerun; covered by source regression"
+  },
+  "evidenceDirectory": "C:\\Users\\WeChenXC000\\AppData\\Local\\Temp\\dsh-bay-172-home"
+}

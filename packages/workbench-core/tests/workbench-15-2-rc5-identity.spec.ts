@@ -12,7 +12,7 @@ describe('Workbench 15.2 rc5 identity', () => {
     const root = json('package.json')
     const core = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as Record<string, any>
     const provenance = json('provenance/dsh-0.2.1-rc.5.json')
-    expect(WORKBENCH_CORE_VERSION).toBe('0.2.2-alpha.17')
+    expect(WORKBENCH_CORE_VERSION).toBe('0.2.2-alpha.17.2')
     expect(WORKBENCH_DSH_GENERATION).toBe('0.2.1-rc.5')
     expect(WORKBENCH_UPSTREAM_COMMIT).toBe('b830ec950faba0a46dda564be3e2d854afed94f1')
     expect(root.devDependencies['@deepseek-ai/dsh']).toBe(WORKBENCH_DSH_GENERATION)

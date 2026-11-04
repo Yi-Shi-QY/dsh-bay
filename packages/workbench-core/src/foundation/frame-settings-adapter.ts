@@ -1,3 +1,4 @@
+import { createWorkbenchPresetDocument, type WorkbenchLayoutPresetId, type WorkbenchAreaEditorChoice } from './workbench-layout-presets.ts'
 import type { SettingsScopeSnapshot, WorkbenchSettingsScope as SettingsScope } from '../client/workbench-settings-contracts.ts'
 import type { SettingsScopePathOperation, SettingsScopePatchResult } from '../client/workbench-settings-contracts.ts'
 import { patchWorkbenchSettings } from '../client/workbench-settings-contracts.ts'
@@ -6,7 +7,7 @@ import {
 } from './document-v3.ts'
 import type { WorkbenchDocumentV3 } from './document-v3.ts'
 import { defaultLayout, groupsOf, type WorkbenchLayoutDocument } from './model.ts'
-import { decodeWorkbenchHiddenEditorIds, normalizeWorkbenchTags, type WorkbenchSettings, type WorkbenchSettingsV4 } from './persistence.ts'
+import { decodeWorkbenchHiddenEditorIds, normalizeWorkbenchTags, type WorkbenchPackageOriginV1, type WorkbenchSettings, type WorkbenchSettingsV4 } from './persistence.ts'
 import { workbenchExtensionConsentKey, type WorkbenchExtensionConsentV1 } from '../workbench-extension-access.ts'
 
 /** Read-only named Workbench and layout-template roster for the outer rail. */
@@ -24,6 +25,8 @@ export interface WorkbenchDirectorySnapshot {
     layoutLocked?: boolean
     createdAt: number
     updatedAt: number
+    packageOrigin?: WorkbenchPackageOriginV1
+    offlineOrigin?: { schemaVersion: 1; packageId: string; archiveSha256: string }
     pinnedAt?: number
     archivedAt?: number
   }[]
@@ -43,7 +46,22 @@ export interface WorkbenchDirectorySnapshot {
 /** Settings mutation outcome including user-correctable directory rejections. */
 export type WorkbenchDirectoryOperationResult = SettingsScopePatchResult | {
   status: 'rejected'
-  reason: 'invalid-name' | 'duplicate-name' | 'not-found' | 'already-open' | 'archived' | 'last-runnable' | 'still-open'
+  reason: 'invalid-name' | 'duplicate-name' | 'not-found' | 'already-open' | 'archived' | 'last-runnable' | 'still-open' | 'invalid-preset'
+}
+
+export interface WorkbenchDirectoryCreateOptions {
+  templateId?: string
+  layoutPresetId?: WorkbenchLayoutPresetId
+  areaEditors?: readonly (WorkbenchAreaEditorChoice | null)[]
+  name?: string
+  description?: string
+  tags?: readonly string[]
+}
+
+export type WorkbenchDirectoryCreateResult = WorkbenchDirectoryOperationResult | {
+  status: 'committed'
+  revision: number
+  workbenchId: string
 }
 
 /** Named-Workbench selector backed by the same revision-aware Settings scope. */
@@ -57,7 +75,7 @@ export interface WorkbenchDirectory {
   reorder?(workbenchId: string, targetIndex: number): Promise<WorkbenchDirectoryOperationResult>
   openAndSelect(workbenchId: string): Promise<WorkbenchDirectoryOperationResult>
   unload(workbenchId: string): Promise<WorkbenchDirectoryOperationResult>
-  create(options?: { templateId?: string }): Promise<WorkbenchDirectoryOperationResult>
+  create(options?: WorkbenchDirectoryCreateOptions): Promise<WorkbenchDirectoryCreateResult>
   saveTemplate(name: string, document: WorkbenchLayoutDocument): Promise<WorkbenchDirectoryOperationResult>
   rename(workbenchId: string, name: string): Promise<WorkbenchDirectoryOperationResult>
   updateMetadata(workbenchId: string, metadata: { name: string; description: string; tags?: readonly string[] }): Promise<WorkbenchDirectoryOperationResult>
@@ -127,7 +145,7 @@ function openIdsOf(value: WorkbenchSettingsV4): string[] {
   return value.openWorkbenchIds ?? Object.keys(value.workbenches).filter(id => value.workbenches[id]?.archivedAt === undefined)
 }
 
-function nextWorkbenchName(value: WorkbenchSettingsV4): string {
+function nextWorkbenchName(value: Pick<WorkbenchSettingsV4, 'workbenches'>): string {
   const occupied = Object.values(value.workbenches).map(record => record.name)
   for (let index = Object.keys(value.workbenches).length + 1; ; index += 1) {
     const candidate = `工作台 ${String(index)}`
@@ -275,8 +293,9 @@ export function createProjectNeutralFrameSettings(
     const inactive = Object.values(value.workbenches)
       .filter(record => record.workbenchId !== removedId && record.archivedAt === undefined && !before.includes(record.workbenchId))
       .sort((left, right) => right.updatedAt - left.updatedAt)[0]
-    if (inactive === undefined) return undefined
-    return { activeWorkbenchId: inactive.workbenchId, openWorkbenchIds: [...remaining, inactive.workbenchId] }
+    // An empty open list is a valid Home state. Keep the last selected id as
+    // a resumable reference without opening an implicit Workbench.
+    return { activeWorkbenchId: inactive?.workbenchId ?? '', openWorkbenchIds: remaining }
   }
   const directory: WorkbenchDirectory = {
     getSnapshot: () => {
@@ -296,6 +315,8 @@ export function createProjectNeutralFrameSettings(
           ...(record.hiddenEditorIds === undefined ? {} : { hiddenEditorIds: [...record.hiddenEditorIds] }),
           ...(record.layoutLocked === true ? { layoutLocked: true } : {}),
           createdAt: record.createdAt, updatedAt: record.updatedAt,
+          ...(record.packageOrigin === undefined ? {} : { packageOrigin: structuredClone(record.packageOrigin) }),
+          ...(record.offlineOrigin === undefined ? {} : { offlineOrigin: { ...record.offlineOrigin } }),
           ...(record.pinnedAt === undefined ? {} : { pinnedAt: record.pinnedAt }),
           ...(record.archivedAt === undefined ? {} : { archivedAt: record.archivedAt }),
         })),
@@ -351,20 +372,56 @@ export function createProjectNeutralFrameSettings(
     unload: (workbenchId) => options.workbenchId !== undefined ? Promise.resolve({ status: 'unavailable' }) : guarded(source.getSnapshot().value?.activeWorkbenchId === workbenchId, () => {
       const value = source.getSnapshot().value
       if (value === undefined || !openIdsOf(value).includes(workbenchId)) return Promise.resolve({ status: 'rejected', reason: 'not-found' })
-      const fallback = fallbackFor(value, workbenchId)
+      const fallback = openIdsOf(value).length === 1
+        ? { activeWorkbenchId: workbenchId, openWorkbenchIds: [] }
+        : fallbackFor(value, workbenchId)
       if (fallback === undefined) return Promise.resolve({ status: 'unavailable' })
       return rootUpdate(current => ({ ...current, ...fallback }))
     }),
     create: (createOptions) => options.workbenchId !== undefined ? Promise.resolve({ status: 'unavailable' }) : guarded(true, () => {
-      const options = createOptions
-      const snapshot = source.getSnapshot(); const value = snapshot.value
-      if (snapshot.status !== 'ready' || !snapshot.writable || value === undefined) return Promise.resolve({ status: 'unavailable' })
-      const template = options?.templateId === undefined ? undefined
-        : value.layoutTemplates[options.templateId] ?? value.workbenches[options.templateId]
-      if (options?.templateId !== undefined && template === undefined) return Promise.resolve({ status: 'rejected', reason: 'not-found' })
-      const now = Date.now(); const workbenchId = `workbench-${globalThis.crypto.randomUUID()}`
-      const name = template === undefined ? nextWorkbenchName(value) : uniqueName(template.name, Object.values(value.workbenches).map(record => record.name))
-      return rootUpdate(current => ({ ...current, activeWorkbenchId: workbenchId, openWorkbenchIds: [...openIdsOf(current), workbenchId], workbenches: { ...current.workbenches, [workbenchId]: { workbenchId, name, description: '', document: template === undefined ? blankWorkbenchDocument() : cloneWorkbenchDocumentWithFreshIds(template.document), createdAt: now, updatedAt: now } } }))
+      const requested = createOptions
+      const snapshot = source.getSnapshot()
+      if (snapshot.status !== 'ready' || !snapshot.writable) return Promise.resolve({ status: 'unavailable' })
+      const value = snapshot.value
+      const workbenchId = `workbench-${globalThis.crypto.randomUUID()}`
+      const now = Date.now()
+      const template = requested?.templateId === undefined || value === undefined ? undefined
+        : value.layoutTemplates[requested.templateId] ?? value.workbenches[requested.templateId]
+      if (requested?.templateId !== undefined && template === undefined) return Promise.resolve({ status: 'rejected', reason: 'not-found' })
+      if (requested?.templateId !== undefined && requested.layoutPresetId !== undefined) return Promise.resolve({ status: 'rejected', reason: 'invalid-preset' })
+      const presetDocument = requested?.layoutPresetId === undefined ? undefined : createWorkbenchPresetDocument(requested.layoutPresetId, requested.areaEditors)
+      if ((requested?.layoutPresetId !== undefined && presetDocument === undefined) || (requested?.areaEditors !== undefined && requested.layoutPresetId === undefined)) return Promise.resolve({ status: 'rejected', reason: 'invalid-preset' })
+      const existingNames = Object.values(value?.workbenches ?? {}).map(record => record.name)
+      const requestedName = acceptedName(requested?.name ?? '')
+      if (requested?.name !== undefined && requestedName === undefined) return Promise.resolve({ status: 'rejected', reason: 'invalid-name' })
+      if (requestedName !== undefined && existingNames.some(existing => nameKey(existing) === nameKey(requestedName))) {
+        return Promise.resolve({ status: 'rejected', reason: 'duplicate-name' })
+      }
+      const name = requestedName === undefined
+        ? template === undefined ? nextWorkbenchName(value ?? { workbenches: {} }) : uniqueName(template.name, existingNames)
+        : requestedName
+      const tags = normalizeWorkbenchTags(requested?.tags ?? [])
+      const record = {
+        workbenchId, name, description: (requested?.description ?? '').trim(),
+        document: presetDocument ?? (template === undefined ? blankWorkbenchDocument() : cloneWorkbenchDocumentWithFreshIds(template.document)),
+        createdAt: now, updatedAt: now,
+        ...(tags.length === 0 ? {} : { tags }),
+      }
+      const next: WorkbenchSettingsV4 = value === undefined
+        ? {
+          version: 4, activeWorkbenchId: workbenchId, openWorkbenchIds: [workbenchId],
+          workbenches: { [workbenchId]: record }, layoutTemplates: {}, invalidWorkbenches: {}, sessionMarkers: {},
+        }
+        : {
+          ...value,
+          activeWorkbenchId: workbenchId,
+          openWorkbenchIds: [...openIdsOf(value), workbenchId],
+          workbenches: { ...value.workbenches, [workbenchId]: record },
+        }
+      const write = value === undefined
+        ? patchWorkbenchSettings(source, { operation: 'set', path: [], value: next, ...(snapshot.revision === undefined ? {} : { expectedRevision: snapshot.revision }) })
+        : rootUpdate(() => next)
+      return write.then(result => result.status === 'committed' ? { ...result, workbenchId } : result)
     }),
     saveTemplate: (requestedName, document) => {
       if (options.workbenchId !== undefined) return Promise.resolve({ status: 'unavailable' })
@@ -490,9 +547,7 @@ export function createProjectNeutralFrameSettings(
       if (value === undefined) return Promise.resolve({ status: 'unavailable' })
       if (record === undefined) return rootUpdate(current => current.invalidWorkbenches[workbenchId] === undefined ? current : { ...current, invalidWorkbenches: { ...current.invalidWorkbenches, [workbenchId]: { ...current.invalidWorkbenches[workbenchId], archivedAt: Date.now() } } })
       if (record.archivedAt !== undefined) return Promise.resolve({ status: 'rejected', reason: 'archived' })
-      if (Object.values(value.workbenches).filter(item => item.archivedAt === undefined).length <= 1) return Promise.resolve({ status: 'rejected', reason: 'last-runnable' })
-      const fallback = openIdsOf(value).includes(workbenchId) ? fallbackFor(value, workbenchId) : undefined
-      if (value.activeWorkbenchId === workbenchId && fallback === undefined) return Promise.resolve({ status: 'unavailable' })
+      const fallback = fallbackFor(value, workbenchId)
       return rootUpdate(current => {
         const currentRecord = current.workbenches[workbenchId]
         if (currentRecord === undefined) return current
@@ -511,15 +566,17 @@ export function createProjectNeutralFrameSettings(
       const { archivedAt: _archivedAt, ...withoutArchived } = invalid
       return { ...value, invalidWorkbenches: { ...value.invalidWorkbenches, [workbenchId]: withoutArchived } }
     }),
-    remove: (workbenchId) => {
+    remove: (workbenchId) => guarded(source.getSnapshot().value?.activeWorkbenchId === workbenchId, () => {
       const value = source.getSnapshot().value
       if (value === undefined) return Promise.resolve({ status: 'unavailable' })
-      if (openIdsOf(value).includes(workbenchId)) return Promise.resolve({ status: 'rejected', reason: 'still-open' })
       const record = value.workbenches[workbenchId]
-      if (record !== undefined && record.archivedAt === undefined && Object.values(value.workbenches).filter(item => item.archivedAt === undefined).length <= 1) return Promise.resolve({ status: 'rejected', reason: 'last-runnable' })
       if (record === undefined && value.invalidWorkbenches[workbenchId] === undefined) return Promise.resolve({ status: 'rejected', reason: 'not-found' })
-      return rootUpdate(current => { const { [workbenchId]: _valid, ...workbenches } = current.workbenches; const { [workbenchId]: _invalid, ...invalidWorkbenches } = current.invalidWorkbenches; return { ...current, workbenches, invalidWorkbenches } })
-    },
+      return rootUpdate(current => {
+        const { [workbenchId]: _valid, ...workbenches } = current.workbenches
+        const { [workbenchId]: _invalid, ...invalidWorkbenches } = current.invalidWorkbenches
+        return { ...current, ...fallbackFor(current, workbenchId), workbenches, invalidWorkbenches }
+      })
+    }),
     setBeforeLifecycleTransition: listener => {
       beforeLifecycleTransition = listener
       return () => { if (beforeLifecycleTransition === listener) beforeLifecycleTransition = undefined }

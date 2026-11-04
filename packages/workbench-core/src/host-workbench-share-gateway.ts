@@ -4,6 +4,7 @@ import { connect as connectNet } from 'node:net'
 import type { Duplex } from 'node:stream'
 import { createHash } from 'node:crypto'
 import { URL } from 'node:url'
+import { guestDistributionDenied, GuestDistributionMuxGuard } from './host-distribution-guest-guard.ts'
 import type { WorkbenchShareSessionManagerV1, WorkbenchShareSessionV1, WorkbenchShareViewLeaseV1 } from './host-workbench-share-session.ts'
 
 const SHARE_COOKIE = 'dsh-workbench-share'
@@ -415,6 +416,11 @@ export async function createWorkbenchShareGateway(options: WorkbenchShareGateway
     if (url.pathname.startsWith('/api/workbench-share/')) {
       writeSecurityHeaders(response); response.writeHead(403); response.end('share management is host-only'); return
     }
+    // Shared browsers hold a proxy-owned owner cookie. Never forward package
+    // authority through that cookie; these actions have no Remote/mux exports.
+    if (guestDistributionDenied(url.pathname)) {
+      writeSecurityHeaders(response); response.writeHead(403); response.end('package distribution is host-only'); finishRequest(); return
+    }
     const upstreamUrl = new URL(`${url.pathname}${url.search}`, upstream)
     const result = await requestUpstream(upstreamUrl, request, ownerCookie ?? '')
     const headers = responseHeaders(result.response, upstream, `http://${host}:${String(gateway.port)}`)
@@ -448,12 +454,17 @@ export async function createWorkbenchShareGateway(options: WorkbenchShareGateway
     const headers = cleanHeaders(request.headers, upstream, found.lease.ownerCookie ?? '')
     headers.connection = 'Upgrade'
     headers.upgrade = 'websocket'
+    // No negotiated compression: inspect plaintext mux requests before the owner carrier.
+    delete headers['sec-websocket-extensions']
+    const guard=new GuestDistributionMuxGuard()
+    guard.once('error',()=>{clientSocket.destroy();target.destroy()})
     target.once('connect', () => {
       const path = request.url ?? '/'
       const lines = [`GET ${path} HTTP/1.1`, ...Object.entries(headers).filter(([, value]) => value !== undefined).map(([name, value]) => `${name}: ${value}`), '', '']
       target.write(lines.join('\r\n'))
-      if (head.length > 0) target.write(head)
-      clientSocket.pipe(target); target.pipe(clientSocket)
+      guard.pipe(target)
+      if (head.length > 0) guard.write(head)
+      clientSocket.pipe(guard); target.pipe(clientSocket)
     })
     const close = () => {
       clientSocket.destroy(); target.destroy()

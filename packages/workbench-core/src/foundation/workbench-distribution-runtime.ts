@@ -167,6 +167,7 @@ export function validateWorkbenchRuntimeReadinessSnapshotV1(
  * remounting the Frame.
  */
 export interface WorkbenchDistributionRuntimeV1 {
+  readonly packagesV4?: import('../distribution-contract.ts').DistributionAuthorityV4
   readonly version: 1
   readonly authority: 'host' | 'manager' | 'test'
   readonly label: string
@@ -312,6 +313,9 @@ export function validateWorkbenchDistributionRuntimeV1(
   }
   if (typeof row.capabilities !== 'object' || row.capabilities === null || Array.isArray(row.capabilities)) return false
   const capabilities = row.capabilities as Record<string, unknown>
+  if (row.packagesV4 !== undefined && (typeof row.packagesV4 !== 'object' || row.packagesV4 === null
+    || !['export','inspect','consent','resume','complete','restorePending','preparePending','cancel','history','identities']
+      .every(key => typeof (row.packagesV4 as Record<string, unknown>)[key] === 'function'))) return false
   return [
     'durableArtifacts', 'durableRegistry', 'durableTransactions',
     'staticActivation', 'dynamicActivation', 'restartResume',
@@ -350,6 +354,11 @@ export function workbenchDistributionRuntimeStatus(
     }
   }
   const blockers: string[] = []
+  if(runtime.packagesV4){
+    if(!validateWorkbenchDistributionRuntimeV1(runtime))blockers.push('分发服务接口不完整')
+    if(!runtime.capabilities.durableArtifacts||!runtime.capabilities.durableTransactions||!runtime.capabilities.staticActivation||!runtime.capabilities.restartResume)blockers.push('分发服务缺少持久安装或重启恢复能力')
+    return {available:blockers.length===0,authority:runtime.authority,label:runtime.label,capabilities:runtime.capabilities,blockers}
+  }
   if (!runtime.capabilities.durableArtifacts || runtime.artifactStore === undefined) blockers.push('缺少持久 Artifact Store')
   if (!runtime.capabilities.durableRegistry || runtime.packageRegistry === undefined) blockers.push('缺少持久 Package Registry')
   if (!runtime.capabilities.durableTransactions || runtime.transactionStore === undefined) blockers.push('缺少持久导入事务')

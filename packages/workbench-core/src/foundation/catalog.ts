@@ -1,3 +1,4 @@
+import { normalizeWorkbenchEditorSvgIcon, fallbackWorkbenchEditorSvgIcon, type WorkbenchEditorSvgIconV1 } from './workbench-editor-icons.ts'
 import type {
   SlotPortabilityDescriptorV1,
   SlotPreviewDescriptorV1,
@@ -18,6 +19,8 @@ export interface WorkbenchEditorCatalogRow {
   pluginId?: string
   /** Stable presentation token. Unknown/third-party editors may omit it. */
   icon?: string
+  /** Validated 24×24 path-only SVG; takes precedence over a semantic token. */
+  iconSvg?: WorkbenchEditorSvgIconV1
   /** Human-facing menu group. Unknown/third-party editors fall back to 扩展. */
   category?: string
   /** Stable category order; lower values are shown first. */
@@ -40,6 +43,7 @@ export interface WorkbenchEditorCatalogRow {
 
 /** Stable icon and category metadata used by the Area editor picker. */
 export interface WorkbenchEditorPresentation {
+  iconSvg?: WorkbenchEditorSvgIconV1
   icon: string
   category: string
   categoryOrder: number
@@ -124,4 +128,14 @@ export function editorPresentationFromPreview(
   if (typeof declared.category === 'string' && declared.category.length > 0 && declared.category.length <= 64) result.category = declared.category
   if (typeof declared.categoryOrder === 'number' && Number.isFinite(declared.categoryOrder)) result.categoryOrder = declared.categoryOrder
   return result
+}
+
+/** One identity resolver for launchers, tabs, menus, previews and settings. */
+export function resolveWorkbenchEditorPresentation(editor: WorkbenchEditorCatalogRow | undefined): WorkbenchEditorPresentation {
+  if (!editor) return { icon: 'panel', category: '其他', categoryOrder: 100 }
+  const base = editorPresentationFor(editor.id, editor.scope)
+  const token = normalizeWorkbenchEditorIconName(editor.icon) ?? base.icon
+  const svg = normalizeWorkbenchEditorSvgIcon(editor.iconSvg)
+    ?? (token === 'extension' ? fallbackWorkbenchEditorSvgIcon((editor.pluginId ?? '') + ':' + editor.id) : undefined)
+  return { icon: token, ...(svg ? { iconSvg: svg } : {}), category: editor.category ?? base.category, categoryOrder: editor.categoryOrder ?? base.categoryOrder }
 }

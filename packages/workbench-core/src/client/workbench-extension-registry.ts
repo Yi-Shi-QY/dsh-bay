@@ -33,6 +33,7 @@ export function createWorkbenchExtensionRegistryV1(options: {
   let accessSnapshot: WorkbenchExtensionAccessSnapshotV1 = { status: 'unavailable', extensions: [] }
   let disposed = false
   let refreshGeneration = 0
+  let latestRefresh: Promise<void> | undefined
   const listeners = new Set<() => void>()
 
   const recompute = (publish: boolean) => {
@@ -61,7 +62,32 @@ export function createWorkbenchExtensionRegistryV1(options: {
     },
     getSnapshot: () => accessSnapshot,
     subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener) },
-    async refresh() {
+    refresh() {
+      const work = refreshInventory()
+      latestRefresh = work
+      // A newer inventory request must not let an awaited export observe the
+      // older (possibly empty) catalog. Follow superseding refreshes to completion.
+      return (async () => {
+        let pending = work
+        for (;;) {
+          await pending
+          if (latestRefresh === pending || disposed) return
+          pending = latestRefresh!
+        }
+      })()
+    },
+    dispose() {
+      if (disposed) return
+      disposed = true
+      refreshGeneration += 1
+      offCatalog()
+      offSettings()
+      offDsh?.()
+      offConnectionReset?.()
+      listeners.clear()
+    },
+  }
+  async function refreshInventory() {
       if (disposed) return
       const generation = ++refreshGeneration
       if (options.readDshInventory === undefined) {
@@ -88,17 +114,6 @@ export function createWorkbenchExtensionRegistryV1(options: {
           }]
       }
       recompute(true)
-    },
-    dispose() {
-      if (disposed) return
-      disposed = true
-      refreshGeneration += 1
-      offCatalog()
-      offSettings()
-      offDsh?.()
-      offConnectionReset?.()
-      listeners.clear()
-    },
   }
 
   const onCatalogChange = () => {

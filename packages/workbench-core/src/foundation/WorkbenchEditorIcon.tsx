@@ -1,7 +1,8 @@
+import { normalizeWorkbenchEditorSvgIcon, type WorkbenchEditorSvgIconV1 } from './workbench-editor-icons.ts'
 import { normalizeWorkbenchEditorIconName } from './catalog.ts'
 
 /** One theme-inheriting line-icon set shared by frame and settings surfaces. */
-export function WorkbenchEditorIcon({ name }: { name: string }) {
+export function WorkbenchEditorIcon({ name, iconSvg }: { name: string; iconSvg?: WorkbenchEditorSvgIconV1 | undefined }) {
   const icon = normalizeWorkbenchEditorIconName(name) ?? 'extension'
   const common = {
     viewBox: '0 0 24 24',
@@ -13,6 +14,9 @@ export function WorkbenchEditorIcon({ name }: { name: string }) {
     strokeLinecap: 'round',
     strokeLinejoin: 'round',
   } as const
+
+  const custom = normalizeWorkbenchEditorSvgIcon(iconSvg)
+  if (custom) return <svg {...common}>{custom.paths.map((d, index) => <path key={index} d={d} />)}</svg>
 
   switch (icon) {
     case 'plus-message':

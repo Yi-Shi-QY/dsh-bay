@@ -1,3 +1,5 @@
+import { createDistributionClient } from '../distribution-contract.ts'
+import { createWorkbenchPackageService } from './workbench-package-service.ts'
 import { createWorkbenchLayoutPackageService } from './layout-package-service.ts'
 import { createLayoutImportJournal } from '../layout-import-journal.ts'
 import { scopeSettingsSnapshot, settingsTargetWritable, DESKTOP_SETTINGS_CONTEXT } from './settings-context.ts'
@@ -322,6 +324,7 @@ export function applyWorkbenchCoreFoundation(
     return scopedSnapshot
   } }
   const settingsPage = {
+    ...(windowView === undefined ? { distributionPackage: createWorkbenchPackageService({version:4,client: createDistributionClient(), settings, directory, editors: editorCatalog, rawEditors: slotEditorCatalog, registry: extensionRegistry, canExport: id => settingsTargetWritable(settingsContext, id, windowController), canImport: () => settingsContext.mode === 'desktop'}) } : {}),
     layoutPackage: createWorkbenchLayoutPackageService({ settings, directory, editors: editorCatalog, journal: createLayoutImportJournal(),
       canExport: id => settingsTargetWritable(settingsContext, id, windowController), canImport: () => settingsContext.mode === 'desktop' }),
     settingsContext,

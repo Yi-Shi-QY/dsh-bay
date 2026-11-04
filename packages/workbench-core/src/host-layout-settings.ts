@@ -1,4 +1,4 @@
-/** Migrated from workbench/src/workbench-settings.ts; Core starts with an empty Area. */
+/** New Profiles start at Home; existing workbench records are preserved. */
 import z from '@deepseek-ai/schemastery'
 
 /** Settings namespace used by Workbench layout persistence. */
@@ -10,31 +10,12 @@ const SessionMarkersSchema = z.dict(z.dict(z.object({
   customized: z.boolean(),
 }))).default({})
 
-const DEFAULT_WORKBENCH_DOCUMENT = {
-  version: 3,
-  root: {
-    kind: 'area',
-    areaId: 'group-main',
-    moduleHistory: [],
-  },
-  activeAreaId: 'group-main',
-}
-
 const DEFAULT_WORKBENCH_SETTINGS = {
   version: 4 as const,
   activeWorkbenchId: 'main',
-  openWorkbenchIds: ['main'],
+  openWorkbenchIds: [],
   globalHiddenEditorIds: [],
-  workbenches: {
-    main: {
-      workbenchId: 'main',
-      name: '主工作台',
-      description: '',
-      document: DEFAULT_WORKBENCH_DOCUMENT,
-      createdAt: 0,
-      updatedAt: 0,
-    },
-  },
+  workbenches: {},
   layoutTemplates: {},
   invalidWorkbenches: {},
   sessionMarkers: {},
@@ -60,7 +41,7 @@ const WorkbenchSettingsV2Schema = z.object({
 const WorkbenchSettingsV4Schema = z.object({
   version: z.const(4).default(4),
   activeWorkbenchId: z.string().default('main'),
-  openWorkbenchIds: z.array(z.string()).default(['main']),
+  openWorkbenchIds: z.array(z.string()).default([]),
   globalHiddenEditorIds: z.array(z.string()),
   // Strict record validation and lifecycle metadata migration live in the
   // client decoder; keep this Host envelope open for older V4 records.

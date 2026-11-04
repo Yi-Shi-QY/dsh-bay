@@ -2,7 +2,7 @@
 
 更新时间：2026-10-22  
 规范版本：1.0  
-适用基线：Workbench Core `0.2.2-alpha.17`、DSH `0.2.1-rc.5`（commit `b830ec950faba0a46dda564be3e2d854afed94f1`）
+适用基线：Workbench Core `0.2.2-alpha.17.2`、DSH `0.2.1-rc.5`（commit `b830ec950faba0a46dda564be3e2d854afed94f1`）
 状态：**Core 接口与自动化合同说明；正式桌面扩展生命周期验收仍未完成**
 
 本文是开发新的 Workbench 容器内页扩展时的主规范。模板位于 `packages/workbench-core/presets/workbench-creator/skills/workbench-extension-development/templates/workbench-editor/`。若模板与本文不一致，以对应目标 Core/DSH 版本的公开导出、类型、测试和锁定文件为准；不要复制本文以外版本的 Slot 参数或 API。
@@ -98,7 +98,7 @@ my-workbench-extension/
       "kind": "extension",
       "delivery": "direct-source",
       "version": "1.0.0",
-      "coreCompatibility": "0.2.2-alpha.17",
+      "coreCompatibility": "0.2.2-alpha.17.2",
       "dshGeneration": "0.2.1-rc.5",
       "activation": "restart-only",
       "scope": "root",
@@ -137,7 +137,7 @@ const extension = {
   moduleId: 'example.my-extension',
   apiVersion: 1,
   editorIds: ['example.my-extension.main'],
-  coreCompatibility: '0.2.2-alpha.17',
+  coreCompatibility: '0.2.2-alpha.17.2',
   dshGeneration: '0.2.1-rc.5',
 }
 
@@ -164,17 +164,24 @@ return {
 
 多内页扩展的每个 Slot 都应提供完整相同的 `extension` 身份，其中 `editorIds` 列出该扩展全部 editor ID；每个 Slot 自己的 `declaration.editorId` 与 Slot `id` 一致。
 
-### 可选的内页图标
+### 每个内页的 SVG 图标
 
-可在同一 `workbenchEditor` metadata 中添加 `presentation.icon`，从 Core 提供的语义 token 中选择：
+新建或更新内页时，必须提供与功能对应、在小尺寸仍可辨认的 SVG 图标。同一扩展中的不同内页也应有可区分的图形；不要给所有内页复制同一个通用拼图图标。图标是小空区域中识别内页的主要线索。
+
+在同一 `workbenchEditor` metadata 中声明 `presentation.iconSvg`。它是受限的路径描述，不是完整 SVG 字符串：
 
 ```js
-presentation: { icon: 'tool' }
+presentation: { iconSvg: { version: 1, paths: [
+  'M7 3h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z',
+  'M3 7h4M3 12h4M3 17h4M10 8h7M10 12h7M10 16h4',
+] } }
 ```
 
-可用 token：`plus-message`、`message`、`trajectory`、`folder`、`terminal`、`browser`、`file-preview`、`changes`、`plan`、`schedule`、`guide`、`subagent`、`tool`、`extension`、`panel`。
+上例是笔记本图形；请按内页功能重新设计，不能仅替换名称。Core 统一使用 `viewBox="0 0 24 24"`、无填充、`currentColor` 描边、圆角端点和转角；图标应留出边缘余量，避免过密细节。路径只允许 M/L/H/V/C/S/Q/T/A/Z 命令，每个路径最多 1024 字符，总计最多 4096 字符，最多 12 个路径。拒绝 SVG 标记、样式、事件、颜色、外部链接和图片；禁止 `innerHTML`。
 
-Core 会校验 token；缺省或未知值回退为通用 `extension` 图标。Core 自己绘制统一的线框图标，并根据 DSH 主题调整颜色。不要传 SVG、任意颜色、字符画或图片 URL。请选择在 14–20px 下仍容易辨认的符号；相同图标会用于内页标签、添加/替换菜单、区域收起预览和设置目录。
+开发时可用 Core client 导出的 `normalizeWorkbenchEditorSvgIcon()` 校验，返回 `undefined` 表示描述无效。校验通过只表示结构安全，不能代替视觉验收。必须验证 16/20/24px、浅色/深色主题、仅图标状态，以及悬停和键盘聚焦时名称可读。相同图标用于空区域、标签、添加/替换菜单、区域预览和设置目录。
+
+原有 `presentation.icon` 语义 token 继续兼容：`plus-message`、`message`、`trajectory`、`folder`、`terminal`、`browser`、`file-preview`、`changes`、`plan`、`schedule`、`guide`、`subagent`、`tool`、`extension`、`panel`。官方内页使用对应的独立语义图形。旧扩展没有有效图标时，Core 根据插件和内页身份生成稳定的几何回退标识，保留使用能力；该标识不保证功能语义或全局唯一性，也不满足新扩展的图标设计验收要求。
 
 ## 6. 扩展声明字段
 
@@ -403,7 +410,7 @@ Workbench Core `0.2.2-alpha.13` / DSH `0.2.1-rc.2` 保留 alpha.12 已实现的 
 
 本规范本身不表示任何第三方测试插件已经成功安装或激活。`packages/workbench-svgdeepseek-pet` 是历史测试扩展，**不是本规范或当前 Core 验收的前置条件**；相关源码、制品和证据仅用于历史追溯。
 
-仍需独立完成的验收包括：干净桌面 Profile 下扩展发现设置 UI；DSH 原生安装、启停、升级、卸载和重装恢复全流程；实际布局 stale reference 恢复；Creator 产物端到端安装；各扩展真实功能及资源路由；不同宿主能力表现。当前没有对扩展发布者做数字签名验证，没有 artifact digest 信任根，也没有运行时安全沙箱。自动化通过只表示代码合同测试通过。
+仍需独立完成的验收包括：干净桌面 Profile 下扩展发现设置 UI；DSH 原生安装、启停、升级、卸载和重装恢复全流程；实际布局 stale reference 恢复；Creator 产物端到端安装；各扩展真实功能及资源路由；不同宿主能力表现。17.2 完整分发已加入 Profile 发布身份的 Ed25519 签名和精确运行制品摘要验证；这不等于扩展作者认证或代码安全保证，也没有运行时安全沙箱。自动化通过只表示代码合同测试通过。
 
 ## 19. 最小发布信息
 
@@ -427,3 +434,12 @@ Desktop host result:
 Known unsupported/unverified behavior:
 ```
 
+
+
+## 20. 17.2 分发要求
+
+完整包支持普通持久 Bundle 的 client-only 和 client-host。声明 distribution.version=1、exportPolicy、runtimeKind、精确 runtimeFiles、requires；包含所有入口、必要静态资源、Bundle 配置和 LICENSE。Bundle row ID 必须全局唯一。依赖打入产物，或使用本代宿主提供的精确 peer；禁止安装构建脚本。client-only 只能有模板中的空 Host shim。
+
+inject 返回的 workbenchEditor 同时提供 portability.exportState/importState 与 distribution；Host 根据原生清单和文件校验补充 provenance。仅处理器输出的受限 JSON 可迁移，无状态内页使用明确空投影。配置恢复须精确匹配包名、版本、运行摘要、editor ID、scope 和授权，缺失项保留 Host 待恢复数据。
+
+新安装和启用后必须重启；实际注册通过才恢复配置并提交工作台。协议不会迁移 Session、模型、工作目录、凭据或整个 Profile。签名不是沙箱，静态闭包检查不是任意代码安全证明。

@@ -1,3 +1,4 @@
+import { normalizeWorkbenchEditorSvgIcon } from '../src/foundation/workbench-editor-icons.ts'
 import { readFileSync } from 'node:fs'
 import vm from 'node:vm'
 import { Context } from '@deepseek-ai/cordis'
@@ -35,8 +36,8 @@ describe('Workbench editor extension template identity', () => {
       },
     })
     expect(registration?.registrant).toBe(packageName)
-    const registrationMetadata = (registration?.inject as (() => { workbenchEditor: { presentation?: { icon?: string } } }) | undefined)?.()
-    expect(registrationMetadata?.workbenchEditor.presentation).toEqual({ icon: 'extension' })
+    const registrationMetadata = (registration?.inject as (() => { workbenchEditor: { presentation?: { iconSvg?: unknown } } }) | undefined)?.()
+    expect(normalizeWorkbenchEditorSvgIcon(registrationMetadata?.workbenchEditor.presentation?.iconSvg)?.paths).toHaveLength(2)
 
     const editors = [{
       id: 'workbench.example', label: 'Example', scope: 'root', pluginId: fiber.name,

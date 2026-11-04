@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "candidateId": "dsh-bay-0.2.2-alpha.17-dsh-0.2.1-rc.5",
+  "candidateId": "dsh-bay-0.2.2-alpha.17.2-dsh-0.2.1-rc.5",
   "product": "DSH Bay / 湾域",
-  "workbenchVersion": "0.2.2-alpha.17",
+  "workbenchVersion": "0.2.2-alpha.17.2",
   "dshGeneration": "0.2.1-rc.5",
   "upstream": {
     "repository": "https://github.com/deepseek-ai/deepseek-harness.git",
@@ -17,8 +17,13 @@
   },
   "delivery": {
     "mode": "core-only",
-    "defaultInstall": ["@dsh-workbench/core"],
-    "excludedModules": ["@dsh-workbench/conversation-suite", "@dsh-workbench/svgdeepseek-pet"],
+    "defaultInstall": [
+      "@dsh-workbench/core"
+    ],
+    "excludedModules": [
+      "@dsh-workbench/conversation-suite",
+      "@dsh-workbench/svgdeepseek-pet"
+    ],
     "more": "deferred-official-only",
     "pluginManager": "native-dsh-settings-entry",
     "repositoryStatus": "private-staging"
@@ -30,13 +35,15 @@
     "conversationMigration": "deferred"
   },
   "digests": {
-    "lockfile": "f8ccc800d6fe1a70a985f8e1dab7878b2c18926023c5cf63434ab3b624fb5fca",
+    "lockfile": "0c0ef887bc84c95ea8418872328157776b33815f8a739530996353e52cb4dfc7",
     "patch": "f8f5e33595034f7cae9a82a4525e58525520c47917fc3ac197d6ff10c07c100e"
   },
   "validation": {
     "sourceConsistency": "inherited-from-rc5-candidate",
-    "coreTests": 608,
-    "desktopAcceptance": "pending-real-dsh-rc5",
-    "typecheck": "blocked-existing-rc5-generated-source"
+    "coreTests": 642,
+    "coreTestFiles": 107,
+    "desktopAcceptance": "broader native desktop smoke still pending",
+    "typecheck": "blocked-existing-112-rc5-sidebar-workspace-errors",
+    "distributionAcceptance": "isolated real DSH web Profiles; private client-only + client-host; restart/config/function verified"
   }
 }

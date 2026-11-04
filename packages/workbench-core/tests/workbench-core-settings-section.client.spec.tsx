@@ -54,7 +54,7 @@ describe('official DSH settings section', () => {
     } as never} />)
 
     expect(view.container.querySelector('[data-workbench-settings="core"]')).not.toBeNull()
-    expect(view.container.textContent).toContain('工作台管理')
+    expect(view.container.textContent).not.toContain('工作台管理')
     expect(view.container.textContent).toContain('内页与扩展')
   })
 

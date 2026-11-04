@@ -9,7 +9,7 @@ const MAX_FILE = 64 * 1024 * 1024
 const MAX_ENTRIES = 4096
 
 /** Inspect trusted npm bytes without extracting paths or executing package code. */
-export async function readWorkbenchArtifactFiles(bytes: Uint8Array): Promise<ReadonlyMap<string, Buffer>> {
+export async function readWorkbenchArtifactFiles(bytes: Uint8Array, options: { requireLegacyClient?: boolean } = {}): Promise<ReadonlyMap<string, Buffer>> {
   const expanded = gunzipSync(bytes, { maxOutputLength: MAX_EXPANDED })
   const files = new Map<string, Buffer>(), paths = new Set<string>()
   await new Promise<void>((done, reject) => {
@@ -44,7 +44,7 @@ export async function readWorkbenchArtifactFiles(bytes: Uint8Array): Promise<Rea
     })
     parser.end(expanded)
   })
-  if (!files.has('package.json') || !files.has('lib/client.js')) throw new Error('Workbench artifact lacks its runtime files')
+  if (!files.has('package.json') || (options.requireLegacyClient !== false && !files.has('lib/client.js'))) throw new Error('Workbench artifact lacks its runtime files')
   const fileKeys = new Set([...files.keys()].map(path => path.toLowerCase()))
   for (const path of files.keys()) {
     const parts = path.split('/')

@@ -1,3 +1,4 @@
+import { normalizeWorkbenchEditorSvgIcon } from '../foundation/workbench-editor-icons.ts'
 import type { WorkbenchEditorDeclarationV1 } from '../module-contract.ts'
 import type { WorkbenchExtensionDeclarationV1 } from '../workbench-extension-access.ts'
 import { normalizeWorkbenchEditorIconName, type WorkbenchEditorCatalogRow } from '../foundation/catalog.ts'
@@ -8,8 +9,10 @@ export interface WorkbenchEditorRegistrationMetadataV1 {
   readonly schemaVersion: 1
   readonly declaration?: WorkbenchEditorDeclarationV1
   readonly extension?: WorkbenchExtensionDeclarationV1
+  readonly portability?: WorkbenchEditorCatalogRow['portability']
+  readonly distribution?: WorkbenchEditorCatalogRow['distribution']
   readonly resourceOnly?: boolean
-  readonly presentation?: { readonly icon?: unknown }
+  readonly presentation?: { readonly icon?: unknown; readonly iconSvg?: unknown }
 }
 
 interface DshSlotEntryLike {
@@ -21,7 +24,7 @@ interface DshSlotEntryLike {
     /** Legacy fields are intentionally read only as a compatibility fallback. */
     readonly declaration?: WorkbenchEditorDeclarationV1
     readonly extension?: WorkbenchExtensionDeclarationV1
-    readonly presentation?: { readonly icon?: unknown }
+    readonly presentation?: { readonly icon?: unknown; readonly iconSvg?: unknown }
   }
   readonly registrant?: string | undefined
   readonly inject?: ((...args: never[]) => Record<string, unknown>) | undefined
@@ -62,6 +65,7 @@ export function workbenchEditorCatalogRowFromSlotEntry(
   const metadata = registrationMetadata(entry)
   const label = resolveSlotLabel(entry.options.label as string | (() => string) | undefined) ?? entry.options.id ?? ''
   const icon = normalizeWorkbenchEditorIconName(metadata?.presentation?.icon)
+  const iconSvg = normalizeWorkbenchEditorSvgIcon(metadata?.presentation?.iconSvg)
   return {
     id: entry.options.id ?? '',
     label,
@@ -71,7 +75,10 @@ export function workbenchEditorCatalogRowFromSlotEntry(
     ...(entry.registrant === undefined ? {} : { pluginId: entry.registrant }),
     ...(metadata?.declaration === undefined ? {} : { declaration: metadata.declaration }),
     ...(metadata?.extension === undefined ? {} : { extension: metadata.extension }),
+    ...(metadata?.portability?.version !== 1 ? {} : { portability: metadata.portability }),
+    ...(metadata?.distribution?.version !== 1 ? {} : { distribution: metadata.distribution }),
     ...(icon === undefined ? {} : { icon }),
+    ...(iconSvg === undefined ? {} : { iconSvg }),
     order: entry.options.order ?? 0,
   }
 }

@@ -1,4 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
+import { connect } from 'node:net'
+import { createHash } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import { createWorkbenchShareGateway, selectPrivateIPv4 } from '../src/host-workbench-share-gateway.ts'
 import { createWorkbenchShareSessionManager } from '../src/host-workbench-share-session.ts'
@@ -24,7 +26,7 @@ describe('Workbench LAN share gateway', () => {
     const gatewayHost = selectPrivateIPv4()
     if (gatewayHost === undefined) return
     let seenOwnerCookie = ''
-    const upstream = await listen(createServer(async (request: IncomingMessage, response: ServerResponse) => {
+    const upstreamServer=createServer(async (request: IncomingMessage, response: ServerResponse) => {
       if (request.url?.startsWith('/workbench?workbench=')) {
         response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'set-cookie': ['dsh-owner=owner-value; HttpOnly'] })
         response.end('<!doctype html><html data-workbench-document="v1"><head></head><body><div id="root"></div></body></html>')
@@ -42,7 +44,15 @@ describe('Workbench LAN share gateway', () => {
         return
       }
       response.writeHead(404); response.end()
-    }))
+    })
+    const forwarded:Buffer[]=[]
+    upstreamServer.on('upgrade',(request,socket)=>{
+      const accept=createHash('sha1').update(String(request.headers['sec-websocket-key'])+'258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64')
+      socket.write('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: '+accept+'\r\n\r\n')
+      socket.on('data',chunk=>forwarded.push(Buffer.from(chunk)))
+      socket.on('end',()=>socket.destroy())
+    })
+    const upstream = await listen(upstreamServer)
     const manager = createWorkbenchShareSessionManager({ randomToken: () => `s-${'x'.repeat(42)}` })
     let viewCounter = 0
     const gateway = await createWorkbenchShareGateway({
@@ -69,6 +79,21 @@ describe('Workbench LAN share gateway', () => {
       expect(proxied.status).toBe(200)
       expect(await proxied.text()).toBe('ok')
       expect(seenOwnerCookie).toBe('dsh-owner=owner-value')
+      for(const path of ['/api/workbench/distribution/v4/export','/api/workbenchDistribution/export','/api/pluginManager/installBundle','/api/dynamicCordisRunner/run','/api/%77orkbench/distribution/v4/identities']){
+        const blocked=await fetch('http://'+gateway.host+':'+gateway.port+path,{method:'POST',headers:{cookie:shareCookie!,'content-type':'application/json'},body:'{}'})
+        expect(blocked.status).toBe(403)
+      }
+      await new Promise<void>((resolve,reject)=>{
+        const socket=connect(gateway.port,gateway.host),timer=setTimeout(()=>{socket.destroy();reject(Error('guest mux was not closed'))},2000)
+        socket.once('connect',()=>socket.write('GET /api/remote.mux HTTP/1.1\r\nHost: '+gateway.host+':'+gateway.port+'\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGVzdC1kaXN0cmlidXRpb24=\r\nSec-WebSocket-Version: 13\r\nCookie: '+shareCookie+'\r\n\r\n'))
+        socket.once('data',()=>{
+          const text=JSON.stringify({type:'open',streamId:'1',endpoint:'pluginManager/installBundle',payload:{}})
+          const frame=(source:string,opcode:number,final:boolean)=>{const bytes=Buffer.from(source),mask=Buffer.from([1,2,3,4]);return Buffer.concat([Buffer.from([(final?128:0)|opcode,128|bytes.length]),mask,Buffer.from(bytes.map((b,i)=>b^mask[i%4]!))])}
+          socket.write(frame(text.slice(0,40),1,false));socket.write(frame(text.slice(40),0,true))
+        })
+        socket.once('close',()=>{clearTimeout(timer);resolve()});socket.once('error',reject)
+      })
+      expect(forwarded).toEqual([])
       const redirect = await fetch(`http://${gateway.host}:${String(gateway.port)}/api/redirect`, { redirect: 'manual', headers: { cookie: shareCookie! } })
       expect(redirect.status).toBe(302)
       expect(redirect.headers.get('location')).toBe(`http://${gateway.host}:${String(gateway.port)}/workbench?keep=1`)
