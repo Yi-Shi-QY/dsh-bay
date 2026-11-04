@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   conversationResourceActionFor,
+  migrateWorkbenchInteractionPolicy,
   DEFAULT_WORKBENCH_CONVERSATION_INTERACTION_POLICY,
   normalizeWorkbenchConversationInteractionPolicy,
 } from '../src/workbench-interaction-policy.ts'
@@ -8,8 +9,8 @@ import { decodeWorkbenchSettingsV4 } from '../src/foundation/persistence.ts'
 
 describe('Workbench Conversation interaction policy', () => {
   it('keeps native resource defaults compatible with the existing Area route', () => {
-    expect(conversationResourceActionFor('file', undefined)).toEqual({ handled: true })
-    expect(conversationResourceActionFor('changes-review', DEFAULT_WORKBENCH_CONVERSATION_INTERACTION_POLICY)).toEqual({ handled: true })
+    expect(conversationResourceActionFor('file', undefined)).toEqual({ handled: true, options: { floating: true } })
+    expect(conversationResourceActionFor('changes-review', DEFAULT_WORKBENCH_CONVERSATION_INTERACTION_POLICY)).toEqual({ handled: true, options: { floating: true } })
   })
 
   it('turns user placement choices into explicit native-tab actions', () => {
@@ -29,11 +30,11 @@ describe('Workbench Conversation interaction policy', () => {
     }))).toEqual({ handled: true, options: { ignoreResource: true } })
     expect(conversationResourceActionFor('file', normalizeWorkbenchConversationInteractionPolicy({
       conversationResources: { file: { enabled: true, placement: 'official-sidebar' } },
-    }))).toEqual({ handled: false })
+    }))).toEqual({ handled: true, options: { floating: true } })
   })
 
   it('includes browser links in the same configurable resource policy', () => {
-    expect(conversationResourceActionFor('browser', undefined)).toEqual({ handled: true })
+    expect(conversationResourceActionFor('browser', undefined)).toEqual({ handled: true, options: { floating: true } })
     expect(conversationResourceActionFor('browser', normalizeWorkbenchConversationInteractionPolicy({
       conversationResources: { browser: { enabled: false, placement: 'disabled' } },
     }))).toEqual({ handled: true, options: { ignoreResource: true } })
@@ -45,7 +46,7 @@ describe('Workbench Conversation interaction policy', () => {
     }))).toEqual({ handled: true })
     expect(conversationResourceActionFor('future-resource', normalizeWorkbenchConversationInteractionPolicy({
       unknownResource: 'official-sidebar',
-    }))).toEqual({ handled: false })
+    }))).toEqual({ handled: true, options: { floating: true } })
     expect(conversationResourceActionFor('future-resource', normalizeWorkbenchConversationInteractionPolicy({
       unknownResource: 'disabled',
     }))).toEqual({ handled: true, options: { ignoreResource: true } })
@@ -79,6 +80,14 @@ describe('Workbench Conversation interaction policy', () => {
       },
       layoutTemplates: {}, invalidWorkbenches: {}, sessionMarkers: {},
     })
-    expect(decoded?.interactionPolicy?.conversationResources.file).toEqual({ enabled: true, placement: 'activate-or-add' })
+    expect(decoded?.interactionPolicy?.conversationResources.file).toEqual({ enabled: true, placement: 'floating' })
   })
+})
+
+it('migrates enabled extension preferences once and preserves disabled choices', () => {
+  const first = migrateWorkbenchInteractionPolicy({ conversationResources: { file: { enabled: false, placement: 'disabled' }, custom: { enabled: true, placement: 'new-tab' } } })
+  expect(first.conversationResources.file?.enabled).toBe(false)
+  expect(first.conversationResources.custom?.placement).toBe('floating')
+  const edited = { ...first, conversationResources: { ...first.conversationResources, custom: { enabled: true, placement: 'new-tab' as const } } }
+  expect(migrateWorkbenchInteractionPolicy(edited)).toEqual(edited)
 })

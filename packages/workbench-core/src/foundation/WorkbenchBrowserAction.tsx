@@ -26,7 +26,7 @@ export function WorkbenchBrowserAction({
     ?? (windowSnapshot.request?.workbenchId === workbenchId ? windowSnapshot.request : undefined)
   const handoffStatus = request?.status
   const openingInBrowser = handoffStatus === 'requested' || handoffStatus === 'redeemed'
-  const browserViewReady = handoffStatus === 'ready'
+  const browserViewReady = handoffStatus === 'ready' || handoffStatus === 'failed' && request?.code === 'browser-view-heartbeat-timeout'
   const reclaimPending = handoffStatus === 'reclaiming'
   const hostPreparing = handoffStatus === 'preparing'
   const isBusy = preparing || opening || reclaiming || openingInBrowser || reclaimPending || hostPreparing

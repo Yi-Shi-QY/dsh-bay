@@ -54,8 +54,9 @@ describe('Workbench resource opener', () => {
       conversationResources: { file: { enabled: true, placement: 'official-sidebar' } },
     })
 
-    expect(routeWorkbenchConversationResource(openNativeTab, address, nativePolicy, undefined, 'session-a')).toBe('native-fallback')
-    expect(openNativeTab).not.toHaveBeenCalled()
+    expect(routeWorkbenchConversationResource(openNativeTab, address, nativePolicy, undefined, 'session-a')).toBe('handled')
+    expect(openNativeTab).toHaveBeenCalledWith('documentpreview', { floating: true, nativeContentId: address, resourceAddress: address })
+    openNativeTab.mockClear()
     expect(routeWorkbenchConversationResource(openNativeTab, address, undefined, undefined, 'session-b')).toBe('rejected')
     expect(openNativeTab).not.toHaveBeenCalled()
     expect(routeWorkbenchConversationResource(() => false, address, undefined, undefined, 'session-a')).toBe('rejected')
@@ -97,7 +98,9 @@ describe('Workbench resource opener', () => {
       sessionId: 'child-a', parentSessionId: 'parent-a',
     })).toBe('handled')
     expect(openNativeTab).toHaveBeenCalledWith('documentpreview', {
+      floating: true,
       nativeContentId: childFile,
+      resourceSource: { sessionId: 'child-a', parentSessionId: 'parent-a' },
       resourceAddress: childFile,
     })
   })
@@ -168,6 +171,7 @@ describe('Workbench resource opener', () => {
     )).toBe('handled')
     expect(openNativeTab).toHaveBeenCalledWith('workbench.report', {
       editorId: 'extension.report-viewer',
+      resourceSource: { sessionId: 'session-a' },
       resourceType: 'workbench.report',
       nativeContentId: address,
       resourceAddress: address,
@@ -192,6 +196,7 @@ describe('Workbench resource opener', () => {
     )).toBe('handled')
     expect(openNativeTab).toHaveBeenCalledWith('workbench.report', {
       editorId: 'extension.report-viewer',
+      resourceSource: { sessionId: 'session-a' },
       resourceType: 'workbench.report',
       revealIfOpened: false,
       nativeContentId: address,
@@ -217,7 +222,7 @@ describe('Workbench resource opener', () => {
       undefined,
       'session-a',
       { sessionId: 'session-a' },
-    )).toBe('native-fallback')
+    )).toBe('rejected')
   })
 
   it('reads the native 0.2 plan and plan-review address shapes', () => {

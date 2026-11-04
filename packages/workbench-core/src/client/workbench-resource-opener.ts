@@ -225,7 +225,7 @@ export function openWorkbenchResource(
 function actionForPlacement(
   placement: WorkbenchConversationResourceBindingV1['defaultPlacement'],
 ): { readonly handled: boolean; readonly options?: Readonly<Record<string, unknown>> } {
-  if (placement === 'official-sidebar') return { handled: false }
+  if (placement === 'official-sidebar' || placement === 'floating') return { handled: true, options: { floating: true } }
   if (placement === 'disabled') return { handled: true, options: { ignoreResource: true } }
   if (placement === 'new-tab') return { handled: true, options: { revealIfOpened: false } }
   if (placement === 'replace-current') return { handled: true, options: { replaceTab: true } }
@@ -272,9 +272,8 @@ export function routeWorkbenchConversationResource(
     if (unknown === 'disabled') return 'handled'
     // `module-default` is deliberately strict: without a Workbench module
     // declaration there is no owner or lifecycle contract to invoke. The
-    // caller must explicitly choose `official-sidebar` before a newer DSH
-    // resource is allowed to escape to the global native owner.
-    if (unknown === 'official-sidebar') return 'native-fallback'
+    // legacy sidebar preference cannot authorize an undeclared resource.
+    if (unknown === 'official-sidebar') return 'rejected'
     return 'rejected'
   }
   if (!action.handled) return 'native-fallback'
@@ -282,6 +281,7 @@ export function routeWorkbenchConversationResource(
   return openWorkbenchResource(openNativeTab, address, {
     ...(placement ?? {}),
     ...(action.options ?? {}),
+    ...(source ? { resourceSource: source } : {}),
   }, undefined, declaredBinding) ? 'handled' : 'rejected'
 }
 

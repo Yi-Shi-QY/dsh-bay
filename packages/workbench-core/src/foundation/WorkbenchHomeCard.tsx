@@ -5,6 +5,7 @@ import { areasOf, type WorkbenchDocumentV3 } from './document-v3.ts'
 import type { WorkbenchEditorCatalogRow } from './catalog.ts'
 import { WorkbenchHomePreview } from './WorkbenchHomePreview.tsx'
 import css from './WorkbenchHome.module.css'
+import { FloatingWorkspaceUnread } from './FloatingWorkspaceContext.tsx'
 
 type HomeRow = WorkbenchDirectorySnapshot['rows'][number]
 export function WorkbenchHomeCard({ row, document, editors, opened, writable, busy, onOpen, onRestore, onArchive, onExport, onManage, feedback }: {
@@ -39,7 +40,7 @@ export function WorkbenchHomeCard({ row, document, editors, opened, writable, bu
     </div>
     <div className={css.layoutPreview} aria-hidden="true">{document ? <WorkbenchHomePreview node={document.root} editors={editors} /> : <span className={css.previewUnavailable}>布局预览暂不可用</span>}</div>
     <div className={css.cardBody}>
-      <h3 title={row.name}>{row.name}</h3>
+      <h3 title={row.name}>{row.name}<FloatingWorkspaceUnread workbenchId={row.workbenchId} /></h3>
       <p className={css.cardDescription} title={row.description}>{row.description || '会话、文件和工具，在这里各就其位。'}</p>
       <div className={css.tags}>{row.tags?.slice(0, 3).map(tag => <span key={tag} title={tag}>{tag}</span>)}{row.tags && row.tags.length > 3 ? <span title={row.tags.slice(3).join('、')}>+{row.tags.length - 3}</span> : null}</div>
       <div className={css.cardMeta}><span>{areas ? areas.length + ' 个区域 · ' + pageCount + ' 个内页' : '布局摘要不可用'}</span><time dateTime={row.updatedAt > 0 ? new Date(row.updatedAt).toISOString() : undefined} title={'最后修改：' + (row.updatedAt > 0 ? new Date(row.updatedAt).toLocaleString() : modified)}>{modified}</time></div>

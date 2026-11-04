@@ -7,6 +7,7 @@ import {
   type WorkbenchWindowSnapshotV1,
 } from './workbench-window-controller.ts'
 import { WORKBENCH_WINDOW_RPC_CHANNEL, workbenchWindowRpcEndpoint } from '../workbench-window-rpc.ts'
+import type { FloatingHandoffV1 } from '../floating-handoff.ts'
 
 const PREPARE_TIMEOUT_MS = 8_000
 const STATUS_TIMEOUT_MS = 4_000
@@ -15,7 +16,10 @@ const STATUS_POLL_INTERVAL_MS = 2_000
 const HEARTBEAT_RECOVERY_WINDOW_MS = 2 * 60_000
 
 interface PreparedView { readonly windowId: string; readonly url: string; readonly expiresAt: number }
-interface BrowserWindowControllerOptions { readonly rpc?: ClientConnectionRpc | undefined }
+interface BrowserWindowControllerOptions {
+  readonly rpc?: ClientConnectionRpc | undefined
+  readonly floating?: { snapshot(workbenchId: string): FloatingHandoffV1; restore(workbenchId: string, value: unknown): void; incomplete?(workbenchId: string): void }
+}
 
 function unwrap(result: ConnectionRpcResult<unknown>): unknown {
   if (result.ok) return result.value
@@ -61,7 +65,7 @@ function stableSnapshot(value: WorkbenchWindowSnapshotV1): WorkbenchWindowSnapsh
 }
 
 /** Browser carrier uses DSH Connection RPC for both the desktop IPC and web transports. */
-export function createBrowserWindowController({ rpc }: BrowserWindowControllerOptions = {}): WorkbenchWindowControllerV1 & {
+export function createBrowserWindowController({ rpc, floating }: BrowserWindowControllerOptions = {}): WorkbenchWindowControllerV1 & {
   prepare(workbenchId: string): Promise<boolean>
   setRpc(rpc?: ClientConnectionRpc): void
   dispose(): void
@@ -89,11 +93,26 @@ export function createBrowserWindowController({ rpc }: BrowserWindowControllerOp
     publish({ supported: activeRpc !== undefined, windows: [], requests: [...requests.values()], request })
   }
   const requestFor = (workbenchId: string) => requests.get(workbenchId)
+  const restored = new Set<string>()
+  const restoring = new Map<string, Promise<void>>()
   const call = async (endpoint: string, payload: unknown, timeoutMs = STATUS_TIMEOUT_MS): Promise<unknown> => {
     if (activeRpc === undefined) throw new Error('dsh-connection-unavailable')
     const signal = AbortSignal.timeout(timeoutMs)
     const result = await activeRpc.call(WORKBENCH_WINDOW_RPC_CHANNEL, workbenchWindowRpcEndpoint(endpoint), payload, signal)
     return unwrap(result)
+  }
+  const restoreFloating = async (workbenchId: string, windowId: string) => {
+    if (!floating || restored.has(windowId)) return
+    const pending = restoring.get(windowId)
+    if (pending) return pending
+    const task = (async () => {
+      const value = await call('floating-read', { windowId }) as { snapshot?: unknown; incomplete?: boolean }
+      if (value.snapshot != null) floating.restore(workbenchId, value.snapshot)
+      else if (value.incomplete) floating.incomplete?.(workbenchId)
+      restored.add(windowId)
+    })()
+    restoring.set(windowId, task)
+    try { await task } finally { restoring.delete(windowId) }
   }
   const prepare = async (workbenchId: string): Promise<boolean> => {
     if (disposed || !/^[A-Za-z0-9_-]{1,160}$/u.test(workbenchId)) return false
@@ -159,6 +178,7 @@ export function createBrowserWindowController({ rpc }: BrowserWindowControllerOp
           continue
         }
         if (result.status === 'reclaimed') {
+          await restoreFloating(workbenchId, windowId)
           publishRequest({ workbenchId, status: 'reclaimed', windowId })
           return
         }
@@ -168,6 +188,7 @@ export function createBrowserWindowController({ rpc }: BrowserWindowControllerOp
           continue
         }
         if (result.status === 'failed' || result.status === 'expired' || result.status === 'closed') {
+          if (result.status === 'closed') await restoreFloating(workbenchId, windowId)
           publishRequest({ workbenchId, status: result.status as WorkbenchWindowRequestV1['status'], windowId,
             ...(typeof result.code === 'string' ? { code: result.code } : {}) })
           return
@@ -186,10 +207,12 @@ export function createBrowserWindowController({ rpc }: BrowserWindowControllerOp
       try {
         const result = await call('status', { windowId }) as { status?: unknown }
         if (result.status === 'reclaimed') {
+          await restoreFloating(workbenchId, windowId)
           publishRequest({ workbenchId, status: 'reclaimed', windowId })
           return true
         }
         if (result.status === 'closed') {
+          await restoreFloating(workbenchId, windowId)
           publishRequest({ workbenchId, status: 'closed', windowId })
           return true
         }
@@ -211,6 +234,15 @@ export function createBrowserWindowController({ rpc }: BrowserWindowControllerOp
       const view = prepared.get(workbenchId)
       if (disposed || activeRpc === undefined) return { status: 'unsupported', code: 'dsh-connection-unavailable' }
       if (view === undefined || view.expiresAt <= Date.now()) return { status: 'failed', code: 'browser-link-not-ready' }
+      // Freeze the source before snapshotting; async staging must not race edits.
+      publishRequest({ workbenchId, status: 'requested', windowId: view.windowId })
+      try {
+        if (floating) await call('floating-stage', { windowId: view.windowId, snapshot: floating.snapshot(workbenchId) }, PREPARE_TIMEOUT_MS)
+      } catch (error) {
+        const code = error instanceof Error ? error.message : 'floating-handoff-stage-failed'
+        publishRequest({ workbenchId, status: 'failed', code })
+        return { status: 'failed', code }
+      }
       prepared.delete(workbenchId)
       const generation = nextGeneration(workbenchId)
       try {
@@ -240,7 +272,8 @@ export function createBrowserWindowController({ rpc }: BrowserWindowControllerOp
     async reclaim(workbenchId) {
       const current = requestFor(workbenchId)
       if (disposed || activeRpc === undefined || current?.workbenchId !== workbenchId
-        || (current.status !== 'ready' && current.status !== 'reclaiming')
+        || (current.status !== 'ready' && current.status !== 'reclaiming'
+          && !(current.status === 'failed' && current.code === 'browser-view-heartbeat-timeout'))
         || !/^[A-Za-z0-9-]{36}$/u.test(current.windowId ?? '')) {
         return { status: 'failed', code: 'browser-view-not-ready' }
       }
@@ -250,6 +283,11 @@ export function createBrowserWindowController({ rpc }: BrowserWindowControllerOp
       publishRequest({ workbenchId, status: 'reclaiming', windowId })
       try {
         const result = await call('reclaim', { windowId }) as { status?: unknown }
+        if (result.status === 'reclaimed' && !disposed && generation === generationFor(workbenchId)) {
+          await restoreFloating(workbenchId, windowId)
+          publishRequest({ workbenchId, status: 'reclaimed', windowId })
+          return { status: 'reclaimed' }
+        }
         if (disposed || generation !== generationFor(workbenchId) || result.status !== 'reclaim-requested') {
           throw new Error('browser-view-reclaim-rejected')
         }

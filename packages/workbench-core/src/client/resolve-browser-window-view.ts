@@ -2,6 +2,7 @@ import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type { ClientConnectionRpc, ConnectionRpcResult } from '@deepseek-ai/dsh-client-connection/client'
 import type { WorkbenchWindowViewV1 } from './workbench-window-view.ts'
 import { WORKBENCH_WINDOW_RPC_CHANNEL, workbenchWindowRpcEndpoint } from '../workbench-window-rpc.ts'
+import type { FloatingHandoffV1 } from '../floating-handoff.ts'
 
 const STORAGE_KEY = 'dsh-workbench.browser-view.v1'
 const RPC_TIMEOUT_MS = 8_000
@@ -178,6 +179,7 @@ export function startBrowserWorkbenchHeartbeat(
   ctx: ClientContext,
   view: WorkbenchWindowViewV1,
   onReclaimState?: (state: 'requested' | 'reclaimed') => void,
+  floatingSnapshot?: () => FloatingHandoffV1,
 ): () => void {
   const rpc = rpcFor(ctx)
   if (rpc === undefined || typeof window === 'undefined') return () => {}
@@ -203,7 +205,7 @@ export function startBrowserWorkbenchHeartbeat(
     }
     if (!await flushWorkbench()) return
     try {
-      const result = await call(rpc, 'reclaimed', { closeToken: view.closeToken }) as { status?: unknown }
+      const result = await call(rpc, 'reclaimed', { closeToken: view.closeToken, ...(floatingSnapshot ? { floating: floatingSnapshot() } : {}) }) as { status?: unknown }
       if (result.status !== 'reclaimed' || stopped) return
       stopped = true
       window.clearInterval(timer)
@@ -217,8 +219,16 @@ export function startBrowserWorkbenchHeartbeat(
     pending = true
     void call(rpc, 'heartbeat', { windowId: view.windowId })
       .then(async result => {
-        if (typeof result === 'object' && result !== null && (result as { status?: unknown }).status === 'reclaim-requested') {
+        const status = typeof result === 'object' && result !== null ? (result as { status?: unknown }).status : undefined
+        if (status === 'reclaim-requested') {
           await acknowledgeReclaim()
+        } else if (status === 'reclaimed' || status === 'closed' || status === 'expired' || status === 'failed') {
+          // A receipt response may be lost, or the owner may reclaim a stale
+          // lease. Reconnection must never revive the old browser controller.
+          stopped = true
+          window.clearInterval(timer)
+          forgetView()
+          onReclaimState?.('reclaimed')
         }
       })
       .catch(() => {}).finally(() => {
@@ -240,10 +250,12 @@ export function startBrowserWorkbenchHeartbeat(
 }
 
 /** Best-effort lifecycle handoff when the browser view is closed or unloaded. */
-export function reportBrowserWorkbenchClosed(ctx: ClientContext, view: WorkbenchWindowViewV1): void {
+export function reportBrowserWorkbenchClosed(ctx: ClientContext, view: WorkbenchWindowViewV1, floatingSnapshot?: () => FloatingHandoffV1): void {
   if (typeof navigator === 'undefined' || typeof navigator.sendBeacon !== 'function') return
   try {
-    const payload = new Blob([JSON.stringify({ closeToken: view.closeToken })], { type: 'text/plain;charset=UTF-8' })
+    let floating: FloatingHandoffV1 | undefined
+    try { floating = floatingSnapshot?.() } catch { /* Preserve the source copy when a busy tab cannot transfer. */ }
+    const payload = new Blob([JSON.stringify({ closeToken: view.closeToken, ...(floating ? { floating } : {}) })], { type: 'text/plain;charset=UTF-8' })
     navigator.sendBeacon('/api/workbench-window-close', payload)
   } catch { /* page teardown must never affect DSH or Workbench state */ }
 }

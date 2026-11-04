@@ -14,7 +14,8 @@ export function settingsTargetWritable(context: WorkbenchSettingsContextV1, id: 
   if (context.mode === 'browser-workbench') return context.workbenchId === id
   const snapshot = windows?.getSnapshot()
   return !(snapshot?.requests ?? (snapshot?.request ? [snapshot.request] : [])).some(row => row.workbenchId === id
-    && ['requested', 'redeemed', 'ready', 'reclaiming'].includes(row.status))
+    && (['requested', 'redeemed', 'ready', 'reclaiming'].includes(row.status)
+      || row.status === 'failed' && ['browser-view-heartbeat-timeout', 'browser-view-reclaim-timeout'].includes(row.code ?? '')))
 }
 
 /** Project before rendering. This is a product scope, not an account permission boundary. */

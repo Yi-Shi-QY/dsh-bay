@@ -1,3 +1,7 @@
+import { RetainedEditorTarget, useFloatingWorkspace, FloatingWorkspaceUnread } from './FloatingWorkspaceContext.tsx'
+import type { FloatingWorkspaceRuntime } from '../client/floating-workspace-runtime.ts'
+import { floatingInstanceKey } from '../client/floating-workspace-runtime.ts'
+import { WorkbenchFloatingWorkspace, FloatingWorkspaceToolbarButton } from './WorkbenchFloatingWorkspace.tsx'
 import { WorkbenchEmptyArea } from './WorkbenchEmptyArea.tsx'
 import { WorkbenchEditorPicker } from './WorkbenchEditorPicker.tsx'
 import type { WorkbenchEditorSvgIconV1 } from './workbench-editor-icons.ts'
@@ -59,7 +63,7 @@ import {
 import { sessionBindingCopy } from './binding-copy.ts'
 import type { WorkbenchDirectory } from './frame-settings-adapter.ts'
 import {
-  applyWorkbenchCommandV3, migrateDocumentV2ToV3, projectDocumentV3ToLayoutV2,
+  applyWorkbenchCommandV3, migrateDocumentV2ToV3, projectDocumentV3ToLayoutV2, validateWorkbenchDocumentV3,
 } from './document-v3.ts'
 import { buildWorkbenchInventory } from './workbench-inventory.ts'
 import {
@@ -142,7 +146,7 @@ import {
 } from './split-resize-metrics.ts'
 import css from './WorkbenchFrame.module.css'
 import { WorkbenchBrowserAction } from './WorkbenchBrowserAction.tsx'
-import { createPendingSessionTab, selectableWorkbenchEditors } from './editor-selection.ts'
+import { createPendingSessionTab, prepareFloatingTabForArea, selectableWorkbenchEditors } from './editor-selection.ts'
 import type { WorkbenchRuntimeMetricsSinkV1 } from './workbench-runtime-metrics.ts'
 import { WorkbenchBrowserControlPage } from './WorkbenchBrowserControlPage.tsx'
 import { closeWorkbenchNative } from '../client/native-sidebar-area-editor.tsx'
@@ -203,6 +207,7 @@ export type WorkbenchFrameProps =
     bindNavigation: (handler: WorkbenchNavigationHandler) => () => void
     selectSession: (sessionId: SessionId) => void
     settings: SettingsScope<WorkbenchSettings>
+    floatingRuntime?: FloatingWorkspaceRuntime
     editorCatalog: WorkbenchEditorCatalog
     extensionRegistry?: WorkbenchExtensionRegistryV1
     sidebarCompatibility: SidebarCompatibilityProbe
@@ -306,7 +311,7 @@ function findAreaTabElement(root: Element | null, tabId: string): HTMLElement | 
  * render the surface at body level, where one fixed positioning algorithm can
  * flip and clamp it without knowing how deeply nested the Area is.
  */
-function WorkbenchFloatingMenu({
+export function WorkbenchFloatingMenu({
   kind, ownerId, anchorRef, surfaceRef, side, align = 'start', className, label, children,
 }: {
   kind: 'editor' | 'area' | 'binding'
@@ -881,6 +886,7 @@ function withoutRecordKey<T>(
 
 export function WorkbenchFrame(props: WorkbenchFrameProps) {
   const resizeCanvasRef = useRef<HTMLDivElement>(null)
+  const floatingPinPending = useRef(false)
   const {
     renderSlot, useSessions, useWorkspaces, bindLayout, bindNavigation, editorCatalog,
     selectSession, settings, sidebarCompatibility, projectNeutral = false, embeddedDesktop = false, desktopControls,
@@ -1583,7 +1589,12 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
     })
   }, [current, settings, patchLayout])
 
+  const guardedCommands = useRef(new WeakSet<object>())
+  const pendingDestructiveCommands = useRef(new Set<string>())
   const commit = useCallback<Commit>((command) => {
+    if (floatingPinPending.current) return false
+    const currentWorkbenchId = props.floatingRuntime?.visibleWorkbenchId
+    if (currentWorkbenchId && props.floatingRuntime?.hasControl?.(currentWorkbenchId) === false) return false
     if (browserOwnedWorkbench) {
       setStateDiagnostic('当前工作台正在浏览器中打开，先收回到 DSH 客户端后再编辑。')
       return false
@@ -1596,8 +1607,32 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
       setStateDiagnostic('工作台布局已锁定，解锁后才能调整区域尺寸。')
       return false
     }
-    if (applyLayoutCommand(documentRef.current, command) === documentRef.current) return false
-    if (command.type === 'close-tab') closeWorkbenchNative(command.tabId)
+    const before = documentRef.current
+    const candidate = applyLayoutCommand(before, command)
+    if (candidate === before) return false
+    if (!validateWorkbenchDocumentV3(migrateDocumentV2ToV3(candidate))) {
+      setStateDiagnostic('此操作无法生成有效布局，已保留原工作台和内页。请检查区域绑定后重试。')
+      return false
+    }
+    const nextTabs = tabsOf(candidate.root)
+    const displaced = tabsOf(before.root).filter(old => {
+      const next = nextTabs.find(tab => tab.id === old.id)
+      return !next || next.editorId !== old.editorId || next.sessionId !== old.sessionId || next.bindingGeneration !== old.bindingGeneration
+        || command.type === 'replace-tab' && command.tabId === old.id
+    })
+    if (displaced.length && props.floatingRuntime && !guardedCommands.current.has(command)) {
+      const runtime = props.floatingRuntime, owner = accountRef.current, ownerWorkbenchId = currentWorkbenchId
+      if (displaced.some(tab => pendingDestructiveCommands.current.has(tab.id) || runtime.find(tab.id, ownerWorkbenchId)?.busy)) return false
+      for (const tab of displaced) pendingDestructiveCommands.current.add(tab.id)
+      void (async () => {
+        try {
+          for (const tab of displaced) if (!await runtime.authorizeClose(tab.id, ownerWorkbenchId)) return
+          if (accountRef.current !== owner || runtime.visibleWorkbenchId !== ownerWorkbenchId || documentRef.current !== before) return
+          guardedCommands.current.add(command); commit(command)
+        } finally { for (const tab of displaced) pendingDestructiveCommands.current.delete(tab.id) }
+      })()
+      return false
+    }
     setLayout((previous) => {
       const next = applyLayoutCommand(previous, command)
       if (next === previous) return previous
@@ -1613,8 +1648,12 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
       })
       return next
     })
+    for (const tab of displaced) {
+      if (props.floatingRuntime?.find(tab.id, currentWorkbenchId)) props.floatingRuntime.forget(tab.id, currentWorkbenchId)
+      else closeWorkbenchNative(tab.id)
+    }
     return true
-  }, [browserOwnedWorkbench, layoutLockPending, layoutLocked])
+  }, [browserOwnedWorkbench, layoutLockPending, layoutLocked, props.floatingRuntime])
 
   const replaceVisibleDocument = useCallback((next: WorkbenchLayoutDocument) => {
     const previous = documentRef.current
@@ -1759,6 +1798,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
       throw new Error('DSH 原生会话内页尚未就绪，请重新加载当前实例。')
     }
     const document = documentRef.current
+    const ownerWorkbenchId = props.floatingRuntime?.visibleWorkbenchId
     const group = groupsOf(document.root).find(candidate => candidate.id === input.areaId)
     if (group === undefined) throw new Error(`Workbench Area ${input.areaId} 不存在`)
     const tab: TabDocument = {
@@ -1768,7 +1808,8 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
     // leave no destination for the new Start editor.
     const commands: LayoutCommand[] = [{ type: 'add-tab', groupId: group.id, tab }]
     if (group.activeTabId !== undefined) {
-      closeWorkbenchNative(group.activeTabId)
+      if (props.floatingRuntime && !await props.floatingRuntime.authorizeClose(group.activeTabId, ownerWorkbenchId)) return
+      if (documentRef.current !== document || props.floatingRuntime?.visibleWorkbenchId !== ownerWorkbenchId) return
       commands.push({ type: 'close-tab', tabId: group.activeTabId })
     }
     const next = applyCommands(document, commands)
@@ -1777,7 +1818,8 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
     const holder = placementRepositoryRef.current
     holder?.repository.replaceDocument(holder.workbenchId, migrateDocumentV2ToV3(next))
     replaceVisibleDocument(next)
-  }, [editorCatalog, replaceVisibleDocument])
+    if (group.activeTabId) { props.floatingRuntime?.forget(group.activeTabId, ownerWorkbenchId); closeWorkbenchNative(group.activeTabId) }
+  }, [editorCatalog, replaceVisibleDocument, props.floatingRuntime])
 
   const sidebarRouting = useMemo<WorkbenchShellSidebarRoutingV1>(() => {
     const activeBinding = bindingOfActive(layout)
@@ -2064,6 +2106,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
   const workspaceTitle = activeWorkspace?.title ?? '未分组'
   const sessionTitle = current === undefined ? undefined : sessionRows[current]?.displayTitle
   const flushCurrentWorkbench = useCallback((): Promise<boolean> => {
+    if (floatingPinPending.current) return Promise.resolve(false)
     if (surfaceView === 'home') return props.beforeHomeLeave?.() ?? Promise.resolve(true)
     if (flushInFlightRef.current !== undefined) return flushInFlightRef.current
     // A lifecycle transition must still honor dirty snapshots and conflicts,
@@ -2145,6 +2188,56 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
     void result.then(committed => workbenchSelectionMark(trace, committed ? 'flush-committed' : 'flush-failed'))
     return result
   }, [flushCurrentWorkbench])
+  const pinFloatingTab = async (tab: TabDocument, areaId: string, edge: DropEdge): Promise<boolean> => {
+    const ownerId = selectedWorkbenchId
+    if (!ownerId || floatingPinPending.current || browserOwnedWorkbench || !settingsWritable || !await flushCurrentWorkbench()) return false
+    if (floatingPinPending.current || ownerId !== workbenchDirectory.getSnapshot().activeWorkbenchId || props.floatingRuntime?.hasControl?.(ownerId) === false
+      || props.floatingRuntime?.canUseEditor?.(ownerId, tab.editorId) === false
+      || tab.binding && props.floatingRuntime?.validBinding?.(tab.binding) === false) return false
+    const before = documentRef.current
+    const target = groupsOf(before.root).find(group => group.id === areaId)
+    if (!target || tabsOf(before.root).some(existing => existing.id === tab.id)) return false
+    const targetSession = target.areaBinding?.sessionId ?? target.tabs.find(item => item.sessionId)?.sessionId
+    if (edge === 'center' && tab.sessionId && targetSession && tab.sessionId !== targetSession) throw new Error('目标区域属于另一对话，请选择分屏或其他区域。')
+    if (edge === 'center' && tab.binding?.workspaceId && target.areaBinding?.workspaceId && tab.binding.workspaceId !== target.areaBinding.workspaceId) throw new Error('目标区域属于另一工作区，请选择分屏或其他区域。')
+    if (edge !== 'center') {
+      const element = [...(resizeCanvasRef.current?.querySelectorAll<HTMLElement>('[data-workbench-group]') ?? [])].find(item => item.dataset.workbenchGroup === areaId)
+      const rect = element?.getBoundingClientRect()
+      const horizontal = edge === 'left' || edge === 'right'
+      if (rect && !splitCanFit(horizontal ? rect.width : rect.height, horizontal ? EXPANDED_AREA_MIN_WIDTH : EXPANDED_AREA_MIN_HEIGHT)) throw new Error('目标区域空间不足，无法分屏。')
+    }
+    const placed = prepareFloatingTabForArea(tab, edge === 'center' ? target : { kind: 'group', id: 'new-area', tabs: [] }, tabsOf(before.root))
+    let next = applyLayoutCommand(before, { type: 'add-tab', groupId: areaId, tab: placed })
+    if (edge !== 'center') next = applyLayoutCommand(next, { type: 'move-tab', tabId: tab.id, targetGroupId: areaId, edge, ids: { groupId: nextId('group'), splitId: nextId('split') } })
+    if (placed.binding) {
+      const bindDestination = (node: WorkbenchLayoutDocument['root']): WorkbenchLayoutDocument['root'] => node.kind === 'split'
+        ? { ...node, first: bindDestination(node.first), second: bindDestination(node.second) }
+        : node.tabs.some(item => item.id === tab.id) ? { ...node, areaBinding: placed.binding! } : node
+      next = { ...next, root: bindDestination(next.root) }
+    }
+    if (!validateWorkbenchDocumentV3(migrateDocumentV2ToV3(next))) throw new Error('此内页暂时无法安全写入布局，临时内容仍保留。请先检查来源绑定。')
+    const snapshot = settings.getSnapshot()
+    if (snapshot.revision === undefined || next === before) return false
+    floatingPinPending.current = true
+    try {
+      const result = await patchLayout({ operation: 'set', path: ['layouts', accountRef.current], value: next, expectedRevision: snapshot.revision })
+      if (result.status !== 'committed') return false
+      const latest = props.floatingRuntime?.find(tab.id, ownerId)?.tab
+      const visible = latest && latest.state !== tab.state
+        ? applyLayoutCommand(next, { type: 'update-tab-state', tabId: tab.id, state: latest.state, bindingGeneration: placed.bindingGeneration ?? 0 }) : next
+      const committedTab = tabsOf(visible.root).find(item => item.id === tab.id)
+      if (committedTab) props.floatingRuntime?.update(tab.id, committedTab, ownerId)
+      // A controller can finish work while CAS is pending. Keep that newer
+      // state in the normal autosave/conflict pipeline after the durable move.
+      const remaining: LayoutCommand[] = visible === next ? [] : [{ type: 'replace-layout', document: visible }]
+      documentRef.current = visible; lastSavedRef.current = next; lastSavedRevisionRef.current = result.revision
+      pendingRef.current = remaining; setPending(remaining); setLayout(visible); setSaveState(remaining.length ? 'saving' : 'saved')
+      // The first durable placement is a transaction boundary. Layout undo
+      // must not silently remove a live temporary instance after commit.
+      setPast([]); setFuture([])
+      return true
+    } finally { floatingPinPending.current = false }
+  }
   const saveCurrentWorkbench = useCallback(async () => {
     if (!settingsWritable) {
       setStateDiagnostic('当前工作台无法保存；请恢复连接后重试。')
@@ -2555,7 +2648,9 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
       : browserHandoffRequest?.status === 'requested'
         ? '正在浏览器中打开当前工作台…'
         : browserHandoffRequest?.status === 'failed'
-          ? '浏览器工作台未连接，可继续在 DSH 客户端使用。'
+          ? browserHandoffRequest.code === 'browser-view-heartbeat-timeout'
+            ? '浏览器暂时失去连接，请先收回控制权。未完成交接的临时内容会保留在此端。'
+            : '浏览器工作台未连接，可继续在 DSH 客户端使用。'
         : browserHandoffRequest?.status === 'expired'
           ? '浏览器打开链接已过期，可在 DSH 客户端重新打开。'
           : undefined
@@ -2613,6 +2708,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
                 aria-atomic="true"
                 data-state={saveState}
               >{saveLabel}</span>
+              {!shareGuest && props.floatingRuntime && selectedWorkbenchId ? <FloatingWorkspaceToolbarButton runtime={props.floatingRuntime} workbenchId={selectedWorkbenchId} canvasRef={resizeCanvasRef} className={css.browserWorkspaceIconButton} disabled={!layoutActionsEnabled} /> : null}
               {workbenchDirectory.setLayoutLocked === undefined ? null : <button
                 type="button"
                 className={css.browserWorkspaceIconButton}
@@ -2823,6 +2919,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
                           onKeyDown={(event) => { onWorkbenchTabKeyDown(event, row.workbenchId, row.name) }}
                         >
                           <span className={css.workbenchTabLabel}>{row.name}</span>
+                          <FloatingWorkspaceUnread workbenchId={row.workbenchId} />
                         </button>
                       )}
                       <span className={css.workbenchTabActions} role="group" aria-label={`${row.name}操作`}>
@@ -3011,6 +3108,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
               aria-label="工作台设置"
               title="工作台设置"
             >设置</button> : null}
+            {!shareGuest && props.floatingRuntime && selectedWorkbenchId && surfaceView === 'workbench' ? <FloatingWorkspaceToolbarButton runtime={props.floatingRuntime} workbenchId={selectedWorkbenchId} canvasRef={resizeCanvasRef} className={css.workbenchSettingsButton} disabled={activeBrowserOwned} /> : null}
             {!shareGuest && projectNeutral && desktopControls !== undefined ? <button
               type="button"
               className={css.workbenchSettingsButton}
@@ -3047,6 +3145,11 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
           data-layout-locked={layoutLocked ? 'true' : undefined}
           {...(frameTransition !== undefined || browserOpening || browserActionPhase !== undefined ? { inert: '' } : {})}
         >
+          {!shareGuest && props.floatingRuntime && selectedWorkbenchId ? <WorkbenchFloatingWorkspace
+            runtime={props.floatingRuntime} workbenchId={selectedWorkbenchId} canvasRef={resizeCanvasRef}
+            visible={surfaceView === 'workbench' && !activeBrowserOwned && layoutActionsEnabled}
+            editors={editors} hidden={workbenchDirectorySnapshot.globalHiddenEditorIds ?? []} extensionAccess={extensionAccess}
+            frame={props} layout={layout} policy={conversationResourcePolicy} sessionMarkers={allWorkspaceSessionMarkers} commit={commit} pin={pinFloatingTab} /> : null}
           {createPreset && props.browserView !== true ? <WorkbenchCreateDialog directory={workbenchDirectory} presetId={createPreset}
             onClose={() => { setCreatePreset(undefined); requestAnimationFrame(() => createWorkbenchButtonRef.current?.focus()) }}
             onCreated={() => { props.onShowWorkbench?.(); navigationReservationsRef.current.clear(); setStateDiagnostic(undefined) }} /> : null}
@@ -3496,7 +3599,7 @@ interface SplitResizeControllerOptions {
   commit: Commit
 }
 
-interface AreaContentCommandHandlersV1 {
+export interface AreaContentCommandHandlersV1 {
   commit: Commit
   openBindingPicker: () => void
   placeConversation: (input: { workspaceId: string; agentPreset?: string; presentation?: 'start' | 'conversation' }) => Promise<SessionBindingV1>
@@ -4828,6 +4931,7 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
     summary,
     conversationResourcePolicy,
   } = props
+  const floating = useFloatingWorkspace()
   const active = activeTab(group)
   const hasPendingSessionTabs = group.tabs.some(tab => tab.editorScope === 'session' && tab.pendingBinding !== undefined)
   const activeSessionId = active?.sessionId
@@ -5155,7 +5259,6 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
   ) => {
     const tab = makeReplacementTab(editor)
     if (tab !== undefined) {
-      closeWorkbenchNative(tab.id)
       commit({ type: 'replace-tab', tabId: tab.id, tab })
     }
     setMenu(undefined)
@@ -5209,6 +5312,9 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
     if (editor === undefined) {
       reportStateFailure(`Workbench 暂时无法打开 DSH ${kind} 内页`)
       return false
+    }
+    if (floating && options?.floating === true) {
+      return floating.route?.({ workbenchId, kind, options, ...(targetBinding ? { binding: targetBinding } : {}), ...(active ? { sourceId: active.id } : {}) }) ?? false
     }
     const state = nativeTabState(kind, options)
     const replace = options?.replaceTab === true
@@ -5689,11 +5795,15 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
       data-area-menu-open={menu !== undefined || undefined}
       data-workbench-group={group.id}
       data-workbench-area-merge-source={areaMergeDragging || undefined}
+      onFocusCapture={() => {
+        if (floating && (active?.editorId === 'workbench.conversation' || active?.editorId === 'workbench.conversation.start')) { floating.focusedWorkbenchId = workbenchId; floating.focusedBinding = targetBinding; floating.invalidate() }
+      }}
       onPointerDown={() => {
+        if (floating && (active?.editorId === 'workbench.conversation' || active?.editorId === 'workbench.conversation.start')) { floating.focusedWorkbenchId = workbenchId; floating.focusedBinding = targetBinding; floating.invalidate() }
         if (active !== undefined) commit({ type: 'activate', groupId: group.id, tabId: active.id })
       }}
     >
-      <header className={css.areaHeader}>
+      <header className={css.areaHeader} data-workbench-area-header>
         <div ref={areaTabStripRef} className={css.areaTabStrip} data-workbench-area-tab-strip>
           <button
             type="button"
@@ -5997,7 +6107,7 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
             <span>展开此区域后恢复内页状态。</span>
           </div>
         ) : (
-          <MemoizedEditor
+          <AreaEditorTarget id={active.id}><MemoizedEditor
             workbenchId={workbenchId}
             sharePresenceEnabled={sharePresenceEnabled}
             projection={areaContentProjection!}
@@ -6011,7 +6121,7 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
             {...(sessionUnavailable === undefined ? {} : { sessionUnavailable })}
             areaClaim={areaClaim}
             lifecycle={editorLifecycle}
-          />
+          /></AreaEditorTarget>
         )}
         {/*
          * Kept as a non-visual compatibility seam for older automated tests and
@@ -6108,10 +6218,12 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
 }
 
 function WorkbenchAreaTabLabel({ tab, fallback }: { tab: TabDocument; fallback: string }) {
+  const runtime = useFloatingWorkspace()
+  const identity = runtime?.visibleWorkbenchId ? floatingInstanceKey(runtime.visibleWorkbenchId, tab.id) : tab.id
   const renderNativeTitle = useSyncExternalStore(
     subscribeWorkbenchNativeTabTitles,
-    () => getWorkbenchNativeTabTitle(tab.id),
-    () => getWorkbenchNativeTabTitle(tab.id),
+    () => getWorkbenchNativeTabTitle(identity),
+    () => getWorkbenchNativeTabTitle(identity),
   )
   const nativeTitle = renderNativeTitle?.()
   return <span className={css.areaTabLabel}>{nativeTitle ?? fallback}</span>
@@ -6244,7 +6356,7 @@ function MountedEditorOutlet({ metrics, children }: {
   return <>{children}</>
 }
 
-interface EditorPropsV1 {
+export interface EditorPropsV1 {
   workbenchId: string
   sharePresenceEnabled: boolean
   projection: AreaContentProjectionV1
@@ -6267,14 +6379,34 @@ interface EditorPropsV1 {
 }
 
 function Editor({
-  workbenchId, sharePresenceEnabled, projection, commands, tab, renderSlot, editorAvailable, editors, extensionAccess, editor, sessionUnavailable,
+  workbenchId, sharePresenceEnabled, projection, commands, tab: suppliedTab, renderSlot, editorAvailable, editors, extensionAccess, editor, sessionUnavailable,
   areaClaim, lifecycle, runtimeMetrics,
 }: EditorPropsV1) {
+  const floating = useFloatingWorkspace()
+  useSyncExternalStore(floating?.subscribe ?? (() => () => {}), floating?.getSnapshot ?? (() => 0), () => 0)
+  const managed = floating?.find(suppliedTab.id, workbenchId)
+  const tab = managed?.tab ?? suppliedTab
+  const sourceEpoch = floating?.epoch
+  const placementGeneration = managed?.generation
+  const actionable = (automatic = false) => !floating || floating.enabled && floating.epoch === sourceEpoch && (automatic || floating.visibleWorkbenchId === workbenchId)
+    && floating.hasControl?.(workbenchId) !== false
+    && floating.canUseEditor?.(workbenchId, tab.editorId) !== false
+    && (!managed || floating.find(tab.id, workbenchId) === managed && managed.generation === placementGeneration && !managed.busy
+      && managed.tab.bindingGeneration === tab.bindingGeneration)
+  const effectiveLifecycle = managed && (!floating?.enabled || floating.visibleWorkbenchId !== workbenchId || !managed.target)
+    ? { ...lifecycle, visibility: 'background' as const, focused: false } : lifecycle
+  useEffect(() => {
+    if (!managed?.pendingState || managed.location !== 'area' || !actionable() || effectiveLifecycle.visibility !== 'visible') return
+    const accepted = commands.commit({ type: 'update-tab-state', tabId: tab.id, state: tab.state, bindingGeneration: tab.bindingGeneration ?? 0 })
+    if (accepted !== false && managed.tab.state === tab.state) managed.pendingState = false
+  }, [managed, tab.state, tab.bindingGeneration, commands, effectiveLifecycle.visibility, sourceEpoch, floating?.visibleWorkbenchId, managed?.busy])
   const workspaceId = tab.binding?.workspaceId
   const persistedStateFailure = editor?.extension === undefined || editor.declaration === undefined
     ? undefined
     : workbenchEditorStateFailureV1(tab.state, editor.declaration)
   const props = {
+    presentation: managed?.location ?? 'area' as const,
+    ...(managed ? { runtimeIdentity: floatingInstanceKey(workbenchId, tab.id), registerCloseGuard: (guard: () => boolean | Promise<boolean>) => floating!.registerCloseGuard(tab.id, guard, workbenchId) } : {}),
     instanceId: tab.id,
     workbenchId,
     sharePresenceEnabled,
@@ -6284,26 +6416,47 @@ function Editor({
     ...(workspaceId === undefined ? {} : { workspaceId }),
     bindingGeneration: tab.bindingGeneration ?? 0,
     state: persistedStateFailure === undefined ? tab.state : {},
-    lifecycle,
+    lifecycle: effectiveLifecycle,
     ...(editor?.declaration === undefined ? {} : { declaration: editor.declaration }),
-    placeConversation: commands.placeConversation,
-    completePreparedConversation: commands.completePreparedConversation,
-    openSession: commands.openSession,
-    openNativeTab: commands.openNativeTab,
-    openConversationResource: commands.openConversationResource,
+    ...(commands.placeConversation === undefined ? {} : { placeConversation: (input: Parameters<NonNullable<typeof commands.placeConversation>>[0]) => {
+      if (!actionable()) return Promise.reject(new Error('来源工作台或绑定已失效，请重新打开内页。'))
+      return commands.placeConversation!(input)
+    } }),
+    ...(commands.completePreparedConversation === undefined ? {} : { completePreparedConversation: (input: Parameters<NonNullable<typeof commands.completePreparedConversation>>[0]) => actionable(true) && commands.completePreparedConversation!(input) }),
+    ...(commands.openSession === undefined ? {} : { openSession: (id: string) => actionable() ? commands.openSession!(id) : Promise.reject(new Error('来源工作台已失效')) }),
+    openNativeTab: (kind: string, options?: Record<string, unknown>) => {
+      if (!actionable(options?.trigger === 'automatic')) return false
+      const request = { floating: true, ...options, sourceEpoch, sourceGeneration: tab.bindingGeneration ?? 0, sourceLocationGeneration: placementGeneration }
+      return floating && managed ? floating.route?.({ workbenchId, kind, options: request, ...(tab.binding ? { binding: tab.binding } : {}), sourceId: tab.id }) ?? false : commands.openNativeTab(kind, request)
+    },
+    openConversationResource: (...args: Parameters<typeof commands.openConversationResource>) => {
+      const automatic = args[1]?.trigger === 'automatic'
+      if (!actionable(automatic)) return 'rejected' as const
+      if (automatic && floating && managed) return routeWorkbenchConversationResource((kind, options) => floating.route?.({
+        workbenchId, kind, options: { ...options, sourceEpoch, sourceGeneration: tab.bindingGeneration ?? 0, sourceLocationGeneration: placementGeneration },
+        ...(tab.binding ? { binding: tab.binding } : {}), sourceId: tab.id,
+      }) ?? false, args[0], floating.policy?.(), args[1], tab.sessionId, args[2], editors.flatMap(row => row.declaration?.conversationResources ?? []))
+      const result = commands.openConversationResource(...args)
+      if (result === 'rejected') commands.reportStateFailure('无法打开此资源：来源绑定已失效，或对应内页未获授权。')
+      return result
+    },
     setState: (state: JsonValue) => {
       const failure = workbenchEditorStateFailureV1(state, editor?.declaration)
       commands.reportStateFailure(failure)
-      if (failure === undefined) commands.commit({
+      if (failure === undefined && managed) {
+        if (floating!.hasControl?.(workbenchId) !== false && floating!.canUseEditor?.(workbenchId, tab.editorId) !== false && managed.tab.bindingGeneration === tab.bindingGeneration && managed.generation === placementGeneration) floating!.updateState(tab.id, state, workbenchId)
+        return
+      }
+      if (failure === undefined && actionable()) commands.commit({
         type: 'update-tab-state', tabId: tab.id, state,
         bindingGeneration: tab.bindingGeneration ?? 0,
       })
     },
     close: () => {
-      closeWorkbenchNative(tab.id)
+      if (!actionable()) return
       commands.commit({ type: 'close-tab', tabId: tab.id })
     },
-    focus: () => { commands.commit({ type: 'activate', groupId: projection.areaId, tabId: tab.id }) },
+    focus: () => { if (actionable()) commands.commit({ type: 'activate', groupId: projection.areaId, tabId: tab.id }) },
   }
   const unavailableReason = sessionUnavailable
     ?? (!editorAvailable ? 'editor' : undefined)
@@ -6341,7 +6494,7 @@ function Editor({
       <button onClick={() => { props.close() }}>关闭视图</button>
     </div>
   )
-  if (!editorAvailable || sessionUnavailable !== undefined) return unavailable
+  if (!editorAvailable || sessionUnavailable !== undefined || floating?.canUseEditor?.(workbenchId, tab.editorId) === false) return unavailable
   if (persistedStateFailure !== undefined) return <div className={css.unavailable} role="alert" data-workbench-extension-state="rejected">
     <strong>此内页的已保存状态超出当前扩展限制</strong>
     <span>{tab.editorId}</span>
@@ -6368,11 +6521,22 @@ function Editor({
       </section>
     </div>
   }
+  // The contract permits releasing a background view, never its underlying
+  // task. A registered close guard keeps an unsaved view mounted instead.
+  if (effectiveLifecycle.visibility !== 'visible' && effectiveLifecycle[effectiveLifecycle.visibility] === 'dispose'
+    && !floating?.hasGuard(tab.id, workbenchId)) return null
   return <MountedEditorOutlet metrics={runtimeMetrics}>{tab.editorScope === 'session' && tab.sessionId !== undefined
     ? renderSlot('workbench.editor.session', props, {
       only: tab.editorId, fallback: unavailable,
     })
     : renderSlot('workbench.editor.root', props, { only: tab.editorId, fallback: unavailable })}</MountedEditorOutlet>
+}
+
+function AreaEditorTarget({ id, children }: { id: string; children: ReactNode }) {
+  const floating = useFloatingWorkspace()
+  const content = children as import('react').ReactElement<EditorPropsV1>
+  if (floating && content.props) floating.retain(content.props.workbenchId, content.props.tab)
+  return floating ? <RetainedEditorTarget id={id} workbenchId={content.props.workbenchId}>{children}</RetainedEditorTarget> : <>{children}</>
 }
 
 function areaContentRenderProps(props: EditorPropsV1): AreaContentRenderPropsV1 {
@@ -6390,7 +6554,7 @@ function areaContentRenderProps(props: EditorPropsV1): AreaContentRenderPropsV1 
   }
 }
 
-const MemoizedEditor = memo(Editor, (previous, next) =>
+export const MemoizedEditor = memo(Editor, (previous, next) =>
   previous.workbenchId === next.workbenchId
     && areAreaContentRenderPropsEqual(areaContentRenderProps(previous), areaContentRenderProps(next)))
 

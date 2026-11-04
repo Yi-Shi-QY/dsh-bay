@@ -66,6 +66,14 @@ type InputStateSource = {
   readonly getSnapshot: () => { readonly draft?: unknown; readonly attachmentIds?: readonly unknown[]; readonly draftRev?: unknown }
 }
 
+/** Retained Session contexts identify the Session but do not grant service injection. */
+function conversationInputState(ctx: Context, binding: SessionReference['binding']): InputStateSource | undefined {
+  const conversation = (ctx as unknown as {
+    conversation?: { input?: { for(scope: unknown): { state: InputStateSource } } }
+  }).conversation
+  return conversation?.input?.for(binding.ctx).state
+}
+
 function SharePresenceBar({
   ctx, owner, binding, scopeRef,
 }: {
@@ -79,10 +87,7 @@ function SharePresenceBar({
   const client = useMemo(() => createWorkbenchSharePresenceClient(ctx), [ctx])
   const inputSource = useMemo<InputStateSource | undefined>(() => {
     try {
-      const input = (binding.ctx as unknown as {
-        conversation?: { input?: { for(scope: unknown): { state: InputStateSource } } }
-      }).conversation?.input?.for(binding.ctx)
-      return input?.state
+      return conversationInputState(ctx, binding)
     } catch {
       return undefined
     }
@@ -215,6 +220,17 @@ function useSummaryBlank(ctx: Context, sessionId: string | undefined): boolean |
 
 /** DSH owns Session, Conversation and Trajectory; Core only provides Area identity and binding. */
 export function createWorkbenchNativeConversationEditors(ctx: Context) {
+  function useDraftCloseGuard(owner: NativeOwner, binding?: SessionReference['binding']) {
+    useEffect(() => owner.registerCloseGuard?.(() => {
+      if (!binding) return true
+      try {
+        const input = conversationInputState(ctx, binding)?.getSnapshot()
+        if (!input) return false
+        const draft = typeof input?.draft === 'string' ? input.draft.trim() : ''
+        return !draft && !input?.attachmentIds?.length || globalThis.confirm('此对话还有未发送的文字或附件，确定关闭这个内页吗？')
+      } catch { return false }
+    }), [owner.registerCloseGuard, binding])
+  }
   /**
    * React StrictMode replays passive effects without replacing the committed
    * renderer. Deferring disposal until the next task lets the replayed setup
@@ -258,8 +274,8 @@ export function createWorkbenchNativeConversationEditors(ctx: Context) {
       ...(reference === undefined ? {} : { sessionReference: reference }),
       // Keep each Start occurrence's DSH factory state private even before it
       // has a Session. The stable Workbench occurrence id survives reopening.
-      scopeKey: `${owner.areaId ?? 'area'}:${owner.instanceId}`,
-    }), [ctx, owner.areaId, owner.instanceId, onOpenResource, reference, selectAgentPreset, selectWorkspace, sessionId])
+      scopeKey: owner.runtimeIdentity ?? `${owner.areaId ?? 'area'}:${owner.instanceId}`,
+    }), [ctx, owner.runtimeIdentity ?? owner.areaId, owner.instanceId, onOpenResource, reference, selectAgentPreset, selectWorkspace, sessionId])
     useNativeRendererLifetime(startRenderer)
     return startRenderer
   }
@@ -296,6 +312,7 @@ export function createWorkbenchNativeConversationEditors(ctx: Context) {
     renderer: ReturnType<typeof createWorkbenchNativeAreaSlotRenderer>
     placement: StartPlacement
   }) {
+    useDraftCloseGuard(owner, reference.binding)
     const session = reference.binding.session
     const subscribe = useCallback((listener: () => void) => session.subscribe(listener), [session])
     const getSnapshot = useCallback(() => session.getSnapshot(), [session])
@@ -354,7 +371,8 @@ export function createWorkbenchNativeConversationEditors(ctx: Context) {
     </section>
   }
 
-  function Start(owner: NativeOwner) {
+  function Start(suppliedOwner: NativeOwner) {
+    const owner = suppliedOwner.runtimeIdentity ? { ...suppliedOwner, areaId: suppliedOwner.runtimeIdentity, areaClaim: suppliedOwner.runtimeIdentity + ':' + (suppliedOwner.bindingGeneration ?? 0) } : suppliedOwner
     const placementRef = useRef<Promise<void>>()
     const mountedRef = useRef(true)
     const ownerRef = useRef(owner)
@@ -462,6 +480,7 @@ export function createWorkbenchNativeConversationEditors(ctx: Context) {
     view: 'chat' | 'trajectory'
     nativeRenderer: ReturnType<typeof createWorkbenchNativeAreaSlotRenderer> | undefined
   }) {
+    useDraftCloseGuard(owner, reference.binding)
     const binding = reference.binding
     const source = useMemo(() => ctx.uiConversation.binding(binding).snapshot, [binding])
     const conversation = useSyncExternalStore(source.subscribe, source.getSnapshot, source.getSnapshot)
@@ -495,7 +514,8 @@ export function createWorkbenchNativeConversationEditors(ctx: Context) {
     </div>
   }
 
-  function Bound({ owner, view }: { owner: NativeOwner; view: 'chat' | 'trajectory' }) {
+  function Bound({ owner: suppliedOwner, view }: { owner: NativeOwner; view: 'chat' | 'trajectory' }) {
+    const owner = suppliedOwner.runtimeIdentity ? { ...suppliedOwner, areaId: suppliedOwner.runtimeIdentity, areaClaim: suppliedOwner.runtimeIdentity + ':' + (suppliedOwner.bindingGeneration ?? 0) } : suppliedOwner
     const [reference, setReference] = useState<SessionReference>()
     const [error, setError] = useState(false)
     const leaseLifetime = useRef<{ lease: ReturnType<typeof retainWorkbenchArea>; token: number }>()
@@ -533,19 +553,27 @@ export function createWorkbenchNativeConversationEditors(ctx: Context) {
       openConversationResourceRef.current?.(address, placement, source) ?? 'native-fallback', [])
     const openNativeTabRef = useRef(owner.openNativeTab)
     openNativeTabRef.current = owner.openNativeTab
+    const stateRef = useRef(owner.state); stateRef.current = owner.state
+    const readInspectCallId = useCallback(() => {
+      const state = stateRef.current as { nativeParams?: { inspectCallId?: unknown } } | null
+      return typeof state?.nativeParams?.inspectCallId === 'string' ? state.nativeParams.inspectCallId : undefined
+    }, [])
     const onInspectCall = useCallback((callId: string) => {
       openNativeTabRef.current?.('trajectory', {
         editorId: 'workbench.agent-trajectory',
+        resourceType: 'trajectory-inspect',
+        ...(owner.sessionId ? { resourceAddress: 'dsh-resource://trajectory-inspect/session/' + encodeURIComponent(owner.sessionId) + '/' + encodeURIComponent(callId) } : {}),
         params: { inspectCallId: callId },
       })
-    }, [])
+    }, [owner.sessionId])
     const nativeRenderer = useMemo(() => reference === undefined
       ? undefined
       : createWorkbenchNativeAreaSlotRenderer(ctx, owner.sessionId, {}, {
         sessionReference: reference,
-        scopeKey: `${owner.areaId ?? 'area'}:${owner.instanceId}`,
+        scopeKey: owner.runtimeIdentity ?? `${owner.areaId ?? 'area'}:${owner.instanceId}`,
         onOpenResource,
         onInspectCall,
+        readInspectCallId,
       }), [ctx, onInspectCall, owner.areaId, owner.instanceId, onOpenResource, owner.sessionId, reference])
     useNativeRendererLifetime(nativeRenderer)
     if (error) return <p role="alert">当前对话绑定已失效，请在此容器重新选择对话。</p>
@@ -555,7 +583,7 @@ export function createWorkbenchNativeConversationEditors(ctx: Context) {
 
   return {
     start: Start,
-    conversation: (owner: NativeOwner) => <Bound key={`${owner.areaId}:${owner.areaClaim}:${owner.sessionId}`} owner={owner} view="chat" />,
-    trajectory: (owner: NativeOwner) => <Bound key={`${owner.areaId}:${owner.areaClaim}:${owner.sessionId}`} owner={owner} view="trajectory" />,
+    conversation: (owner: NativeOwner) => <Bound key={`${owner.runtimeIdentity ?? owner.areaId}:${owner.runtimeIdentity ? owner.bindingGeneration : owner.areaClaim}:${owner.sessionId}`} owner={owner} view="chat" />,
+    trajectory: (owner: NativeOwner) => <Bound key={`${owner.runtimeIdentity ?? owner.areaId}:${owner.runtimeIdentity ? owner.bindingGeneration : owner.areaClaim}:${owner.sessionId}`} owner={owner} view="trajectory" />,
   }
 }

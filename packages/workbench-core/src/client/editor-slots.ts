@@ -5,6 +5,10 @@ import type { WorkbenchResourceRouteResult, WorkbenchResourceSourceV1 } from './
 
 /** Core-owned instance state and explicit Area binding, independent of DSH's current Session. */
 export interface WorkbenchEditorOwnerProps {
+  readonly presentation?: 'floating' | 'area'
+  /** Stable content identity for a movable instance; independent of placement. */
+  readonly runtimeIdentity?: string
+  registerCloseGuard?(guard: () => boolean | Promise<boolean>): () => void
   readonly instanceId: string
   /** Runtime Workbench identity used by ephemeral LAN share presence. */
   readonly workbenchId?: string

@@ -178,6 +178,20 @@ describe('browser Workbench view lifecycle', () => {
     host.dispose()
   })
 
+  it('locks a browser when its reclaim receipt response was lost', async () => {
+    vi.useFakeTimers()
+    const view = { schemaVersion: 1 as const, windowId: '00000000-0000-4000-8000-000000000000', mode: 'browser-workbench' as const,
+      workbenchId: 'workbench-a', closeToken: 'B'.repeat(43) }
+    const rpc = { call: vi.fn(async () => ({ ok: true, value: { status: 'reclaimed' } })) }
+    const states: string[] = []
+    const stop = startBrowserWorkbenchHeartbeat({ connection: { rpc } } as never, view, state => states.push(state))
+    window.dispatchEvent(new Event('workbench-browser-reclaim-wake'))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(states).toEqual(['reclaimed'])
+    expect(window.sessionStorage.getItem('dsh-workbench.browser-view.v1')).toBeNull()
+    stop()
+  })
+
   it('does not restore a browser view after the Host has reclaimed it', async () => {
     const view = {
       schemaVersion: 1, windowId: '00000000-0000-4000-8000-000000000000', mode: 'browser-workbench',

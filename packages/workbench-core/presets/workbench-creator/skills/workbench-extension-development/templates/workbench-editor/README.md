@@ -1,5 +1,18 @@
 # Workbench editor extension template
 
+## 17.3 展示位置与实例生命周期
+
+Core 兼容版本为 `0.2.2-alpha.17.3`。模板扩展自身保留独立的 `0.1.0` 版本，不能把它误当成 Core 版本。
+
+- 声明 `presentation.floating: false` 可禁止浮窗；缺少完整绑定及生命周期声明的内页不能在浮窗运行。
+- `owner.instanceId` 是布局内标签 ID，运行时缓存使用 `owner.runtimeIdentity`；不能跨工作台仅按标签 ID 缓存。`owner.presentation` 为 `floating` 或 `area`，位置变化不是新建实例。
+- 标签从浮窗固定到 Area 保持挂载和控制器。不要把 `areaId` 变化当成新任务；仅真实绑定代际改变才释放旧绑定。异步回调必须检查当前绑定与生命周期。
+- `owner.lifecycle.visibility` 变成 background/collapsed 时撤销键盘和前台交互；pause 停止 UI 轮询，keep 保留必要控制器。dispose 只允许释放能从 owner.state 恢复的视图，不能因此终止终端或底层任务。Core 会保留已登记关闭保护的视图，防止未保存内容因后台卸载丢失。
+- 有未保存数据时注册 `owner.registerCloseGuard(() => boolean | Promise<boolean>)`，组件卸载时注销。返回 false 或抛错会取消关闭、工作台清理及受控退出。保存成功后才返回 true；没有接入时不具备完整防丢保障。
+- 所有资源跳转使用 `owner.openConversationResource` / `owner.openNativeTab`，保留精确资源地址及导航参数。不要调用全局 sidebarRight，也不要读取全局当前 Session 猜测目标。
+- 临时标签只在本客户端本次运行中保留；几何存于独立 Profile UI namespace，均不写入 PortableLayout 或分享包。正式固定后才参与布局保存和现有分发。
+- 必测：两个工作台相同标签 ID、最小化和总览往返、退出再进入、固定前后 DOM/控制器一致、关闭取消、固定冲突、权限撤回和旧绑定回调。
+
 模板兼容 DSH `0.2.1-rc.5`，锁定上游提交 `b830ec950faba0a46dda564be3e2d854afed94f1`。
 
 完整字段、生命周期、身份校验、权限和验收要求见[Workbench 容器内页扩展插件开发规范](../../WORKBENCH-CONTAINER-INNER-PAGE-EXTENSION-SPEC.zh.md)。
@@ -42,7 +55,7 @@ ctx.slots.inject('workbench.editor.session', () => ctx.slots.register({
     moduleId: 'workbench.editor-example',
     apiVersion: 1,
     editorIds: ['workbench.example'],
-    coreCompatibility: '0.2.2-alpha.17.2',
+    coreCompatibility: '0.2.2-alpha.17.3',
     dshGeneration: '0.2.1-rc.5',
   } } }),
 }, Editor))

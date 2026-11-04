@@ -38,7 +38,7 @@ export interface WorkbenchConversationResourceBindingV1 {
   readonly description?: string
   readonly editorId: string
   readonly resourcePatterns: readonly string[]
-  readonly defaultPlacement: 'activate-or-add' | 'new-tab' | 'replace-current' | 'official-sidebar' | 'disabled'
+  readonly defaultPlacement: 'floating' | 'activate-or-add' | 'new-tab' | 'replace-current' | 'official-sidebar' | 'disabled'
 }
 
 /**
@@ -47,6 +47,7 @@ export interface WorkbenchConversationResourceBindingV1 {
  * mounts their editor.
  */
 export interface WorkbenchEditorDeclarationV1 {
+  readonly presentation?: { readonly floating?: boolean }
   readonly editorId: string
   readonly scope: WorkbenchEditorScopeV1
   readonly label: string
@@ -108,6 +109,8 @@ export function workbenchEditorDeclarationFailureV1(
     if (binding.requirement === 'none' && binding.sharing !== 'none') return '无绑定内页不能声明共享绑定。'
   }
   const runtime = declaration.runtime
+  if (declaration.presentation !== undefined && (typeof declaration.presentation !== 'object' || declaration.presentation === null
+    || Array.isArray(declaration.presentation) || declaration.presentation.floating !== undefined && typeof declaration.presentation.floating !== 'boolean')) return 'presentation.floating 必须为布尔值。'
   if (typeof runtime !== 'object' || runtime === null || Array.isArray(runtime)
     || !['keep', 'pause', 'dispose'].includes(runtime.background as string)
     || !['keep', 'pause', 'dispose'].includes(runtime.collapsed as string)
@@ -122,7 +125,7 @@ export function workbenchEditorDeclarationFailureV1(
         || resourceTypes.has(resource.resourceType)
         || !Array.isArray(resource.resourcePatterns) || resource.resourcePatterns.length === 0
         || resource.resourcePatterns.some((pattern: unknown) => typeof pattern !== 'string' || pattern.length === 0 || pattern.length > 256)
-        || !['activate-or-add', 'new-tab', 'replace-current', 'official-sidebar', 'disabled'].includes(resource.defaultPlacement as string)) return 'conversationResources 合同无效。'
+        || !['floating', 'activate-or-add', 'new-tab', 'replace-current', 'official-sidebar', 'disabled'].includes(resource.defaultPlacement as string)) return 'conversationResources 合同无效。'
       if ((resource.displayName !== undefined && (typeof resource.displayName !== 'string' || resource.displayName.length > 128))
         || (resource.description !== undefined && (typeof resource.description !== 'string' || resource.description.length > 512))) return '资源显示说明无效。'
       resourceTypes.add(resource.resourceType)

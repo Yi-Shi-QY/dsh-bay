@@ -1,7 +1,7 @@
 {
   "name": "@dsh-workbench/core",
   "description": "Workbench Core lifecycle, module registry and composition installer",
-  "version": "0.2.2-alpha.17.2",
+  "version": "0.2.2-alpha.17.3",
   "private": false,
   "type": "module",
   "main": "lib/index.js",
@@ -91,11 +91,11 @@
       "moduleId": "workbench.core",
       "kind": "official-builtin",
       "delivery": "core-bundled",
-      "coreCompatibility": "0.2.2-alpha.17.2",
+      "coreCompatibility": "0.2.2-alpha.17.3",
       "activation": "restart-only",
       "dshGeneration": "0.2.1-rc.5",
-      "candidateId": "dsh-bay-0.2.2-alpha.17.2-dsh-0.2.1-rc.5",
-      "productLine": "DSH Bay 0.2.2-alpha.17.2",
+      "candidateId": "dsh-bay-0.2.2-alpha.17.3-dsh-0.2.1-rc.5",
+      "productLine": "DSH Bay 0.2.2-alpha.17.3",
       "upstreamCommit": "b830ec950faba0a46dda564be3e2d854afed94f1",
       "morePolicy": "deferred-official-only",
       "defaultInstall": [

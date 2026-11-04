@@ -246,7 +246,7 @@ const RESOURCE_ROWS = [
   ['file', '文件结果', 'Document Preview'], ['changes-review', '变更审查', 'Changes Review'], ['plan', '计划', 'Plan'], ['subagent-chat', '子 Agent 对话', 'Subagent'],
   ['browser', '网页链接', 'Browser'], ['schedule-task', '计划任务', 'Schedule'], ['trajectory-inspect', '轨迹检查', 'Agent 轨迹'],
 ] as const
-const PLACEMENTS: readonly [WorkbenchConversationResourcePlacementV1, string][] = [['activate-or-add', '在当前区域打开或激活'], ['new-tab', '始终新增内页标签'], ['replace-current', '替换当前内页标签'], ['official-sidebar', '使用 DSH 原生侧栏'], ['disabled', '忽略此次点击']]
+const PLACEMENTS: readonly [WorkbenchConversationResourcePlacementV1, string][] = [['floating', '浮动工作区'], ['activate-or-add', '在当前区域打开或激活'], ['new-tab', '始终新增内页标签'], ['replace-current', '替换当前内页标签'], ['disabled', '忽略此次点击']]
 export function InteractionSettingsPage(props: SettingsPageProps) {
   const policy = normalizeWorkbenchConversationInteractionPolicy(props.value?.interactionPolicy)
   const actions = useSettingsAction()
@@ -270,7 +270,7 @@ export function InteractionSettingsPage(props: SettingsPageProps) {
         <button className={css.secondaryButton} disabled={actions.states[row.id]?.busy || !props.patchInteractionPolicy} onClick={() => void commit(row.id, defaultFor(row.id))}>恢复默认</button>{actions.feedback(row.id)}
       </article>
     })}</div>
-    <div className={css.controlCard}><div><strong>未知资源策略</strong><p>当资源没有明确的内页声明时使用此规则。</p></div><label className={css.form}><select aria-label="未知资源策略" value={policy.unknownResource} disabled={actions.states.unknownResource?.busy || !props.patchInteractionPolicy} onChange={event => void commit('unknownResource', event.target.value)}><option value="module-default">遵循已允许模块声明</option><option value="official-sidebar">交给 DSH 原生侧栏</option><option value="disabled">忽略</option></select></label>{actions.feedback('unknownResource')}</div>
+    <div className={css.controlCard}><div><strong>未知资源策略</strong><p>当资源没有明确的内页声明时使用此规则。</p></div><label className={css.form}><select aria-label="未知资源策略" value={policy.unknownResource} disabled={actions.states.unknownResource?.busy || !props.patchInteractionPolicy} onChange={event => void commit('unknownResource', event.target.value)}><option value="module-default">遵循已允许模块声明</option><option value="disabled">忽略</option></select></label>{actions.feedback('unknownResource')}</div>
     <p className={css.notice}>终端内页可在区域中使用。DSH 尚无独立终端结果点击协议，因此这里不提供终端占位开关。同一资源的多个提供者沿用实际路由优先级。</p>
   </section>
 }

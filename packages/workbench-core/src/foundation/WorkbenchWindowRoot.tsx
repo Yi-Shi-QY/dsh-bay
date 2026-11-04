@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import type { PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
 import css from './WorkbenchWindowRoot.module.css'
+import { requestWorkbenchClientExit } from '../client/floating-exit-guard.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface SlotMap {
@@ -28,7 +29,7 @@ export function WorkbenchWindowRoot(props: PropsRenderSlots<'workbench.window.su
       <p>{reclaimState === 'reclaimed'
         ? '此浏览器页面已锁定，工作台现在由 DSH 客户端控制。你可以关闭此页面。'
         : '此页面已停止操作，正在等待 DSH 客户端确认。'}</p>
-      {reclaimState === 'reclaimed' ? <button type="button" onClick={() => window.close()}>关闭此页面</button> : null}
+      {reclaimState === 'reclaimed' ? <button type="button" onClick={() => { void requestWorkbenchClientExit().then(ok => { if (ok) window.close() }) }}>关闭此页面</button> : null}
       </section>
     </div>}
   </div>

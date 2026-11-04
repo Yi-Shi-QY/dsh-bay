@@ -687,6 +687,17 @@ export function mergeGroup(
   let next = document
   for (const tab of source.tabs) next = closeTab(next, tab.id)
   for (const tab of source.tabs) next = insertTab(next, targetGroupId, tab)
+  // Pending pages adopt the destination Area's one explicit conversation.
+  // Without this normalization an otherwise valid merge writes an unreadable
+  // v3 document (bound Area mixed with unbound session modules).
+  const binding = target.areaBinding ?? source.areaBinding
+    ?? [...target.tabs, ...source.tabs].find(tab => tab.binding)?.binding
+  if (binding) next = { ...next, root: mapNode(next.root, targetGroupId, node => {
+    const area = node as GroupNode
+    return { ...area, areaBinding: binding, tabs: area.tabs.map(tab => tab.editorScope === 'session' && tab.pendingBinding
+      ? { ...createSessionTab(tab.id, tab.editorId, binding, tab.lastKnownTitle, tab.state),
+        ...(tab.pendingDistribution ? { pendingDistribution: tab.pendingDistribution } : {}) } : tab) }
+  }) }
   return sourceActiveTabId === undefined ? next : activate(next, targetGroupId, sourceActiveTabId)
 }
 

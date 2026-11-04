@@ -1,0 +1,30 @@
+{
+  "revision": "r14",
+  "version": "0.2.2-alpha.17.3",
+  "artifact": "dsh-workbench-core-0.2.2-alpha.17.3-source-spacing-3eb91ce661f9.tgz",
+  "sha256": "3eb91ce661f956fc90ea2f3774a8f4765bf5b57c05a24179ceee2666dc4e8ce9",
+  "size": 1040984,
+  "packedAtAsiaShanghai": "2026-11-05T02:13:04.487195+08:00",
+  "baseRevision": "r13",
+  "changedPackageFiles": [
+    "package/lib/client.js",
+    "package/lib/build-inputs.json"
+  ],
+  "changedSourceInputs": [
+    "src/foundation/WorkbenchFloatingWorkspace.module.css"
+  ],
+  "verification": {
+    "installedFilesMatch": 277,
+    "sourceInputsMatch": true,
+    "focusedTests": 5,
+    "build": "passed",
+    "realUI": "installed Web/Edge; 720 and 360 pixel windows; dark/light; no overflow; close after resize; no page or network errors",
+    "formalTypecheck": "blocked by prior 112 generated/upstream errors; CSS-only change, not rerun"
+  },
+  "previousFullTests": {
+    "revision": "r13",
+    "files": 119,
+    "tests": 738
+  },
+  "dailyProfileModified": false
+}

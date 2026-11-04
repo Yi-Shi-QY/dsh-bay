@@ -1,5 +1,27 @@
 import type { WorkbenchEditorCatalogRow } from './catalog.ts'
-import type { GroupNode, JsonValue, TabDocument } from './model.ts'
+import { createSessionTab, type GroupNode, type JsonValue, type TabDocument, type SessionBindingV1 } from './model.ts'
+
+/** Render scope does not replace the editor's declared binding requirement. */
+export function createFloatingEditorTab(editor: WorkbenchEditorCatalogRow, id: string, binding?: SessionBindingV1, state: JsonValue = {}): TabDocument {
+  const requirement = editor.declaration?.binding?.requirement ?? editor.declaration?.requiredBinding ?? (editor.scope === 'session' ? 'session' : 'none')
+  const requiresBinding = requirement !== 'none' || editor.scope === 'session'
+  if (requiresBinding && binding && (requirement !== 'workspace' || binding.workspaceId)) {
+    return { ...createSessionTab(id, editor.id, binding, editor.label, state), editorScope: editor.scope }
+  }
+  return { id, editorId: editor.id, editorScope: editor.scope, lastKnownTitle: editor.label, state,
+    ...(requiresBinding ? { pendingBinding: id } : {}) }
+}
+
+/** Translate runtime-only pending identity before the durable Settings boundary. */
+export function prepareFloatingTabForArea(tab: TabDocument, target: GroupNode, allTabs: readonly TabDocument[]): TabDocument {
+  if (tab.editorScope === 'root' && tab.pendingBinding) throw new Error('请先为此内页选择来源对话，再放入区域。')
+  if (!tab.pendingBinding) return tab
+  const binding = target.areaBinding ?? target.tabs.find(row => row.binding)?.binding
+  if (binding) return { ...createSessionTab(tab.id, tab.editorId, binding, tab.lastKnownTitle, tab.state),
+    ...(tab.pendingDistribution ? { pendingDistribution: tab.pendingDistribution } : {}) }
+  const pending = createPendingSessionTab({ id: tab.editorId, label: tab.lastKnownTitle, scope: tab.editorScope }, tab.id, target, allTabs, tab.state)
+  return { ...pending, ...(tab.pendingDistribution ? { pendingDistribution: tab.pendingDistribution } : {}) }
+}
 
 /**
  * These editors are opened from a DSH resource action (for example a plan or

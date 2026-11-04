@@ -34,16 +34,16 @@ export function registerWorkbenchOfficialAreaEditors(
   const declarations = {
     start: declaration(WORKBENCH_OFFICIAL_AREA_EDITOR_IDS.start, 'root', '新建对话', 'none', 'dispose', 'keep'),
     conversation: declaration(WORKBENCH_OFFICIAL_AREA_EDITOR_IDS.conversation, 'session', '对话', 'session', 'keep', 'keep'),
-    trajectory: declaration(WORKBENCH_OFFICIAL_AREA_EDITOR_IDS.trajectory, 'session', 'Agent 轨迹', 'session', 'pause', 'dispose'),
-    files: declaration(WORKBENCH_OFFICIAL_AREA_EDITOR_IDS.files, 'session', '工作区文件', 'session', 'pause', 'dispose'),
-    terminal: declaration(WORKBENCH_OFFICIAL_AREA_EDITOR_IDS.terminal, 'session', '终端', 'session', 'pause', 'dispose'),
-    browser: declaration(WORKBENCH_OFFICIAL_AREA_EDITOR_IDS.browser, 'session', '浏览器', 'session', 'pause', 'dispose'),
-    documentPreview: declaration(WORKBENCH_OFFICIAL_AREA_EDITOR_IDS.documentPreview, 'session', '文件预览', 'session', 'pause', 'dispose'),
-    changesReview: declaration(WORKBENCH_OFFICIAL_AREA_EDITOR_IDS.changesReview, 'session', '变更审查', 'session', 'pause', 'dispose'),
-    plan: declaration(WORKBENCH_OFFICIAL_AREA_EDITOR_IDS.plan, 'session', '计划', 'session', 'pause', 'dispose'),
-    scheduleTask: declaration(WORKBENCH_OFFICIAL_AREA_EDITOR_IDS.scheduleTask, 'session', '计划任务', 'session', 'pause', 'dispose'),
-    guide: declaration(WORKBENCH_OFFICIAL_AREA_EDITOR_IDS.guide, 'session', '功能指南', 'session', 'pause', 'dispose'),
-    subagentChat: declaration(WORKBENCH_OFFICIAL_AREA_EDITOR_IDS.subagentChat, 'session', '子 Agent 对话', 'session', 'pause', 'dispose'),
+    trajectory: declaration(WORKBENCH_OFFICIAL_AREA_EDITOR_IDS.trajectory, 'session', 'Agent 轨迹', 'session', 'pause', 'pause'),
+    files: declaration(WORKBENCH_OFFICIAL_AREA_EDITOR_IDS.files, 'session', '工作区文件', 'session', 'pause', 'pause'),
+    terminal: declaration(WORKBENCH_OFFICIAL_AREA_EDITOR_IDS.terminal, 'session', '终端', 'session', 'pause', 'keep'),
+    browser: declaration(WORKBENCH_OFFICIAL_AREA_EDITOR_IDS.browser, 'session', '浏览器', 'session', 'pause', 'keep'),
+    documentPreview: declaration(WORKBENCH_OFFICIAL_AREA_EDITOR_IDS.documentPreview, 'session', '文件预览', 'session', 'pause', 'pause'),
+    changesReview: declaration(WORKBENCH_OFFICIAL_AREA_EDITOR_IDS.changesReview, 'session', '变更审查', 'session', 'pause', 'pause'),
+    plan: declaration(WORKBENCH_OFFICIAL_AREA_EDITOR_IDS.plan, 'session', '计划', 'session', 'pause', 'pause'),
+    scheduleTask: declaration(WORKBENCH_OFFICIAL_AREA_EDITOR_IDS.scheduleTask, 'session', '计划任务', 'session', 'pause', 'pause'),
+    guide: declaration(WORKBENCH_OFFICIAL_AREA_EDITOR_IDS.guide, 'session', '功能指南', 'session', 'pause', 'pause'),
+    subagentChat: declaration(WORKBENCH_OFFICIAL_AREA_EDITOR_IDS.subagentChat, 'session', '子 Agent 对话', 'session', 'pause', 'pause'),
   } as const
   const registrations: Array<() => void> = [
     disposerOf(ctx.slots.inject('workbench.editor.root', () => ctx.slots.register({

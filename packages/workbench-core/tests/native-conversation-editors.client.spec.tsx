@@ -62,6 +62,43 @@ function nativeConversationContext(options: {
 describe('Core native Conversation editors', () => {
   afterEach(() => cleanup())
 
+  it('checks drafts through the injected root service, not the unprivileged retained Session context', async () => {
+    const scopedContext = new Proxy({}, { get(_target, key) { if (key === 'conversation') throw new Error('cannot get property without inject'); return undefined } })
+    const input = { draft: '', attachmentIds: [] as string[] }
+    const forSession = vi.fn(() => ({ state: { getSnapshot: () => input, subscribe: () => () => {} } }))
+    const ctx = nativeConversationContext({ onOfficialWorkspaceOpen: vi.fn(), injectArgs: [] }) as unknown as Record<string, unknown>
+    ctx.conversation = { input: { for: forSession } }
+    const sessionSnapshot = { blank: false, running: false, promptAttempted: false, awaitingFirstTurn: false, openState: 'open' }
+    ctx.sessions = { retain: () => ({
+      sessionId: 'guarded-session', ready: Promise.resolve(), release: vi.fn(),
+      binding: { ctx: scopedContext, session: {
+        getSnapshot: () => sessionSnapshot,
+        subscribe: () => () => {},
+      } },
+    }) }
+    let guard: (() => boolean | Promise<boolean>) | undefined
+    const Conversation = createWorkbenchOfficialAreaEditors(ctx as never).conversation as unknown as ComponentType<Record<string, unknown>>
+    const confirm = vi.spyOn(globalThis, 'confirm').mockReturnValue(false)
+    try {
+      render(createElement(Conversation, {
+        instanceId: 'guarded', areaId: 'guarded-area', areaClaim: 'guarded-claim', sessionId: 'guarded-session',
+        state: {}, setState: vi.fn(), close: vi.fn(), focus: vi.fn(),
+        registerCloseGuard: (next: typeof guard) => { guard = next; return () => { guard = undefined } },
+      }))
+      await waitFor(() => expect(guard).toBeTypeOf('function'))
+      expect(await guard!()).toBe(true)
+      expect(forSession).toHaveBeenCalledWith(scopedContext)
+      expect(confirm).not.toHaveBeenCalled()
+      input.draft = 'unsent draft'
+      expect(await guard!()).toBe(false)
+      confirm.mockReturnValue(true)
+      expect(await guard!()).toBe(true)
+      input.draft = ''; input.attachmentIds = ['attachment']
+      confirm.mockReturnValue(false)
+      expect(await guard!()).toBe(false)
+    } finally { confirm.mockRestore() }
+  })
+
   it('renders the DSH Conversation Factory without a Workbench-owned Composer', () => {
     const editors = createWorkbenchOfficialAreaEditors(nativeConversationContext({
       onOfficialWorkspaceOpen: vi.fn(), injectArgs: [],

@@ -5,8 +5,9 @@ import { WorkbenchEditorIcon } from './WorkbenchEditorIcon.tsx'
 import css from './WorkbenchEditorPicker.module.css'
 
 /** The same searchable chooser serves empty Areas, add-tab and replace-tab. */
-export function WorkbenchEditorPicker({ editors, mode, onSelect }: {
+export function WorkbenchEditorPicker({ editors, mode, onSelect, unavailable }: {
   editors: readonly WorkbenchEditorCatalogRow[]; mode: 'add' | 'replace'; onSelect(editor: WorkbenchEditorCatalogRow): void
+  unavailable?(editor: WorkbenchEditorCatalogRow): string | undefined
 }) {
   const [query, setQuery] = useState('')
   const groups = new Map<string, { order: number; editors: WorkbenchEditorCatalogRow[] }>()
@@ -30,7 +31,7 @@ export function WorkbenchEditorPicker({ editors, mode, onSelect }: {
       {[...groups].sort(([, a], [, b]) => a.order - b.order).map(([category, group]) => <div key={category} role="group" aria-label={category}>
         <div className={css.category}>{category}</div>
         {group.editors.map(editor => { const presentation = resolveWorkbenchEditorPresentation(editor); return <button key={editor.scope + ':' + editor.id} type="button" role="menuitem" className={css.option}
-          aria-label={(mode === 'replace' ? '切换为 ' : '添加为标签 ') + editor.label} onClick={() => onSelect(editor)}>
+          aria-label={(mode === 'replace' ? '切换为 ' : '添加为标签 ') + editor.label} disabled={!!unavailable?.(editor)} title={unavailable?.(editor)} onClick={() => onSelect(editor)}>
           <span className={css.icon}><WorkbenchEditorIcon name={presentation.icon} iconSvg={presentation.iconSvg} /></span><span>{editor.label}</span>
         </button> })}
       </div>)}
