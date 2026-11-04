@@ -150,6 +150,11 @@
 .controlCard > div { display: grid; gap: 3px; }
 .controlCard > .form { padding: 0; border: 0; background: transparent; }
 .controlCard input[type='file'] { width: 100%; min-height: 36px; padding: 8px 10px; border: 0.5px dashed var(--dsw-alias-border-l3, #cfd4dc); border-radius: var(--dsw-radius-md, 12px); background: var(--dsw-alias-bg-module-platform, #f0f2f5); }
+.preferenceToggle { display: flex; align-items: flex-start; gap: 10px; min-width: 0; cursor: pointer; }
+.preferenceToggle input { flex: none; margin: 3px 0 0; accent-color: var(--dsw-alias-state-business-primary, #4b7bec); }
+.preferenceToggle span { display: grid; gap: 3px; min-width: 0; }
+.preferenceToggle strong { font-size: 13px; font-weight: 500; }
+.preferenceToggle p { font-size: 12px; }
 .empty { padding: 40px 16px; text-align: center; color: var(--dsw-alias-label-secondary, #69707b); }
 .steps { margin: 0; padding-left: 22px; color: var(--dsw-alias-label-secondary, #69707b); }
 .flowFilters { align-self: start; }

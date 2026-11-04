@@ -45,6 +45,10 @@
 .frame[data-session-frame='area'][data-layout-locked='true'][data-active]::after { opacity: .96; }
 .frame[data-session-frame='area'][data-layout-locked='true']:not([data-active])::after { opacity: .46; }
 
+/* The marker remains part of the binding model when the user chooses the
+   minimal Workbench presentation; only its paint layer is removed. */
+[data-session-accent-frames='hidden'] .frame[data-session-frame]::after { content: none; }
+
 @media (prefers-reduced-motion: reduce) {
   .frame[data-session-frame]::after { transition: none; }
 }

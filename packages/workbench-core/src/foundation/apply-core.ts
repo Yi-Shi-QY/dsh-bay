@@ -403,7 +403,7 @@ export function applyWorkbenchCoreFoundation(
     },
     patchInteractionPolicy: async (key: string, value: unknown) => {
       if (windowView !== undefined) return false
-      const result = await settings.patch({ operation: 'set', path: key === 'unknownResource' ? ['interactionPolicy', key] : ['interactionPolicy', 'conversationResources', key], value })
+      const result = await settings.patch({ operation: 'set', path: key === 'unknownResource' || key === 'showSessionAccentFrames' ? ['interactionPolicy', key] : ['interactionPolicy', 'conversationResources', key], value })
       return result.status === 'committed'
     },
     ...(moduleManager === undefined ? {} : { moduleManager }),

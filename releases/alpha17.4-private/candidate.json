@@ -6,28 +6,30 @@
   "version": "0.2.2-alpha.17.4",
   "dshGeneration": "0.2.1-rc.5",
   "upstreamCommit": "b830ec950faba0a46dda564be3e2d854afed94f1",
-  "recordedAt": "2026-11-04T21:30:50.035Z",
+  "recordedAt": "2026-11-04T22:40:29.797Z",
   "artifact": {
     "path": "releases/alpha17.4-private/dsh-workbench-core-0.2.2-alpha.17.4.tgz",
-    "size": 1045023,
-    "archiveModifiedAt": "2026-11-04T21:29:12.956Z",
-    "sha256": "a623500f6b167782a793729da194fe34fea9f788a4f42df924f7ea55cba186a4",
-    "integrity": "sha512-9FQ1LQGXpfq7n9TcbHajLOD9rKm3boLvlV1VpjT0QK5jowrz7GpJgw82ajW5RD9lJYVG4GmhaPCKx1xcSRn7sQ=="
+    "size": 1046425,
+    "archiveModifiedAt": "2026-11-04T22:38:11.188Z",
+    "sha256": "f05444f0639492611b7b790510cbf6f343241a09a9068325627c88a13feb11f9",
+    "sha512": "03d06645955fb929dde709e1ff5402b9b5f8a5fc560b1f21fbbbd28dd7d88c292e239f26b32940505bbfcd28e5906f6a48b43bc34d92b763fb9f93f581bf068d",
+    "integrity": "sha512-A9BmRZVfuSnd5wnh/1QCubX4pfxWCx8h+7vSjdfYjCkuI58msylAUFu/zSjlkG9qSLQ7w02St2P7n5P1gb8GjQ=="
   },
   "checks": {
     "rc5Identity": "passed",
     "build": "passed",
-    "sourceTests": "120 files / 746 tests passed",
+    "sourceTests": "4 files / 67 targeted tests passed",
     "archiveExtracted": true,
     "manifestVersionMatched": true,
     "buildInputVersionMatched": true,
-    "brandCssEmbedded": true,
-    "baySvgEmbedded": true,
+    "hostClientBytesMatched": true,
+    "markerFramePreferenceEmbedded": true,
     "strictPackCore": "held by existing 112 generated/upstream Sidebar/Workspace type errors",
     "typecheck": "blocked by existing 112 errors; no new errors identified",
     "dailyProfileModified": false
   },
   "validation": {
+    "fullSuite": "120 files / 747 tests passed in the full run; one distribution transaction timing failure was isolated and passed on immediate rerun",
     "install": "not performed",
     "desktopSmoke": "not performed",
     "browserSmoke": "not performed",

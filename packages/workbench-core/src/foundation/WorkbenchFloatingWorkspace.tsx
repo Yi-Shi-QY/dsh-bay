@@ -23,15 +23,15 @@ import frameCss from './WorkbenchFrame.module.css'
 import accentFrameCss from './SessionAccentFrame.module.css'
 
 const uid = () => 'floating-' + globalThis.crypto.randomUUID()
-export function FloatingWorkspaceIcon({ size = 18 }: { size?: number } = {}) {
-  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-    <path d="M3.4 13.7A9.15 9.15 0 0 1 20.75 8.55" stroke="var(--dsw-alias-label-link, #1d4f9b)" strokeWidth="1.8" strokeLinecap="round" />
-    <path d="M2.15 16.75c3.25-2.45 6.35-2.9 9.4-1.6 3.6 1.55 7.05 1.2 10.3-1.1" stroke="var(--dsw-alias-label-link, #1d4f9b)" strokeWidth="2.2" strokeLinecap="round" />
-    <path d="M5.45 19.05c2.85 2.05 6.1 2.3 9.15.65" stroke="var(--dsw-alias-label-link, #1d4f9b)" strokeWidth="1.8" strokeLinecap="round" />
-    <path d="M7.75 10.55c.95-1.8 3.15-2.65 5.35-2.25 1.5.25 2.45 1.1 3.55 1.85 1.1.8 2.35.95 3.9.55-.8 1.05-2.05 1.6-3.4 1.8-.05 1.6-.45 3.05-1.1 4.45l-3.25-.2c-.55-1.7-1.15-3.6-2.5-5.05-.7-.7-1.5-1.1-2.55-1.15Z" fill="var(--dsw-alias-label-primary, #0b1220)" />
-    <path d="M8.15 10.65c1.55-.15 2.85.45 4.1 1.5 1.15.95 1.7 2.05 2.1 3.1" stroke="var(--dsw-alias-bg-base, #fff)" strokeWidth="1.25" strokeLinecap="round" />
-    <ellipse cx="15.45" cy="9.35" rx="1.1" ry=".55" transform="rotate(25 15.45 9.35)" fill="var(--dsw-alias-bg-base, #fff)" />
-    <path d="M19.45 13.75c.75-.8 1.4-1.3 2.05-1.6-.25.85-.75 1.6-1.4 2.15M20.55 15.05c.55-.25 1.05-.55 1.45-.95" stroke="var(--dsw-alias-label-link, #1d4f9b)" strokeWidth="1.25" strokeLinecap="round" />
+export function FloatingWorkspaceIcon({ size = 24, className }: { size?: number; className?: string } = {}) {
+  return <svg className={className} width={size} height={size} style={{ width: size, height: size, display: 'block', flex: '0 0 auto' }} viewBox="0 0 1024 1024" fill="none" aria-hidden="true">
+    <path d="M814 377 784 317 751 273 697 224 638 190 593 174 530 163 446 167 377 186 319 215 267 255 225 302 190 362 168 427 161 481 166 551 187 619 225 608 204 537 201 478 213 414 238 356 269 311 312 269 355 240 405 218 469 204 523 203 555 207 602 220 643 239 673 258 723 304 761 359 775 389 787 428 828 428Z" fill="var(--dsw-alias-label-link, #0b4596)" />
+    <path d="M422 448 419 461 426 480 471 546 498 596 497 621 535 638 495 566 433 481 430 471 434 466 467 467 499 477 537 497 574 524 606 554 642 598 667 638 689 684 749 684 796 675 773 600 778 590 800 565 816 554 873 535 866 525 857 520 810 507 769 506 728 513 696 481 653 452 620 437 572 424 542 420 478 423 440 434Z" fill="var(--dsw-alias-label-primary, #050608)" />
+    <path d="M569 462 577 458 594 459 630 472 663 499 670 516 663 520 651 519 620 507 581 479Z" fill="var(--dsw-alias-bg-base, #fff)" />
+    <path d="M62 727 127 697 189 678 249 668 310 666 353 670 408 682 539 732 596 748 656 756 712 754 787 736 843 710 894 673 918 649 937 623 877 663 816 688 757 701 692 703 606 687 490 639 438 624 368 614 291 616 231 627 166 651 109 685Z" fill="var(--dsw-alias-label-link, #0b4596)" />
+    <path d="M239 711 288 760 348 799 428 832 491 845 548 846 611 834 673 809 730 772 637 791 561 791 486 773 388 730 343 716 296 709Z" fill="var(--dsw-alias-label-link, #0b4596)" />
+    <path d="M900 580 887 580 868 596 855 620 848 643 899 599 903 590Z" fill="var(--dsw-alias-label-link, #0b4596)" />
+    <path d="M832 632 822 640 820 659 834 642Z" fill="var(--dsw-alias-label-link, #0b4596)" />
   </svg>
 }
 
@@ -50,8 +50,9 @@ export function FloatingWorkspaceToolbarButton({ runtime, workbenchId, canvasRef
   return <><button ref={anchor} type="button" className={className} aria-label="浮动工作区" title="浮动工作区 · 右键或 Shift+F10 重置位置" disabled={disabled}
     aria-haspopup="menu" aria-expanded={menu} onClick={() => { runtime.patch(workbenchId, { expanded: true }); setMenu(false) }}
     onContextMenu={event => { event.preventDefault(); if (!disabled) setMenu(true) }}
-    onKeyDown={event => { if (event.key === 'ContextMenu' || event.shiftKey && event.key === 'F10' || event.altKey && event.key === 'ArrowDown') { event.preventDefault(); setMenu(true) } }}><FloatingWorkspaceIcon /></button>
+    onKeyDown={event => { if (event.key === 'ContextMenu' || event.shiftKey && event.key === 'F10' || event.altKey && event.key === 'ArrowDown') { event.preventDefault(); setMenu(true) } }}><FloatingWorkspaceIcon size={22} /></button>
     {menu ? <WorkbenchFloatingMenu kind="editor" ownerId={'floating-toolbar:' + workbenchId} anchorRef={anchor} surfaceRef={surface} side="bottom" align="end" className={css.toolbarMenu} label="浮动工作区">
+      <button type="button" className={css.menuClose} aria-label="关闭浮动工作区菜单" title="关闭菜单" onClick={() => setMenu(false)}><IconCloseOutlineMedium size={14} /></button>
       <button role="menuitem" onClick={() => { runtime.patch(workbenchId, { expanded: true }); setMenu(false) }}>打开浮动工作区</button>
       <button role="menuitem" onClick={() => { const width = canvasRef.current?.clientWidth || 900, height = canvasRef.current?.clientHeight || 600; runtime.patch(workbenchId, { rect: defaultFloatingRect(width, height), launcher: { x: Math.max(0, width - 54), y: Math.max(0, height - 54) }, maximized: false, expanded: true }, true); setMenu(false) }}>重置位置</button>
     </WorkbenchFloatingMenu> : null}</>
@@ -363,7 +364,7 @@ export function WorkbenchFloatingWorkspace(props: Props) {
     ? '此内页声明不支持浮窗，请在正式区域中打开。' : !editor.declaration ? '此内页缺少绑定与生命周期声明。' : undefined
   const canvasRect = canvasRef.current?.getBoundingClientRect()
   return <div className={css.layer} data-workbench-floating-layer style={{ display: visible ? undefined : 'none' }}>
-    {!space.expanded ? <button type="button" className={css.launcher + ' ' + accentFrameCss.frame} data-session-frame={launcherMarker ? 'launcher' : undefined} data-accent={launcherMarker?.accentToken} style={{ left: launcher.x, top: launcher.y }} aria-label="展开浮动工作区" title="浮动工作区 · 拖动可调整位置" onPointerDown={e => pointerGesture(e, 'launcher')} onClick={e => { if (e.detail === 0) runtime.patch(workbenchId, { expanded: true }) }}><FloatingWorkspaceIcon />{rows.some(row => row.unread) ? <span className={css.badge} /> : null}</button> : null}
+    {!space.expanded ? <button type="button" className={css.launcher + ' ' + accentFrameCss.frame} data-session-frame={launcherMarker ? 'launcher' : undefined} data-accent={launcherMarker?.accentToken} style={{ left: launcher.x, top: launcher.y }} aria-label="展开浮动工作区" title="浮动工作区 · 拖动可调整位置" onPointerDown={e => pointerGesture(e, 'launcher')} onClick={e => { if (e.detail === 0) runtime.patch(workbenchId, { expanded: true }) }}><FloatingWorkspaceIcon size={30} />{rows.some(row => row.unread) ? <span className={css.badge} /> : null}</button> : null}
     <div ref={windowRef} className={css.window + ' ' + accentFrameCss.frame} data-session-frame={sourceMarker ? 'floating' : undefined} data-accent={sourceMarker?.accentToken} data-workbench-floating-window role="region" aria-label="浮动工作区" style={{ display: space.expanded ? undefined : 'none', left: rect.x, top: rect.y, width: rect.width, height: rect.height }}
       onKeyDown={event => { if (event.key === 'Escape' && menu) { event.stopPropagation(); setMenu(undefined) } if (event.altKey && event.key === 'm') { event.preventDefault(); runtime.patch(workbenchId, { expanded: false }) } }}>
       <header className={css.header} onPointerDown={e => pointerGesture(e, 'move')} onDoubleClick={e => { if (!(e.target as HTMLElement).closest('button,[role=tab]')) runtime.patch(workbenchId, { maximized: !space.maximized }) }}>
@@ -384,8 +385,8 @@ export function WorkbenchFloatingWorkspace(props: Props) {
         </span>
       </div> : null}
       {space.error ? <div className={css.error} role="status">{space.error}<button type="button" title="关闭提示" aria-label="关闭提示" onClick={() => runtime.patch(workbenchId, { error: undefined })}>关闭提示</button></div> : null}
-      <div className={css.content}>{rows.map(renderRow)}{!rows.length ? <div className={css.empty}><FloatingWorkspaceIcon /><p>临时查看，随时放入区域</p><button onClick={() => setMenu('add')}><IconPlusOutlineMedium size={16} /> 添加内页</button><small>临时标签仅在本次运行中保留</small></div> : null}</div>
-      {menu ? <div className={css.menu} role="dialog" aria-label="浮动工作区操作">
+      <div className={css.content}>{rows.map(renderRow)}{!rows.length ? <div className={css.empty}><FloatingWorkspaceIcon size={44} /><p>临时查看，随时放入区域</p><button onClick={() => setMenu('add')}><IconPlusOutlineMedium size={16} /> 添加内页</button><small>临时标签仅在本次运行中保留</small></div> : null}</div>
+      {menu ? <div className={css.menu} role={menu === 'binding' ? 'dialog' : 'menu'} aria-label="浮动工作区操作" data-floating-menu-view={menu}>
         <button type="button" className={css.menuClose} aria-label="关闭浮窗菜单" title="关闭菜单" onClick={() => setMenu(undefined)}><IconCloseOutlineMedium size={14} /></button>
         {menu === 'add' ? <WorkbenchEditorPicker editors={chooser} mode="add" unavailable={unavailable} onSelect={editor => { setMenu(undefined); open(editor, runtime.focusedWorkbenchId === workbenchId ? runtime.focusedBinding : undefined) }} /> : null}
         {menu === 'window' ? <><button disabled={!active || active.busy} onClick={() => setMenu('pin')}>放入区域</button><button onClick={() => setMenu('tabs')}>全部临时内页</button><button disabled={!active} onClick={() => setMenu('binding')}>选择来源对话</button><button onClick={() => { runtime.patch(workbenchId, { rect: defaultFloatingRect(size.width, size.height), launcher: { x: size.width - 54, y: size.height - 54 }, maximized: false }, true); setMenu(undefined) }}>重置位置</button></> : null}

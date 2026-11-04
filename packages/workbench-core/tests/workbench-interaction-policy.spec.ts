@@ -67,6 +67,12 @@ describe('Workbench Conversation interaction policy', () => {
     expect(policy.conversationResources.broken).toBeUndefined()
   })
 
+  it('defaults marker frames on and preserves the minimal presentation choice', () => {
+    expect(normalizeWorkbenchConversationInteractionPolicy(undefined).showSessionAccentFrames).toBe(true)
+    expect(normalizeWorkbenchConversationInteractionPolicy({ showSessionAccentFrames: false }).showSessionAccentFrames).toBe(false)
+    expect(normalizeWorkbenchConversationInteractionPolicy({ showSessionAccentFrames: 'off' }).showSessionAccentFrames).toBe(true)
+  })
+
   it('adds defaults while decoding a pre-policy V4 profile', () => {
     const decoded = decodeWorkbenchSettingsV4({
       version: 4,

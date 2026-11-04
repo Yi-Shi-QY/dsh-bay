@@ -250,6 +250,8 @@ export type WorkbenchFrameProps =
     shareController?: WorkbenchShareControllerV1
     /** User preference for Conversation resource routing in Workbench mode. */
     conversationResourcePolicy?: WorkbenchConversationInteractionPolicyV1 | undefined
+    /** Paint conversation marker colors around Areas and the floating workspace. */
+    showSessionAccentFrames?: boolean
     /** UI-only surface inside Workbench mode. Browser views always remain workbench. */
     surfaceView?: 'home' | 'workbench'
     /** Fixed rail entry for the virtual Workbench Home surface. */
@@ -3138,6 +3140,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
           className={css.canvas}
           data-workbench-canvas
           data-layout-locked={layoutLocked ? 'true' : undefined}
+          data-session-accent-frames={props.showSessionAccentFrames === false ? 'hidden' : undefined}
           {...(frameTransition !== undefined || browserOpening || browserActionPhase !== undefined ? { inert: '' } : {})}
         >
           {!shareGuest && props.floatingRuntime && selectedWorkbenchId ? <WorkbenchFloatingWorkspace

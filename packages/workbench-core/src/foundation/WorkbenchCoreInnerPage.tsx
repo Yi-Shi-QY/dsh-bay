@@ -248,6 +248,7 @@ function WorkbenchCoreInnerPageView(props: WorkbenchCoreInnerPageProps): ReactNo
     selectSession: () => {},
     projectNeutral: true,
     conversationResourcePolicy: settingsSnapshot.value?.interactionPolicy,
+    showSessionAccentFrames: settingsSnapshot.value?.interactionPolicy?.showSessionAccentFrames !== false,
     surfaceView: props.browserView === true ? 'workbench' : surfaceView,
     onShowHome: props.browserView === true ? undefined : () => {
       if (homeNavigation.current) homeNavigation.current()

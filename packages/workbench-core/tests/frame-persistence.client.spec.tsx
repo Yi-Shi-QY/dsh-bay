@@ -32,6 +32,7 @@ function setup(
   nestedSplit?: boolean,
   nestedCollapsedSplit?: boolean,
   boundSession = false,
+  showSessionAccentFrames = true,
 ) {
   const layout = defaultLayout()
   const first = layout.root
@@ -157,6 +158,7 @@ function setup(
     useWorkspaces: (select: (state: unknown) => unknown) => select(workspaces),
     bindLayout: () => () => {}, bindNavigation: () => () => {}, selectSession: vi.fn(),
     settings, runtimeMetrics: metrics,
+    showSessionAccentFrames,
     ...(browserContext ?? {}),
     ...(windowController === undefined ? {} : { windowController }),
     workbenchDirectory: {
@@ -208,6 +210,13 @@ function setup(
 async function advance(ms: number) { await act(async () => { await vi.advanceTimersByTimeAsync(ms) }) }
 
 describe('Frame layout persistence', () => {
+  it('allows the minimal presentation to hide marker frame paint without removing the binding marker', () => {
+    const h = setup(async () => ({ status: 'committed', revision: 2 }), undefined, ['绑定对话内页'], undefined, undefined, undefined, undefined, false, false, true, false)
+    const canvas = h.view.container.querySelector('[data-workbench-canvas]')
+    expect(canvas?.getAttribute('data-session-accent-frames')).toBe('hidden')
+    expect(canvas?.querySelector('[data-session-frame="area"]')).not.toBeNull()
+  })
+
   it('scrolls overflowing Area tabs with either wheel axis without selecting a tab', () => {
     const h = setup(async () => ({ status: 'committed', revision: 2 }), undefined, ['前台内页', '后台内页'])
     const tabs = h.view.getByRole('tablist', { name: '区域内页' })

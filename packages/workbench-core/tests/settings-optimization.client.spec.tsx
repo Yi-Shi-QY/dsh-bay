@@ -87,10 +87,12 @@ describe('settings product interactions', () => {
     expect(view.queryByLabelText('显示 笔记 添加入口')).toBeNull()
     expect(view.queryByRole('button', { name: 'DSH 插件管理' })).toBeNull()
   })
-  it('shows one behavior selector without an enable checkbox and patches only the chosen row', async () => {
+  it('shows one behavior selector plus the marker-frame switch and patches only the chosen row', async () => {
     const patch = vi.fn(async () => true)
     const { view } = setup({ openOptions: { section: 'interactions' }, patchInteractionPolicy: patch })
-    expect(view.queryAllByRole('checkbox')).toHaveLength(0)
+    expect(view.queryAllByRole('checkbox')).toHaveLength(1)
+    fireEvent.click(view.getByRole('checkbox'))
+    await waitFor(() => expect(patch).toHaveBeenCalledWith('showSessionAccentFrames', false))
     fireEvent.change(view.getByLabelText('轨迹检查点击后的行为'), { target: { value: 'disabled' } })
     await waitFor(() => expect(patch).toHaveBeenCalledWith('trajectory-inspect', { enabled: false, placement: 'disabled' }))
     fireEvent.change(view.getByLabelText('文件结果点击后的行为'), { target: { value: 'new-tab' } })
