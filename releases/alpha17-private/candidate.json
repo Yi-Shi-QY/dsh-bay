@@ -1,11 +1,11 @@
 ﻿{
     "status":  "private-staging",
-    "candidateId":  "dsh-bay-0.2.2-alpha.17-dsh-0.2.1-rc.5",
+    "candidateId":  "dsh-bay-0.2.2-alpha.17-dsh-0.2.2-rc.1",
     "product":  "DSH Bay / 湾域",
     "packageName":  "@dsh-workbench/core",
     "version":  "0.2.2-alpha.17",
-    "dshGeneration":  "0.2.1-rc.5",
-    "upstreamCommit":  "b830ec950faba0a46dda564be3e2d854afed94f1",
+    "dshGeneration":  "0.2.2-rc.1",
+    "upstreamCommit":  "66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db",
     "artifact":  {
                      "path":  "releases/alpha17-private/dsh-workbench-core-0.2.2-alpha.17.tgz",
                      "size":  786177,
@@ -16,6 +16,6 @@
                        "compatibility":  "passed",
                        "tests":  "100 files / 608 tests passed",
                        "runtimeBuild":  "passed",
-                       "typecheck":  "blocked by existing RC5 Sidebar/Workspace declaration mismatch"
+                       "typecheck":  "blocked by existing RC1 Sidebar/Workspace declaration mismatch"
                    }
 }

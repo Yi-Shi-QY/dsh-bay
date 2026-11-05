@@ -6,7 +6,7 @@ import type { WorkbenchModeControllerV1 } from '../mode-controller.ts'
 const originals = new WeakMap<StoredEntry, StoredEntry>()
 export const originalWorkbenchAutomaticEntry = (entry: StoredEntry) => originals.get(entry) ?? entry
 
-/** Shadow only the RC5 automatic review opener. The global sidebar owner and
+/** Shadow only the RC1 automatic review opener. The global sidebar owner and
  * its methods remain untouched; official mode delegates the original props. */
 export function installNativeAutomaticIsolation(ctx: Context, mode: WorkbenchModeControllerV1) {
   const name = 'conversation.plan-review.actions' as keyof import('@deepseek-ai/dsh-client-ui-slots').SlotMap & string

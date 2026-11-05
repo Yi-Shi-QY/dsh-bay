@@ -5,6 +5,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, use
 import { createPortal } from 'react-dom'
 import { IconSettingsOutlineMedium } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { HostObservable, PropsRenderSlots, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+import type { ContextMenus } from '@deepseek-ai/dsh-client-ui-context-menu/client'
 import type { SettingsScopeSnapshot } from '../client/workbench-settings-contracts.ts'
 import type { WorkbenchModeControllerV1 } from '../mode-controller.ts'
 import type { WorkbenchSettingsV4 } from './persistence.ts'
@@ -94,6 +95,7 @@ export type WorkbenchCoreInnerPageInjection =
     nativePluginsPanelVisible?: HostObservable<boolean>
     workbenchSettings: HostObservable<SettingsScopeSnapshot<WorkbenchSettingsV4>>
     sidebarHostActions: WorkbenchSidebarHostActionsV1
+    contextMenus?: ContextMenus
     settingsPage: WorkbenchCoreSettingsPage
     renderFooterActions?: (owner: { wide: boolean }) => ReactNode
     requestBrowserReclaim?: (workbenchId: string) => Promise<boolean>
@@ -205,6 +207,15 @@ function WorkbenchCoreInnerPageView(props: WorkbenchCoreInnerPageProps): ReactNo
   useEffect(() => { if (mode.mode !== 'workbench') closeSettings() }, [mode.mode, closeSettings])
   const renderSidebar = useCallback<WorkbenchFrameProps['renderSidebar']>(sidebar => (
     <WorkbenchCoreSidebar {...sidebar}
+      {...(props.contextMenus === undefined ? {} : { contextMenus: props.contextMenus })}
+      useSessionStatus={props.useSessionStatus}
+      useSessionRetainInfo={props.useSessionRetainInfo}
+      useSessionAccess={props.useSessionAccess}
+      useWorkspaceAccess={props.useWorkspaceAccess}
+      usePanelInfo={props.usePanelInfo}
+      useRemoteAccess={props.useRemoteAccess}
+      useContextMenu={props.useContextMenu}
+      useResource={props.useResource}
       {...(props.renderFooterActions === undefined ? {} : { renderFooterActions: props.renderFooterActions })}
       openSettings={openSettings} settingsOpen={settingsOpen} exit={() => {
       setExitError(undefined)

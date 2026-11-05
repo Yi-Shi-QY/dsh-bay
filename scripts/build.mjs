@@ -73,6 +73,9 @@ const js = result.outputFiles.find(file => file.path.endsWith('.js'))?.text
 if (js === undefined) throw new Error('Client bundle did not produce JavaScript')
 const css = result.outputFiles.find(file => file.path.endsWith('.css'))?.text ?? ''
 const imports = [...new Set(Object.values(result.metafile.outputs).flatMap(output => output.imports.filter(item => item.external).map(item => item.path)))].sort()
+if (imports.includes('@deepseek-ai/dsh-api-workspace-controller/default-workspace')) {
+  throw new Error('RC1 default-workspace helper must be bundled locally; it has no client module-table row')
+}
 manifest.dsh.client.external = imports.filter(name => !['react', 'react-dom', 'react/jsx-runtime', '@deepseek-ai/cordis'].includes(name))
 writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n')
 writeFileSync(path.join(core, 'lib/client.js'), `window.__ModuleLoader__.load({id:${JSON.stringify(manifest.name)},factory:(require)=>{const module={exports:{}};const exports=module.exports;\nconst style = document.createElement("style"); style.dataset.plugin = ${JSON.stringify(manifest.name)}; style.textContent = ${JSON.stringify(css)}; document.head.appendChild(style);\n${js}\nreturn module.exports;}});\n`)
@@ -92,7 +95,7 @@ writeFileSync(path.join(core, 'lib/build-inputs.json'), JSON.stringify({
   workbenchVersion: manifest.version,
   defaultInstall: ['@dsh-workbench/core'],
   excludedModules: ['@dsh-workbench/conversation-suite', '@dsh-workbench/svgdeepseek-pet'],
-  more: { workbench: 'deferred', official: 'rc5-ui-entry-customization-only' },
+  more: { workbench: 'deferred', official: 'rc1-ui-entry-customization-only' },
   inputs,
   hostInputs: Object.keys(hostResult.metafile.inputs).sort().map(file => ({
     path: file.replaceAll(String.fromCharCode(92), '/'),

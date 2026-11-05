@@ -21,7 +21,7 @@ it('resumes multi-plugin installation, reuses exact plugins, honors CAS, and can
     for(const suffix of ['first','second']){
       const dir=join(root,suffix);await cp(join(import.meta.dirname,'../presets/workbench-creator/skills/workbench-extension-development/templates/workbench-editor'),dir,{recursive:true})
       for(const file of ['package.json','client.js','cordis.patch.yml'])await writeFile(join(dir,file),(await readFile(join(dir,file),'utf8')).replaceAll('workbench-editor-example','private-'+suffix).replaceAll('workbench.example','private.'+suffix).replaceAll('workbench.editor-example','private.'+suffix))
-      prepared.push(await prepareDistributionArtifact(dir,(n,v)=>(n==='react'&&v==='18.3.1')||(n==='@deepseek-ai/dsh-client-ui-slots'&&v==='0.2.1-rc.5')))
+      prepared.push(await prepareDistributionArtifact(dir,(n,v)=>(n==='react'&&v==='18.3.1')||(n==='@deepseek-ai/dsh-client-ui-slots'&&v==='0.2.2-rc.1')))
     }
     const dependencies=prepared.map(p=>({...p.dependency,archivePath:'artifacts/'+p.dependency.archiveSha256+'.tgz'}))
     const record=structuredClone(settingsFixture().workbenches.a!);if(record.document.root.kind!=='area')throw Error('fixture');record.document.root.moduleHistory=[];delete record.document.root.activeModuleInstanceId
@@ -35,7 +35,7 @@ it('resumes multi-plugin installation, reuses exact plugins, honors CAS, and can
       listPlugins:async()=>dependencies.map(d=>({moduleName:d.packageName,entryId:d.moduleId,enabled:activeBundles.includes(d.packageName),fiberPhase:activeBundles.includes(d.packageName)?'active':'pending'})),
       setBundleEnabled:async()=>{throw Error('Use identity-checked native manifest operation')},
     }
-    const options={profile:{name:'acceptance',dir:profileDir,cwd:profileDir,home:root,installAnchor:profileDir,packageManager:{command:process.execPath,args:[join(dirname(process.execPath),'node_modules/corepack/dist/pnpm.js')]}} as any,native,resolve:(name:string)=>existsSync(join(profileDir,'node_modules',name))?join(profileDir,'node_modules',name):undefined,peerAvailable:(n:string,v:string)=>(n==='react'&&v==='18.3.1')||(n==='@deepseek-ai/dsh-client-ui-slots'&&v==='0.2.1-rc.5'),settings:{describe:()=>[{ns:'workbench-layout',value,revision}],mutate:async(_ns:any,ops:any[],expected:any)=>{if(conflict||expected!==revision)throw Error('CAS conflict');value=ops[0].value;revision++;writes++}} as any}
+    const options={profile:{name:'acceptance',dir:profileDir,cwd:profileDir,home:root,installAnchor:profileDir,packageManager:{command:process.execPath,args:[join(dirname(process.execPath),'node_modules/corepack/dist/pnpm.js')]}} as any,native,resolve:(name:string)=>existsSync(join(profileDir,'node_modules',name))?join(profileDir,'node_modules',name):undefined,peerAvailable:(n:string,v:string)=>(n==='react'&&v==='18.3.1')||(n==='@deepseek-ai/dsh-client-ui-slots'&&v==='0.2.2-rc.1'),settings:{describe:()=>[{ns:'workbench-layout',value,revision}],mutate:async(_ns:any,ops:any[],expected:any)=>{if(conflict||expected!==revision)throw Error('CAS conflict');value=ops[0].value;revision++;writes++}} as any}
     let service=createHostDistributionService(options)
     const inspected=await service.inspect(bytes),installed=await service.consent(inspected.transactionId,inspected.archiveSha256)
     expect(installed.state).toBe('restart-required');expect(installed.installed).toHaveLength(2);expect(writes).toBe(0)

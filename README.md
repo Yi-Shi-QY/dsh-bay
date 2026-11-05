@@ -4,9 +4,9 @@
 >
 > DSH Bay（中文名：湾域）是面向 [DeepSeek Harness（DSH）](https://github.com/deepseek-ai/deepseek-harness) 的多区域插件工作台。它把 DSH 原生 Session、Workspace Files、Terminal、Browser 及其他官方内页组织到相互隔离、可恢复的工作区域中，让插件作者可以在一个清晰的边界内开发和验证自己的扩展。
 
-当前仓库是 DSH Bay `0.2.2-alpha.17.2` 的私有候选仓库，目标宿主为 DSH `0.2.1-rc.5`。仓库已经从研究、迁移和历史验收材料中独立出来，方便进行来源审计、兼容性验证和后续公测准备。
+当前仓库是 DSH Bay `0.2.2-alpha.17.2` 的私有候选仓库，目标宿主为 DSH `0.2.2-rc.1`。仓库已经从研究、迁移和历史验收材料中独立出来，方便进行来源审计、兼容性验证和后续公测准备。
 
-> 当前候选仍处于 `private-staging / experimental-unvalidated`。`pnpm test`、运行时构建和 rc5 身份检查已通过；Sidebar/Workspace 复制源的类型声明门禁和真实 rc5 桌面 smoke 仍是发布前置条件。请不要把当前构建当作已发布的稳定包。
+> 当前候选仍处于 `private-staging / experimental-unvalidated`。`pnpm test`、运行时构建和 rc1 身份检查已通过；Sidebar/Workspace 复制源的类型声明门禁和真实 rc1 桌面 smoke 仍是发布前置条件。请不要把当前构建当作已发布的稳定包。
 
 ## 产品身份
 
@@ -16,8 +16,8 @@
 | 中文名 | **湾域** |
 | 产品定位 | DSH 插件开发、验证、组合和分享的多区域工作台 |
 | 当前版本 | `0.2.2-alpha.17.2` |
-| DSH 兼容版本 | `0.2.1-rc.5` |
-| DSH 上游提交 | `b830ec950faba0a46dda564be3e2d854afed94f1` |
+| DSH 兼容版本 | `0.2.2-rc.1` |
+| DSH 上游提交 | `66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db` |
 | 默认交付 | Core-only |
 | 默认安装包 | `@dsh-workbench/core` |
 | 当前状态 | 私有 staging / experimental-unvalidated |
@@ -45,7 +45,7 @@ DSH Bay 是独立社区项目，不代表 DeepSeek 官方产品。它遵循 DSH 
 
 ### 多区域工作台
 
-支持 Area 的创建、拆分、关闭、恢复和最小占用约束。容器内页的空间算法保持 Workbench 15.1 基线，用于保证最小宽高、分栏、关闭和恢复行为稳定。DSH rc5 适配不会擅自改变这套几何语义。
+支持 Area 的创建、拆分、关闭、恢复和最小占用约束。容器内页的空间算法保持 Workbench 15.1 基线，用于保证最小宽高、分栏、关闭和恢复行为稳定。DSH rc1 适配不会擅自改变这套几何语义。
 
 ### Area-local Session
 
@@ -53,7 +53,7 @@ DSH Bay 是独立社区项目，不代表 DeepSeek 官方产品。它遵循 DSH 
 
 ### 官方内页投影
 
-在 DSH rc5 提供对应 entry 时，Workbench 可以承载：
+在 DSH rc1 提供对应 entry 时，Workbench 可以承载：
 
 - Workspace Files
 - Terminal
@@ -73,7 +73,7 @@ Settings 继续使用 DSH 原生 Plugin Manager 入口。DSH Bay 不维护第二
 
 ### More 菜单隔离
 
-`0.2.2-alpha.17.2` 采用 Core-only 方向：Workbench 不显示、不消费 Workbench More。DSH 官方页面仍可使用 rc5 的 `ui-entry-customization`；在 Workbench projection boundary 只过滤官方 `entry-customization` 注册，不屏蔽整个 actions Slot，也不影响其他合法的官方或第三方 action。
+`0.2.2-alpha.17.2` 采用 Core-only 方向：Workbench 不显示、不消费 Workbench More。DSH 官方页面仍可使用 rc1 的 `ui-entry-customization`；在 Workbench projection boundary 只过滤官方 `entry-customization` 注册，不屏蔽整个 actions Slot，也不影响其他合法的官方或第三方 action。
 
 因此，官方页面、Workbench 页面和模式切换分别遵循以下行为：
 
@@ -97,7 +97,7 @@ Settings 继续使用 DSH 原生 Plugin Manager 入口。DSH Bay 不维护第二
 @dsh-workbench/svgdeepseek-pet
 ```
 
-Conversation/Start/Trajectory 的生成副本继续保留为独立历史证据，不会因为 DSH 宿主升级到 rc5 就自动宣称已经完成 rc5 迁移。
+Conversation/Start/Trajectory 的生成副本继续保留为独立历史证据，不会因为 DSH 宿主升级到 rc1 就自动宣称已经完成 rc1 迁移。
 
 ## 架构边界
 
@@ -124,7 +124,7 @@ DSH 仍然负责：
 
 - Node.js 24 或更高版本；
 - pnpm 11.28.5；
-- DSH `0.2.1-rc.5` 兼容环境。
+- DSH `0.2.2-rc.1` 兼容环境。
 
 在仓库根目录执行：
 
@@ -136,30 +136,30 @@ pnpm verify
 常用命令：
 
 ```text
-pnpm check:rc5   # 检查版本、DSH 提交、来源索引和 Core-only 边界
+pnpm check:rc1   # 检查版本、DSH 提交、来源索引和 Core-only 边界
 pnpm test        # 运行 Core 测试套件
 pnpm build       # 构建运行时并生成 build inputs / provenance
 pnpm typecheck   # 运行 Host / Client 类型声明门禁
 pnpm pack:core   # 生成 Core 包（依赖类型声明门禁）
 ```
 
-`pnpm verify` 当前包含 rc5 身份检查、Core 测试和运行时构建。测试会输出 jsdom、HTMLCanvasElement 以及上游 source map 缺失等预期警告，但退出码为 0。类型声明和打包门禁的当前状态会记录在 [docs/VALIDATION.md](docs/VALIDATION.md)。
+`pnpm verify` 当前包含 rc1 身份检查、Core 测试和运行时构建。测试会输出 jsdom、HTMLCanvasElement 以及上游 source map 缺失等预期警告，但退出码为 0。类型声明和打包门禁的当前状态会记录在 [docs/VALIDATION.md](docs/VALIDATION.md)。
 
 ## 兼容性与来源追踪
 
 本候选的来源和身份必须能够从 DSH 提交、依赖锁定、源文件 digest 和构建产物反向追踪：
 
-- DSH generation：`0.2.1-rc.5`
-- upstream commit：`b830ec950faba0a46dda564be3e2d854afed94f1`
-- Sidebar/Workspace source digest：`28b18fcb45e98bb5a5b4451bb65e4f4f87a4ea6ba727aa9be81cb977c76f78ee`
+- DSH generation：`0.2.2-rc.1`
+- upstream commit：`66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db`
+- Sidebar/Workspace source digest：`bdda51647a9bf715c3ee4662e8259fe6b266ab6f949025190dd1de9c03745df1`
 - lockfile digest：`0c0ef887bc84c95ea8418872328157776b33815f8a739530996353e52cb4dfc7`
 
 详细记录见：
 
-- [rc5 兼容 manifest](compat/dsh-0.2.1-rc.5/manifest.json)
+- [rc1 兼容 manifest](compat/dsh-0.2.2-rc.1/manifest.json)
 - [上游适配记录](packages/workbench-core/core-upstream-adaptation.json)
-- [来源索引](packages/workbench-core/rc5-sidebar-workspace-source-index.json)
-- [provenance](provenance/dsh-0.2.1-rc.5.json)
+- [来源索引](packages/workbench-core/rc1-sidebar-workspace-source-index.json)
+- [provenance](provenance/dsh-0.2.2-rc.1.json)
 - [验证记录](docs/VALIDATION.md)
 
 这些记录区分了 DSH 官方动态投影、Workbench 自有 wrapper 和受控复制源。宿主升级不会自动更新 Workbench 自己复制和改造的文件；任何重基都必须有新的源 digest、patch digest 和验证记录。
@@ -168,7 +168,7 @@ pnpm pack:core   # 生成 Core 包（依赖类型声明门禁）
 
 ```text
 packages/workbench-core/   当前唯一交付的运行时包
-compat/                    DSH rc5 兼容 manifest
+compat/                    DSH rc1 兼容 manifest
 provenance/                DSH 与候选身份、来源和 digest 记录
 releases/                  本地候选索引与构建产物记录
 scripts/                   可复现的检查、测试、构建和打包入口
@@ -187,15 +187,15 @@ private-staging / experimental-unvalidated
 
 在以下门禁全部通过之前，不进入公测或稳定发布：
 
-1. rc5 版本身份与 upstream commit 一致；
+1. rc1 版本身份与 upstream commit 一致；
 2. Core-only 默认安装和排除模块检查通过；
 3. Sidebar/Workspace 类型声明门禁通过；
 4. 官方内页 smoke 通过，包含 Files、Terminal、Browser、Guide 等代表性页面；
 5. More 隔离、Area/session 绑定、布局最小占用和 LAN Share 回归通过；
-6. clean DSH rc5 profile 与真实桌面环境验证通过；
+6. clean DSH rc1 profile 与真实桌面环境验证通过；
 7. artifact provenance、source digest 和 lockfile digest 可追溯。
 
-如果 rc5 候选失败，应回滚到既有的 15.1 / rc2 验收制品。rc5 migration lock、rc2 验收制品和 rc3 开发证据保持独立，互不覆盖。
+如果 rc1 候选失败，应回滚到既有的 15.1 / rc2 验收制品。rc1 migration lock、rc2 验收制品和 rc3 开发证据保持独立，互不覆盖。
 
 ## 参与开发
 

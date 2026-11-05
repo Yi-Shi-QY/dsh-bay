@@ -1,7 +1,7 @@
 # 17.4 开发约定
 
-开始日期：2026-11-05。开发版本：0.2.2-alpha.17.4。
-基线：已合并的 17.3，提交 9064452；宿主继续使用 DSH 0.2.1-rc.5。
+开始日期：2026-11-05。开发版本：0.2.2-alpha.17.5。
+基线：已合并的 17.3，提交 9064452；宿主继续使用 DSH 0.2.2-rc.1。
 开发分支：feature/alpha17.4-ui。
 
 ## 本轮范围
@@ -14,7 +14,7 @@
 
 ## 当前状态
 
-已建立 17.4 开发分支，统一根包、Core、Creator 模板兼容声明和版本身份元数据。已完成下述对话标记色联动，并在用户明确要求后生成了新的 17.4 私有试用包：`releases/alpha17.4-private/dsh-workbench-core-0.2.2-alpha.17.4.tgz`。
+已建立 17.4 开发分支，统一根包、Core、Creator 模板兼容声明和版本身份元数据。已完成下述对话标记色联动，并在用户明确要求后生成了新的 17.4 私有试用包：`releases/alpha17.4-private/dsh-workbench-core-0.2.2-alpha.17.5.tgz`。
 
 17.3 的 112 个既有 generated/upstream 类型错误仍是正式发布阻断基线。17.3 已交付包及其验证记录保留原版本，不将历史验收结果描述为 17.4 验收。
 
@@ -28,7 +28,7 @@
 ### 本次验证
 
 - 本轮相关测试：4 个测试文件、67 项通过；完整测试运行有 747 项通过和 1 个分发事务时序失败，单独重跑该测试通过。
-- `pnpm build` 和 `pnpm check:rc5` 通过。
+- `pnpm build` 和 `pnpm check:rc1` 通过。
 - 用户明确要求打包后，已重新生成私有试用包，并解压核对包名、版本、`lib/index.js`、`lib/client.js`、`lib/build-inputs.json` 和 Creator 模板。
 - `pnpm typecheck` 仍有 112 个既有错误；与 17.3 基线按错误内容归一化比对，无新增、无消除。正式发布门禁仍未通过。
 - 隔离 Web Profile 中通过 Edge 检查深浅主题、1440×1000 和 820×650 视口、360px 浮窗、选区与标签切换、未绑定状态、高对比度、减少动画及标签关闭；无页面异常或失败网络请求。
@@ -63,18 +63,18 @@
 - 菜单项统一为 32px 高度、6px 圆角、轻量 hover 和键盘焦点描边；不可用项统一降低透明度并保留禁止指针。
 - 添加内页选择器的分类标题、图标、文本截断和选项间距与区域/编辑器菜单保持一致；窗口菜单宽度收窄到 280px，避免浮窗内部出现过宽面板。
 - 菜单关闭按钮统一放在右上角；普通操作使用 `menu` 语义，来源对话选择保留 `dialog` 语义。
-- 本轮相关测试 2 个文件、13 项通过，`pnpm build` 和 `pnpm check:rc5` 通过。
+- 本轮相关测试 2 个文件、13 项通过，`pnpm build` 和 `pnpm check:rc1` 通过。
 
 ## 区域容器标签色框开关这一版
 
 - 在工作台设置的“交互偏好”中新增“区域容器标签色框”开关，默认开启，沿用 V4 `interactionPolicy` 保存，不新增 Settings schema 版本。
 - 关闭后只移除区域容器、浮动工作区窗口和最小化入口的标签色装饰线框；绑定标签、颜色记录、对话路由、布局锁定和工作台交互保持不变。
 - 相关测试覆盖设置保存、旧策略默认值、Frame 画布隐藏标记层和分发事务：4 个文件、67 项通过；完整测试运行有 1 个分发事务时序失败，单独重跑该测试通过。
-- `pnpm build`、`pnpm check:rc5` 通过；`pnpm typecheck` 仍为既有 112 个 generated/upstream Sidebar/Workspace 声明错误，未发现新增错误。
+- `pnpm build`、`pnpm check:rc1` 通过；`pnpm typecheck` 仍为既有 112 个 generated/upstream Sidebar/Workspace 声明错误，未发现新增错误。
 
 ## 17.4 私有试用包交付记录
 
-- 文件：`releases/alpha17.4-private/dsh-workbench-core-0.2.2-alpha.17.4.tgz`
+- 文件：`releases/alpha17.4-private/dsh-workbench-core-0.2.2-alpha.17.5.tgz`
 - SHA-256：`f05444f0639492611b7b790510cbf6f343241a09a9068325627c88a13feb11f9`
 - 包大小：`1046425` bytes
 - `pnpm pack:core`：仍被既有 112 个 generated/upstream Sidebar/Workspace 类型错误阻断；本包按项目既定流程在构建通过后使用 `pnpm pack` 生成，因此不表示正式发布门禁全绿。

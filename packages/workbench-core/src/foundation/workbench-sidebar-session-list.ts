@@ -21,5 +21,12 @@ export function projectWorkbenchSidebarSessions(
       byId[sessionId] = { ...byId[sessionId]!, pendingInteraction: kind }
     }
   }
-  return { ...list, byId, current }
+  return {
+    ...list,
+    byId,
+    current,
+    // RC1's workspace tree reads this projection map even when the host
+    // session fixture does not provide any subagent projections yet.
+    projectionsBySession: list.projectionsBySession ?? {},
+  }
 }

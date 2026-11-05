@@ -2,7 +2,7 @@
 
 This repository is private staging for the DSH Bay Core candidate. Before a
 public contribution workflow is opened, changes must preserve the Core-only
-delivery boundary and the DSH `0.2.1-rc.5` contract.
+delivery boundary and the DSH `0.2.2-rc.1` contract.
 
 Every change should state:
 
@@ -14,4 +14,4 @@ Every change should state:
 
 Do not add a second Plugin Manager, consume the official More menu in the
 Workbench projection, or change the 15.1 inner-page space algorithm as part of
-an rc5 compatibility update.
+an rc1 compatibility update.

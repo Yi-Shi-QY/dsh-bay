@@ -3,6 +3,7 @@ import { originalWorkbenchAutomaticEntry } from './native-automatic-isolation.ts
 import type { Context } from '@deepseek-ai/cordis'
 import type { SessionReference } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { SidebarRightTabInfo } from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
+import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { fileAddressFor } from '@deepseek-ai/dsh-util-workspace-path'
 import { isWorkbenchNativeTabClosing } from './native-tab-occurrence.ts'
@@ -287,7 +288,7 @@ export function createWorkbenchNativeAreaSlotRenderer(
   const forbidden = new Set(['root', 'main', 'main.conversation', 'layout.frame', 'sidebar', 'rightbar.session', 'conversation', 'details', 'shell.overlay'])
 
   /**
-   * DSH rc5's official entry-customization plugin registers its More menu
+   * DSH rc1's official entry-customization plugin registers its More menu
    * under three ordinary action Slots.  Workbench intentionally projects
    * only Area-local native content, so that one registration must be hidden
    * at this boundary while every other action remains available.  Match both

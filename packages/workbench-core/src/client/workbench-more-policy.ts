@@ -1,7 +1,7 @@
 /**
- * Workbench 15.2 keeps DSH rc5's entry-customization More menu on the
+ * Workbench 17.5 keeps DSH rc1's entry-customization More menu on the
  * official surface.  This policy is deliberately narrow: it identifies one
- * registration id on the three action slots where rc5 publishes it and does
+ * registration id on the three action slots where rc1 publishes it and does
  * not turn off the surrounding Slot or any other action registration.
  */
 export const WORKBENCH_MORE_FILTERED_SLOTS = [

@@ -42,7 +42,7 @@ describe('17.2 signed package contract',()=>{
 
 describe('explicit runtime artifact preparation',()=>{
   it('supports the real Creator root-entry template and exact runtime file set',async()=>{
-    const p=await prepareDistributionArtifact(template,(name,version)=>(name==='react'&&version==='18.3.1')||(name==='@deepseek-ai/dsh-client-ui-slots'&&version==='0.2.1-rc.5'))
+    const p=await prepareDistributionArtifact(template,(name,version)=>(name==='react'&&version==='18.3.1')||(name==='@deepseek-ai/dsh-client-ui-slots'&&version==='0.2.2-rc.1'))
     expect(p.dependency.packageName).toBe('@local/workbench-editor-example')
     expect(p.dependency.archiveSha256).toBe(artifactHash(p.bytes))
     expect(p.dependency.runtimeFiles).toContain('client.js')
@@ -62,7 +62,7 @@ describe('explicit runtime artifact preparation',()=>{
     try{
       await cp(template,dir,{recursive:true})
       const client=await readFile(join(dir,'client.js'),'utf8'),manifest=JSON.parse(await readFile(join(dir,'package.json'),'utf8'))
-      const peer=(n:string,v:string)=>(n==='react'&&v==='18.3.1')||(n==='@deepseek-ai/dsh-client-ui-slots'&&v==='0.2.1-rc.5')
+      const peer=(n:string,v:string)=>(n==='react'&&v==='18.3.1')||(n==='@deepseek-ai/dsh-client-ui-slots'&&v==='0.2.2-rc.1')
       for(const extra of ['require/* bypass */(variable)','import(/* bypass */"not-collected")']){
         await writeFile(join(dir,'client.js'),client+';'+extra)
         await expect(prepareDistributionArtifact(dir,peer)).rejects.toThrow()
@@ -98,7 +98,7 @@ describe('Host distribution transaction boundaries',()=>{
     try{
       await cp(template,pkg,{recursive:true})
       await rm(join(pkg,'README.md'))
-      const peer=(n:string,v:string)=>(n==='react'&&v==='18.3.1')||(n==='@deepseek-ai/dsh-client-ui-slots'&&v==='0.2.1-rc.5')
+      const peer=(n:string,v:string)=>(n==='react'&&v==='18.3.1')||(n==='@deepseek-ai/dsh-client-ui-slots'&&v==='0.2.2-rc.1')
       const prepared=await prepareDistributionArtifact(pkg,peer),d=prepared.dependency
       const w=JSON.parse(await readFile(join(pkg,'package.json'),'utf8')).dsh.workbench
       const {workbenchExtensionContractFingerprint}=await import('../src/workbench-extension-access.ts')

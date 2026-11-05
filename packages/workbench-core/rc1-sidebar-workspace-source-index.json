@@ -1,0 +1,220 @@
+{
+  "schemaVersion": 1,
+  "product": "DSH Bay 0.2.2-alpha.17.5",
+  "generation": "0.2.2-rc.1",
+  "upstreamCommit": "66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db",
+  "sourceRoot": "packages/client",
+  "sourceDigest": "1ddb4669dbcb52b0a3c93fa1dda418e26994ae83216979849efed76820cd86e3",
+  "fileCount": 34,
+  "packages": [
+    {
+      "package": "ui-sidebar",
+      "path": "HeaderLeadingControls.module.css",
+      "sha256": "054dbbcf4cc260903c82cd9158fdcb6427c8582b6cf9c25b2fd14d06a1453bf2"
+    },
+    {
+      "package": "ui-sidebar",
+      "path": "HeaderLeadingControls.tsx",
+      "sha256": "3a5d0a28b0b6a63874935a23834c5e779a735c48c06a6201877330a65cc0da95"
+    },
+    {
+      "package": "ui-sidebar",
+      "path": "SidebarRoot.module.css",
+      "sha256": "9477109f9d5561710a672756b91ed4986521d27374b8a05f3dccb4fcc4075583"
+    },
+    {
+      "package": "ui-sidebar",
+      "path": "SidebarRoot.tsx",
+      "sha256": "6748bec95bdd6ecc4507fa93a8e7b95128f676ef5967987d666102372ea961e5"
+    },
+    {
+      "package": "ui-sidebar",
+      "path": "contract/slots.ts",
+      "sha256": "05561f648b603d518e7d5a31f62c1c6d5d79fd7837278dca67f66987df595204"
+    },
+    {
+      "package": "ui-sidebar",
+      "path": "index.ts",
+      "sha256": "81f1fea285263f877602eff044a690a18224da88e36176b55ce643c54a1fd192"
+    },
+    {
+      "package": "ui-sidebar",
+      "path": "locales.ts",
+      "sha256": "97f486711ed91151d58ec39434ed0938da5716318e1c4109855410cecf0db3ba"
+    },
+    {
+      "package": "ui-sidebar",
+      "path": "panel-pins.ts",
+      "sha256": "aa50c9eeee25bf161ba1aa0c75fb46796cdb1258ecada82b56349bc7fe84dffc"
+    },
+    {
+      "package": "ui-workspace",
+      "path": "WorkspacePicker.module.css",
+      "sha256": "bd1fea15e55afbfacdae5f97c98bb831b080996bf4d920430f1fd31e304abd14"
+    },
+    {
+      "package": "ui-workspace",
+      "path": "WorkspacePicker.tsx",
+      "sha256": "37431a4bf706729c16a6502f8e57222a373f182bf165011f1cdb4f21678f04f8"
+    },
+    {
+      "package": "ui-workspace",
+      "path": "contract/slots.ts",
+      "sha256": "ff0d464046059e07c59540316c5fc541cba4cd858ca4bcc52bd39ecee017adb0"
+    },
+    {
+      "package": "ui-workspace",
+      "path": "contract/toast.ts",
+      "sha256": "bf60a6b55a3302672d06823e8bc9ff9242f537ca8493587851ffad7e63c50616"
+    },
+    {
+      "package": "ui-workspace",
+      "path": "index.ts",
+      "sha256": "0ceec848fa1ba6f07f2ea94096cc57075d40965ef964924e23514b369ff291b8"
+    },
+    {
+      "package": "ui-workspace",
+      "path": "locales.ts",
+      "sha256": "9485a1f9ca84c59a25021212fe2df59110d5dcb8cf9c209e63b74ba750bda6f6"
+    },
+    {
+      "package": "ui-workspace",
+      "path": "navigation.ts",
+      "sha256": "f9a65b9e80b892219faf1be20631199f9be4f2348a31251167f309e3abcb7018"
+    },
+    {
+      "package": "ui-workspace",
+      "path": "path-suffix.ts",
+      "sha256": "31b29940b1ef5a2a223d83d5b354d63cc7dbfd54853315cc3535d689a7ac6a21"
+    },
+    {
+      "package": "ui-workspace",
+      "path": "pin-order.ts",
+      "sha256": "2138241b54aa77924dc1b7ed2b7fdcc32ed6229251473a3aa27e6847309c72f0"
+    },
+    {
+      "package": "ui-workspace",
+      "path": "rows/Rows.module.css",
+      "sha256": "5eddc6c00489e539a6c7844d18d0a5b9cabf353830109a38662e426c66a7a5d1"
+    },
+    {
+      "package": "ui-workspace",
+      "path": "rows/Rows.tsx",
+      "sha256": "dd4f58eb64471ce8255be218c6870a351bab4ad3f413750d8974530e1654d29f"
+    },
+    {
+      "package": "ui-workspace",
+      "path": "rows/WorkspaceBrowser.module.css",
+      "sha256": "00e213fa33382712429dcd8f2238c88e6031342ddcda1ec65addf918ea4cdfcd"
+    },
+    {
+      "package": "ui-workspace",
+      "path": "rows/WorkspaceBrowser.tsx",
+      "sha256": "c7d298f05933f4ddca62d33907d69ba2cbe34431d41ab0281090baf9fbe3f3cb"
+    },
+    {
+      "package": "ui-workspace",
+      "path": "rows/WorkspaceDialogs.tsx",
+      "sha256": "12cdb74ccf545e0b38593f912cd81d8b7ef36b75b6e742403848042043fb3445"
+    },
+    {
+      "package": "ui-workspace",
+      "path": "session-actions/ArchiveSession.tsx",
+      "sha256": "25060f622ca339c2ef84e6ac29c05d57de18442ecab2f97984806078d3c5ddb7"
+    },
+    {
+      "package": "ui-workspace",
+      "path": "session-actions/PinSession.tsx",
+      "sha256": "11e1bc392292921679a667c933a24b982a7c66dea6d7821a16133a9cb36226cb"
+    },
+    {
+      "package": "ui-workspace",
+      "path": "session-actions/RenameSession.tsx",
+      "sha256": "889975808b39963df4d67b6b3e630072b3dc502545a25d1d7509bdf8b977c5c5"
+    },
+    {
+      "package": "ui-workspace",
+      "path": "session-actions/RowActionToast.tsx",
+      "sha256": "e844aef3af1e00389e663efe2b18336900e862ecbbb814cb5d445e59e025f6a3"
+    },
+    {
+      "package": "ui-workspace",
+      "path": "session-actions/SessionMenu.tsx",
+      "sha256": "7ffc2b7e199566a6578a033fab85fc17f8c4c38b37603edeedf890b389cfa847"
+    },
+    {
+      "package": "ui-workspace",
+      "path": "session-actions/context-menus.tsx",
+      "sha256": "89aa141e86321098f5b63c39a0c9fa5fc06058e0489a0334b5b06be6125884df"
+    },
+    {
+      "package": "ui-workspace",
+      "path": "session-actions/derived.ts",
+      "sha256": "8ec437e979e144e7eb44bffa629445ebcd1ee10371843d05dd436fcc13a266d4"
+    },
+    {
+      "package": "ui-workspace",
+      "path": "shortcuts.ts",
+      "sha256": "da073448ecedc3f08dd532bad25b4c5a4fa5499c5bc012707bb83a6b95e5dce0"
+    },
+    {
+      "package": "ui-workspace",
+      "path": "stores.ts",
+      "sha256": "b94d8e12a14a6377fb8c56067dcee07ac8d0365008c5a691694ce21b2968b007"
+    },
+    {
+      "package": "ui-workspace",
+      "path": "toast/Toast.tsx",
+      "sha256": "a618182f76a94c506b26bbb29d6830d039c38e2c22396e1a97e472378e46c1ad"
+    },
+    {
+      "package": "ui-workspace",
+      "path": "toast/register.ts",
+      "sha256": "c8a0ef5d76a215182690223809eaadba170023fbb8bc5f30c034484e887f23e9"
+    },
+    {
+      "package": "ui-workspace",
+      "path": "tree.ts",
+      "sha256": "9213064fdc642ebebe9fc35cd1562b0d23bd1338bac3abf04e6498e54a4861ed"
+    }
+  ],
+  "materialization": {
+    "sourceMirror": "generated/upstream/rc1-source",
+    "runtimeDestinations": [
+      "packages/workbench-core/src/foundation/workbench-sidebar/generated/upstream"
+    ],
+    "runtimeMode": "standalone-core-only-runtime-with-exact-rc1-source-mirror",
+    "missingSourceFiles": 0,
+    "adaptedFiles": [
+      "ui-sidebar/contract/slots.ts",
+      "ui-sidebar/index.ts",
+      "ui-sidebar/locales.ts",
+      "ui-sidebar/SidebarRoot.module.css",
+      "ui-sidebar/SidebarRoot.tsx",
+      "ui-workspace/contract/slots.ts",
+      "ui-workspace/index.ts",
+      "ui-workspace/locales.ts",
+      "ui-workspace/rows/Rows.module.css",
+      "ui-workspace/rows/Rows.tsx",
+      "ui-workspace/stores.ts",
+      "ui-workspace/tree.ts",
+      "ui-workspace/WorkspacePicker.tsx"
+    ],
+    "runtimeExtras": [
+      {
+        "path": "ui-workspace/WorkspaceBrowser.module.css",
+        "destinations": [
+          "packages/workbench-core/src/foundation/workbench-sidebar/generated/upstream"
+        ],
+        "reason": "DSH Bay Core keeps the reviewed Area/session browser path while rc1 source uses ui-workspace/rows/WorkspaceBrowser.module.css"
+      },
+      {
+        "path": "ui-workspace/WorkspaceBrowser.tsx",
+        "destinations": [
+          "packages/workbench-core/src/foundation/workbench-sidebar/generated/upstream"
+        ],
+        "reason": "DSH Bay Area/session browser preserves explicit Area-local routing and does not consume the rc1 global current Session"
+      }
+    ]
+  }
+}

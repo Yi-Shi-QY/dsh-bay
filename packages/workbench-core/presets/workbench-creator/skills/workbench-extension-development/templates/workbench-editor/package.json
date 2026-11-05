@@ -24,9 +24,9 @@
       "kind": "extension",
       "delivery": "direct-source",
       "version": "0.1.0",
-      "coreCompatibility": "0.2.2-alpha.17.4",
-      "dshGeneration": "0.2.1-rc.5",
-      "upstreamCommit": "b830ec950faba0a46dda564be3e2d854afed94f1",
+      "coreCompatibility": "0.2.2-alpha.17.5",
+      "dshGeneration": "0.2.2-rc.1",
+      "upstreamCommit": "66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db",
       "activation": "restart-only",
       "scope": "root",
       "editorIds": [
@@ -78,7 +78,7 @@
   },
   "peerDependencies": {
     "react": "18.3.1",
-    "@deepseek-ai/dsh-client-ui-slots": "0.2.1-rc.5"
+    "@deepseek-ai/dsh-client-ui-slots": "0.2.2-rc.1"
   },
   "license": "MIT"
 }

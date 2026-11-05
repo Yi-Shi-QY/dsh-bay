@@ -2,7 +2,7 @@
   "name": "dsh-bay-private-staging",
   "description": "Private staging repository for DSH Bay (湾域) on DSH",
   "private": true,
-  "version": "0.2.2-alpha.17.4",
+  "version": "0.2.2-alpha.17.5",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Yi-Shi-QY/dsh-bay.git"
@@ -21,18 +21,18 @@
   "type": "module",
   "packageManager": "pnpm@11.28.5",
   "engines": {
-    "node": ">=24"
+    "node": ">=24.9.0"
   },
   "scripts": {
     "build": "node scripts/build.mjs",
-    "check:rc5": "node scripts/check-rc5.mjs",
-    "verify": "pnpm check:rc5 && pnpm test && pnpm build",
+    "check:rc1": "node scripts/check-rc1.mjs",
+    "verify": "pnpm check:rc1 && pnpm test && pnpm build",
     "test": "node scripts/test.mjs",
     "typecheck": "pnpm --filter @dsh-workbench/core build:types",
     "pack:core": "node scripts/pack.mjs"
   },
   "devDependencies": {
-    "@deepseek-ai/dsh": "0.2.1-rc.5",
+    "@deepseek-ai/dsh": "0.2.2-rc.1",
     "@testing-library/dom": "10.4.1",
     "@testing-library/react": "16.3.2",
     "@types/node": "^24.0.0",

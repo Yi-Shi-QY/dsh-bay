@@ -77,7 +77,7 @@ export async function inspectDistributionArtifact(bytes: Uint8Array, peerAvailab
   if(new Set(bundleEntries.map(e=>e.entryId)).size!==bundleEntries.length)throw new Error('Bundle 入口 ID 重复。')
   if(d.runtimeKind!==undefined&&!['client-only','client-host'].includes(d.runtimeKind))throw new Error('扩展运行类型无效。')
   if(d.runtimeKind==='client-only'){
-    // RC5 discovers clients from Loader rows and still needs an inert shim.
+    // RC1 discovers clients from Loader rows and still needs an inert shim.
     const entry=manifest.main??manifest.exports?.['.']
     if(!manifest.dsh.client||typeof entry!=='string')throw new Error('客户端扩展缺少原生注册入口。')
     const source=files.get(entry.replace(/^[.][/]/u,''))?.toString('utf8').replace(/[/][*][\s\S]*?[*][/]|[/][/][^\r\n]*/gu,'').replace(/\s+/gu,'').replace(/;$/u,'')

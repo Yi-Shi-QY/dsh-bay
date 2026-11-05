@@ -36,7 +36,7 @@ describe('Workbench Area-local native sidebar adapter', () => {
     'sidebar.panellist.actions',
     'conversation.session.header.views.actions',
     'sidebar.right.tab.guide.actions',
-  ])('filters only rc5 official entry-customization More registrations in Area projections (%s)', slot => {
+  ])('filters only rc1 official entry-customization More registrations in Area projections (%s)', slot => {
     const officialMore = {
       component: () => <span data-testid="official-more">official More</span>,
       options: { id: 'entry-customization' },

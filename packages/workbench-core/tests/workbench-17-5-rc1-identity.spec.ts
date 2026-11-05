@@ -7,20 +7,21 @@ function json(relative: string) {
   return JSON.parse(source) as Record<string, any>
 }
 
-describe('Workbench 15.2 rc5 identity', () => {
+describe('Workbench 17.5 rc1 identity', () => {
   it('keeps runtime metadata, Core dependencies, and migration lock on the same candidate', () => {
     const root = json('package.json')
     const core = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as Record<string, any>
-    const provenance = json('provenance/dsh-0.2.1-rc.5.json')
-    expect(WORKBENCH_CORE_VERSION).toBe('0.2.2-alpha.17.4')
-    expect(WORKBENCH_DSH_GENERATION).toBe('0.2.1-rc.5')
-    expect(WORKBENCH_UPSTREAM_COMMIT).toBe('b830ec950faba0a46dda564be3e2d854afed94f1')
+    const provenance = json('provenance/dsh-0.2.2-rc.1.json')
+    expect(WORKBENCH_CORE_VERSION).toBe('0.2.2-alpha.17.5')
+    expect(WORKBENCH_DSH_GENERATION).toBe('0.2.2-rc.1')
+    expect(WORKBENCH_UPSTREAM_COMMIT).toBe('66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db')
     expect(root.devDependencies['@deepseek-ai/dsh']).toBe(WORKBENCH_DSH_GENERATION)
     expect(core.version).toBe(WORKBENCH_CORE_VERSION)
     expect(core.dsh.workbench).toMatchObject({ dshGeneration: WORKBENCH_DSH_GENERATION, upstreamCommit: WORKBENCH_UPSTREAM_COMMIT, candidateId: provenance.candidateId })
     expect(core.dsh.workbench.defaultInstall).toEqual(['@dsh-workbench/core'])
     expect(core.dsh.workbench.excludedModules).toEqual(['@dsh-workbench/conversation-suite', '@dsh-workbench/svgdeepseek-pet'])
-    expect(core.dsh.client.officialMore).toBe('host-only-rc5-ui-entry-customization')
+    expect(core.dsh.client.officialMore).toBe('host-only-rc1-ui-entry-customization')
+    expect(core.dsh.client.external).not.toContain('@deepseek-ai/dsh-api-workspace-controller/default-workspace')
     for (const section of ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies']) {
       for (const [name, version] of Object.entries(core[section] ?? {})) {
         if (name.startsWith('@deepseek-ai/dsh')) expect(version).toBe(WORKBENCH_DSH_GENERATION)
@@ -28,12 +29,24 @@ describe('Workbench 15.2 rc5 identity', () => {
     }
   })
 
-  it('records rc5 Sidebar/Workspace provenance and keeps Conversation deferred', () => {
-    const source = json('packages/workbench-core/rc5-sidebar-workspace-source-index.json')
+  it('records rc1 Sidebar/Workspace provenance and keeps Conversation deferred', () => {
+    const source = json('packages/workbench-core/rc1-sidebar-workspace-source-index.json')
     expect(source).toMatchObject({ generation: WORKBENCH_DSH_GENERATION, upstreamCommit: WORKBENCH_UPSTREAM_COMMIT, fileCount: 34 })
     expect(source.sourceDigest).toMatch(/^[a-f0-9]{64}$/u)
-    const provenance = json('provenance/dsh-0.2.1-rc.5.json')
+    const provenance = json('provenance/dsh-0.2.2-rc.1.json')
     expect(provenance.source.conversationMigration).toBe('deferred')
+  })
+
+  it('bundles the RC1 default Workspace label helper without a module-table request', () => {
+    const core = json('packages/workbench-core/package.json')
+    const workspaceRoot = 'packages/workbench-core/src/foundation/workbench-sidebar/generated/upstream/ui-workspace/'
+    const picker = readFileSync(new URL(`../../../${workspaceRoot}WorkspacePicker.tsx`, import.meta.url), 'utf8')
+    const browser = readFileSync(new URL(`../../../${workspaceRoot}rows/WorkspaceBrowser.tsx`, import.meta.url), 'utf8')
+    expect(picker).toContain('default-workspace.ts')
+    expect(browser).toContain('default-workspace.ts')
+    expect(picker).not.toContain('@deepseek-ai/dsh-api-workspace-controller/default-workspace')
+    expect(browser).not.toContain('@deepseek-ai/dsh-api-workspace-controller/default-workspace')
+    expect(core.dsh.client.external).not.toContain('@deepseek-ai/dsh-api-workspace-controller/default-workspace')
   })
 
   it('does not add the official More package as a Workbench-owned menu dependency', () => {
@@ -43,7 +56,7 @@ describe('Workbench 15.2 rc5 identity', () => {
     expect(packageSource).not.toContain('@deepseek-ai/dsh-client-ui-entry-customization')
   })
 
-  it('keeps the shipped Creator preset on the rc5 identity', () => {
+  it('keeps the shipped Creator preset on the rc1 identity', () => {
     const presetRoot = new URL('../presets/workbench-creator/skills/workbench-extension-development/', import.meta.url)
     const files = [
       'SKILL.md',

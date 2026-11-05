@@ -8,8 +8,8 @@
   "validation": {
     "tests": "108 files / 651 tests passed",
     "build": "passed",
-    "rc5Identity": "passed",
-    "typecheck": "112 existing RC5 generated Sidebar/Workspace errors; zero new errors",
+    "rc1Identity": "passed",
+    "typecheck": "112 existing RC1 generated Sidebar/Workspace errors; zero new errors",
     "inputChecks": 363,
     "artifact": "extracted archive, source input hashes, Creator files and actual installed Host/Client bytes verified",
     "ui": {

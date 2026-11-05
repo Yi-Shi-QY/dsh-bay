@@ -26,6 +26,7 @@ import type {} from '@deepseek-ai/dsh-api-terminal-controller/client'
 import type {} from '@deepseek-ai/dsh-client-ui-theme/client'
 import type { MainPanelId } from '@deepseek-ai/dsh-client-ui-layout/client'
 import type { HostObservable } from '@deepseek-ai/dsh-client-ui-slots'
+import type { ContextMenus } from '@deepseek-ai/dsh-client-ui-context-menu/client'
 import { createNativePluginNavigation } from '../client/native-plugin-navigation.ts'
 import { createNativePluginsPanelVisibility, watchNativePluginsPanel } from '../client/native-main-panel-navigation.ts'
 import { createAreaSessionCreator } from '../client/session-placement.ts'
@@ -70,7 +71,7 @@ import { isWorkbenchShareGuestPage } from '../client/workbench-share-guest.ts'
 
 export const inject = [
   'connection', 'slots', 'layout', 'sessions', 'workspaces', 'uiWorkspace', 'uiSession', 'configForms', 'modules', 'locale', 'conversation',
-  'remote', 'remote.session', 'remote.settings', 'remote.agentPresets', 'remote.pluginInventory', 'remote.pluginManager', 'remote.workspaceFiles', 'webTerminals', 'sidebarRight', 'sidebarRightTabs', 'shortcuts', 'resources', 'theme', 'uiConversation', 'cordisInspect',
+  'remote', 'remote.session', 'remote.settings', 'remote.agentPresets', 'remote.pluginInventory', 'remote.pluginManager', 'remote.workspaceFiles', 'webTerminals', 'sidebarRight', 'sidebarRightTabs', 'shortcuts', 'resources', 'contextMenus', 'theme', 'uiConversation', 'cordisInspect',
 ] as const
 
 function editorCatalogFor(ctx: ClientContext): WorkbenchEditorCatalog {
@@ -123,6 +124,7 @@ function sidebarHostActionsFor(ctx: ClientContext): WorkbenchSidebarHostActionsV
     deleteWorkspace: workspaceId => ctx.workspaces.delete(workspaceId),
     insertWorkspaceBefore: (workspaceId, beforeWorkspaceId) => ctx.workspaces.insertBefore(workspaceId, beforeWorkspaceId),
     archiveSession: sessionId => ctx.workspaces.archiveSession(sessionId),
+    unarchiveSession: sessionId => ctx.workspaces.unarchiveSession(sessionId),
     insertSessionBefore: async (workspaceId, sessionId, beforeSessionId) => { await ctx.workspaces.insertSessionBefore(workspaceId, sessionId, beforeSessionId) },
     createWorkspace: input => ctx.workspaces.create(input),
     pickDirectory: () => ctx.uiWorkspace.pickDirectory(),
@@ -473,6 +475,7 @@ export function applyWorkbenchCoreFoundation(
       createWorkspace: path => ctx.workspaces.create({ path }),
       pickDirectory: () => ctx.uiWorkspace.pickDirectory(),
       sidebarHostActions: sidebarHostActionsFor(ctx),
+      contextMenus: ctx.contextMenus as ContextMenus,
       openOfficialSession: (sessionId, assertClaim) => modeController.exit(() => {
         assertClaim()
         if (!ctx.sessions.list.getSnapshot().byId[sessionId as SessionId]) throw new Error('此对话已不可用')

@@ -361,7 +361,7 @@ export function NativeSidebarAreaEditor({
         entryKey: definition.id,
         info: {
           sidebar: { expanded: true, fullscreen: false },
-          panel: { id: areaId as never },
+          panel: { id: areaId as never, isFloating: false },
           tab: {
             id: `${nativeInstanceId}:resource` as never,
             kind: nextClaim.kind,

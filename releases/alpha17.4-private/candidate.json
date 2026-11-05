@@ -1,14 +1,14 @@
 {
   "status": "experimental-private-trial; typecheck-blocked",
-  "candidateId": "dsh-bay-0.2.2-alpha.17.4-dsh-0.2.1-rc.5",
+  "candidateId": "dsh-bay-0.2.2-alpha.17.5-dsh-0.2.2-rc.1",
   "product": "DSH Bay / 湾域",
   "packageName": "@dsh-workbench/core",
-  "version": "0.2.2-alpha.17.4",
-  "dshGeneration": "0.2.1-rc.5",
-  "upstreamCommit": "b830ec950faba0a46dda564be3e2d854afed94f1",
+  "version": "0.2.2-alpha.17.5",
+  "dshGeneration": "0.2.2-rc.1",
+  "upstreamCommit": "66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db",
   "recordedAt": "2026-11-04T22:40:29.797Z",
   "artifact": {
-    "path": "releases/alpha17.4-private/dsh-workbench-core-0.2.2-alpha.17.4.tgz",
+    "path": "releases/alpha17.4-private/dsh-workbench-core-0.2.2-alpha.17.5.tgz",
     "size": 1046425,
     "archiveModifiedAt": "2026-11-04T22:38:11.188Z",
     "sha256": "f05444f0639492611b7b790510cbf6f343241a09a9068325627c88a13feb11f9",
@@ -16,7 +16,7 @@
     "integrity": "sha512-A9BmRZVfuSnd5wnh/1QCubX4pfxWCx8h+7vSjdfYjCkuI58msylAUFu/zSjlkG9qSLQ7w02St2P7n5P1gb8GjQ=="
   },
   "checks": {
-    "rc5Identity": "passed",
+    "rc1Identity": "passed",
     "build": "passed",
     "sourceTests": "4 files / 67 targeted tests passed",
     "archiveExtracted": true,

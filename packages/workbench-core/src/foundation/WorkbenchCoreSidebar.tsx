@@ -1,4 +1,6 @@
 import { useState, type ReactNode } from 'react'
+import type { ContextMenus } from '@deepseek-ai/dsh-client-ui-context-menu/client'
+import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import { IconSettingsOutlineMedium } from '@deepseek-ai/dsh-client-ui-primitives'
 import css from './WorkbenchSidebarActions.module.css'
 import { WorkbenchBrandMark, WorkbenchBrandName } from './WorkbenchBrand.tsx'
@@ -10,6 +12,15 @@ import {
 } from './workbench-sidebar-browser.tsx'
 import { zh as sidebarZh } from './workbench-sidebar/generated/upstream/ui-sidebar/locales.ts'
 
+const fallbackUsePanelInfo = ((selector: (value: { readonly activePanelId: null }) => unknown) => selector({ activePanelId: null })) as PropsRuntime<'shell.overlay'>['usePanelInfo']
+const fallbackUseRemoteAccess = (() => true) as PropsRuntime<'shell.overlay'>['useRemoteAccess']
+const fallbackUseSessionStatus = ((selector: (value: ReadonlyMap<never, never>) => unknown) => selector(new Map<never, never>())) as PropsRuntime<'shell.overlay'>['useSessionStatus']
+const fallbackUseSessionRetainInfo = (() => undefined) as PropsRuntime<'shell.overlay'>['useSessionRetainInfo']
+const fallbackUseSessionAccess = (() => true) as PropsRuntime<'shell.overlay'>['useSessionAccess']
+const fallbackUseWorkspaceAccess = (() => true) as PropsRuntime<'shell.overlay'>['useWorkspaceAccess']
+const fallbackUseContextMenu = (() => ({ getTriggerProps: (_target: unknown, handlers?: Record<string, unknown>) => handlers ?? {} })) as PropsRuntime<'shell.overlay'>['useContextMenu']
+const fallbackUseResource = (() => ({ status: 'none', value: undefined, failure: undefined })) as PropsRuntime<'shell.overlay'>['useResource']
+
 export interface WorkbenchCoreSidebarProps {
   collapsed: boolean
   width: number
@@ -18,6 +29,16 @@ export interface WorkbenchCoreSidebarProps {
   useWorkspaces: Parameters<typeof WorkbenchSidebarBrowser>[0]['useWorkspaces']
   routing: WorkbenchShellSidebarRoutingV1
   hostActions: WorkbenchSidebarHostActionsV1
+  contextMenus?: ContextMenus
+  drawer?: boolean
+  useSessionStatus: PropsRuntime<'shell.overlay'>['useSessionStatus']
+  useSessionRetainInfo: PropsRuntime<'shell.overlay'>['useSessionRetainInfo']
+  useSessionAccess: PropsRuntime<'shell.overlay'>['useSessionAccess']
+  useWorkspaceAccess: PropsRuntime<'shell.overlay'>['useWorkspaceAccess']
+  usePanelInfo: PropsRuntime<'shell.overlay'>['usePanelInfo']
+  useRemoteAccess: PropsRuntime<'shell.overlay'>['useRemoteAccess']
+  useContextMenu: PropsRuntime<'shell.overlay'>['useContextMenu']
+  useResource: PropsRuntime<'shell.overlay'>['useResource']
   exit: () => void
   openSettings: () => void
   settingsOpen: boolean
@@ -29,7 +50,12 @@ export interface WorkbenchCoreSidebarProps {
  * of the locked DSH generation; only navigation is adapted to Area claims.
  */
 export function WorkbenchCoreSidebar({
-  collapsed, width, toggleSidebar, useSessions, useWorkspaces, routing, hostActions, exit, openSettings, settingsOpen, renderFooterActions,
+  collapsed, width, toggleSidebar, useSessions, useWorkspaces, routing, hostActions, contextMenus, drawer = false,
+  useSessionStatus = fallbackUseSessionStatus, useSessionRetainInfo = fallbackUseSessionRetainInfo,
+  useSessionAccess = fallbackUseSessionAccess, useWorkspaceAccess = fallbackUseWorkspaceAccess,
+  usePanelInfo = fallbackUsePanelInfo, useRemoteAccess = fallbackUseRemoteAccess,
+  useContextMenu = fallbackUseContextMenu, useResource = fallbackUseResource,
+  exit, openSettings, settingsOpen, renderFooterActions,
 }: WorkbenchCoreSidebarProps): ReactNode {
   const [navigationError, setNavigationError] = useState<string>()
   const renderSlot = (name: string, owner: { wide?: boolean; expandSidebar?: () => void; size?: number }): ReactNode => {
@@ -41,6 +67,15 @@ export function WorkbenchCoreSidebar({
         useWorkspaces={useWorkspaces}
         routing={routing}
         hostActions={hostActions}
+        {...(contextMenus === undefined ? {} : { contextMenus })}
+        useSessionStatus={useSessionStatus}
+        useSessionRetainInfo={useSessionRetainInfo}
+        useSessionAccess={useSessionAccess}
+        useWorkspaceAccess={useWorkspaceAccess}
+        usePanelInfo={usePanelInfo}
+        useRemoteAccess={useRemoteAccess}
+        useContextMenu={useContextMenu}
+        useResource={useResource}
       />
     }
     if (name === 'sidebar.settings') {
@@ -74,8 +109,24 @@ export function WorkbenchCoreSidebar({
   return <><WorkbenchSidebar {...{
     collapsed,
     width,
+    drawer,
     useSessions,
     useWorkspaces,
+    useRemoteAccess,
+    usePanelInfo,
+    useWorkspaceAccess,
+    useContextMenu,
+    useResource,
+    useSessionStatus,
+    useSessionAccess,
+    useSessionRetainInfo,
+    usePanels: <T,>(selector: (state: readonly never[]) => T): T => selector([]),
+    useEntryPins: <T,>(selector: (state: readonly string[]) => T): T => selector([]),
+    useEntryActions: <T,>(selector: (state: boolean) => T): T => selector(false),
+    useShortcuts: <T,>(selector: (state: readonly never[]) => T): T => selector([]),
+    selectPanel: () => {},
+    setPinned: () => {},
+    trackEntryClick: () => {},
     startSession: (workspaceId?: string) => {
       const areaId = routing.getSnapshot().focusedAreaId
       setNavigationError(undefined)

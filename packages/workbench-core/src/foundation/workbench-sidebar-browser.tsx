@@ -1,12 +1,17 @@
 import { useEffect, useMemo, useRef, useSyncExternalStore, type ReactNode } from 'react'
+import type { ContextMenus } from '@deepseek-ai/dsh-client-ui-context-menu/client'
 import type { HostObservable } from '@deepseek-ai/dsh-client-ui-slots'
+import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { SessionStatusSnapshot } from '@deepseek-ai/dsh-client-ui-session/client'
 import { type SessionListState as ProjectedSessionListState, projectWorkbenchSidebarSessions } from './workbench-sidebar-session-list.ts'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { SessionListState, SessionSearchResultItem } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { WorkspaceId, WorkspaceSnapshot as WorkspaceListState, WorkspaceView } from '@deepseek-ai/dsh-api-workspace-controller/client'
+import type { ContextMenuTarget } from '@deepseek-ai/dsh-client-ui-context-menu/client'
+import type { WorkspaceShortcutState } from './workbench-sidebar/generated/upstream/ui-workspace/shortcuts.ts'
 import { WorkspaceBrowser } from './workbench-sidebar/generated/upstream/ui-workspace/WorkspaceBrowser.tsx'
 import { createWorkspaceViewStore } from './workbench-sidebar/generated/upstream/ui-workspace/stores.ts'
+import { createWorkspaceShortcutControls } from './workbench-sidebar/generated/upstream/ui-workspace/shortcuts.ts'
 import { zh as workspaceZh } from './workbench-sidebar/generated/upstream/ui-workspace/locales.ts'
 import type { DirectoryFlowOwnerProps, WorkspaceBrowserProps } from './workbench-sidebar/generated/upstream/ui-workspace/contract/slots.ts'
 /** Structural routing face supplied by Core.  Shell deliberately does not
@@ -30,6 +35,7 @@ export interface WorkbenchSidebarHostActionsV1 {
   archiveSession(sessionId: SessionId): Promise<void>
   insertSessionBefore(workspaceId: WorkspaceId, sessionId: SessionId, beforeSessionId?: SessionId): Promise<void>
   createWorkspace(input: { path: string }): Promise<WorkspaceView>
+  unarchiveSession(sessionId: SessionId): Promise<void>
   pickDirectory?: () => Promise<string | null>
   hostHome?: string
 }
@@ -41,6 +47,27 @@ export interface WorkbenchSidebarBrowserProps {
   useWorkspaces: <T>(selector: (state: WorkspaceListState) => T) => T
   routing: WorkbenchShellSidebarRoutingV1
   hostActions: WorkbenchSidebarHostActionsV1
+  contextMenus?: ContextMenus
+  useSessionStatus: PropsRuntime<'shell.overlay'>['useSessionStatus']
+  useSessionRetainInfo: PropsRuntime<'shell.overlay'>['useSessionRetainInfo']
+  useSessionAccess: PropsRuntime<'shell.overlay'>['useSessionAccess']
+  useWorkspaceAccess: PropsRuntime<'shell.overlay'>['useWorkspaceAccess']
+  usePanelInfo: PropsRuntime<'shell.overlay'>['usePanelInfo']
+  useRemoteAccess: PropsRuntime<'shell.overlay'>['useRemoteAccess']
+  useContextMenu: PropsRuntime<'shell.overlay'>['useContextMenu']
+  useResource: PropsRuntime<'shell.overlay'>['useResource']
+}
+
+const EMPTY_CONTEXT_MENU: HostObservable<ContextMenuTarget | null> = {
+  getSnapshot: () => null,
+  subscribe: () => () => {},
+}
+
+const EMPTY_WORKSPACE_SHORTCUTS: WorkspaceShortcutState = {
+  searchRequest: 0,
+  addRequested: false,
+  directoryBusy: false,
+  renameTarget: null,
 }
 
 const workspaceLabels: Readonly<Record<string, string>> = {
@@ -83,7 +110,8 @@ function DirectoryFlowDriver({ owner, pickDirectory }: {
  * menus, dialogs and keyboard behavior remain in the locked upstream copy.
  */
 export function WorkbenchSidebarBrowser({
-  wide, expandSidebar, useSessions, useWorkspaces, routing, hostActions,
+  wide, expandSidebar, useSessions, useWorkspaces, routing, hostActions, contextMenus,
+  useSessionStatus, useSessionRetainInfo, useSessionAccess, useWorkspaceAccess, usePanelInfo, useRemoteAccess, useContextMenu, useResource,
 }: WorkbenchSidebarBrowserProps): ReactNode {
   const routeSnapshot = useSyncExternalStore(routing.subscribe, routing.getSnapshot, routing.getSnapshot)
   const storeRef = useRef<ReturnType<ReturnType<typeof createWorkspaceViewStore>['create']>>()
@@ -102,6 +130,23 @@ export function WorkbenchSidebarBrowser({
     officialList, routeSnapshot.focusedSessionId as SessionId | undefined, pending,
   ), [officialList, routeSnapshot.focusedSessionId, pending])
   const useAreaSessions = <T,>(selector: (state: ProjectedSessionListState) => T): T => selector(areaList)
+  const shortcutStateRef = useRef<ReturnType<typeof createWorkspaceShortcutControls>['state']>()
+  if (shortcutStateRef.current === undefined) shortcutStateRef.current = createWorkspaceShortcutControls().state
+  const shortcutState = shortcutStateRef.current
+  const shortcutSnapshot = useSyncExternalStore(
+    shortcutState.subscribe,
+    shortcutState.getSnapshot,
+    shortcutState.getSnapshot,
+  )
+  const contextMenuTarget = useSyncExternalStore(
+    contextMenus?.active.subscribe ?? EMPTY_CONTEXT_MENU.subscribe,
+    contextMenus?.active.getSnapshot ?? EMPTY_CONTEXT_MENU.getSnapshot,
+    contextMenus?.active.getSnapshot ?? EMPTY_CONTEXT_MENU.getSnapshot,
+  )
+  const useContextMenuTarget = <T,>(selector: (target: ContextMenuTarget | null) => T): T => selector(contextMenuTarget)
+  const useWorkspaceShortcuts = <T,>(selector: (state: WorkspaceShortcutState) => T): T => selector(
+    shortcutSnapshot,
+  )
   const areaId = routeSnapshot.focusedAreaId
   const bind = (sessionId: SessionId): void => {
     if (areaId === undefined) return
@@ -117,9 +162,32 @@ export function WorkbenchSidebarBrowser({
       sessionId: childId, areaId, strategy: 'replace-focused-area',
     }))
   }
+  const requestSearch = (): void => {
+    const state = shortcutState?.getSnapshot() ?? EMPTY_WORKSPACE_SHORTCUTS
+    shortcutState?.set({ ...state, searchRequest: state.searchRequest + 1 })
+  }
+  const requestAddWorkspace = (): void => {
+    const state = shortcutState?.getSnapshot() ?? EMPTY_WORKSPACE_SHORTCUTS
+    if (!state.directoryBusy) shortcutState?.set({ ...state, addRequested: true })
+  }
+  const closeAddWorkspace = (): void => {
+    const state = shortcutState?.getSnapshot() ?? EMPTY_WORKSPACE_SHORTCUTS
+    shortcutState?.set({ ...state, addRequested: false })
+  }
+  const setDirectoryBusy = (busy: boolean): void => {
+    const state = shortcutState?.getSnapshot() ?? EMPTY_WORKSPACE_SHORTCUTS
+    if (state.directoryBusy === busy) return
+    shortcutState?.set({ ...state, directoryBusy: busy })
+  }
+  const openSessionMenu = (sessionId: SessionId, displayTitle: string, point: { x: number; y: number }): void => {
+    contextMenus?.open({ kind: 'session', value: { sessionId, displayTitle } }, point)
+  }
+  const openWorkspaceMenu = (workspaceId: WorkspaceId, path: string, displayTitle: string, point: { x: number; y: number }): void => {
+    contextMenus?.open({ kind: 'workspace', value: { workspaceId, path, displayTitle } }, point)
+  }
   const useDirectoryFlow = <T,>(selector: (available: boolean) => T): T => selector(hostActions.pickDirectory !== undefined)
   const useHostDescription = <T,>(selector: (description: { home?: string } | undefined) => T): T => selector(
-    hostActions.hostHome === undefined ? undefined : { home: hostActions.hostHome },
+    hostActions.hostHome === undefined ? {} : { home: hostActions.hostHome },
   )
   const renderSlot = (name: string, owner: object, options?: { fallback?: ReactNode }): ReactNode => {
     if (name === 'sidebar.workspaces.directoryFlow' && hostActions.pickDirectory !== undefined) {
@@ -148,6 +216,28 @@ export function WorkbenchSidebarBrowser({
     createWorkspace: hostActions.createWorkspace,
     useDirectoryFlow,
     useHostDescription,
+    usePanelInfo,
+    useSessionStatus,
+    useRemoteAccess,
+    useSessionAccess,
+    useWorkspaceAccess,
+    useHostInfo: useHostDescription,
+    useShortcuts: <T,>(selector: (state: readonly never[]) => T): T => selector([]),
+    useWorkspaceShortcuts,
+    requestSearch,
+    requestAddWorkspace,
+    closeAddWorkspace,
+    setDirectoryBusy,
+    requestSessionRename: () => {},
+    notifyArchivedNotOpenable: () => {},
+    useWorkspaceActionRequest: <T,>(selector: (state: null) => T): T => selector(null),
+    settleWorkspaceAction: () => {},
+    unarchiveSession: hostActions.unarchiveSession,
+    openSessionMenu,
+    openWorkspaceMenu,
+    useContextMenuTarget,
+    useContextMenu,
+    useResource,
     renderSlot,
     t: workspaceTranslate as never,
   } as unknown as WorkspaceBrowserProps

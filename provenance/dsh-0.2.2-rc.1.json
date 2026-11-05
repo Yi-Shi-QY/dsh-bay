@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "candidateId": "dsh-bay-0.2.2-alpha.17.5-dsh-0.2.2-rc.1",
+  "product": "DSH Bay / 湾域",
+  "workbenchVersion": "0.2.2-alpha.17.5",
+  "dshGeneration": "0.2.2-rc.1",
+  "upstream": {
+    "repository": "https://github.com/deepseek-ai/deepseek-harness.git",
+    "tag": "dsh-v0.2.2-rc.1",
+    "commit": "66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db",
+    "sourceDigest": "1ddb4669dbcb52b0a3c93fa1dda418e26994ae83216979849efed76820cd86e3"
+  },
+  "derivedFrom": {
+    "repository": "dsh-bay",
+    "commit": "f78908d",
+    "candidateId": "dsh-bay-0.2.2-alpha.17.5-dsh-0.2.2-rc.1"
+  },
+  "delivery": {
+    "mode": "core-only",
+    "defaultInstall": [
+      "@dsh-workbench/core"
+    ],
+    "excludedModules": [
+      "@dsh-workbench/conversation-suite",
+      "@dsh-workbench/svgdeepseek-pet"
+    ],
+    "more": "deferred-official-only",
+    "pluginManager": "native-dsh-settings-entry",
+    "repositoryStatus": "private-staging"
+  },
+  "source": {
+    "sidebarWorkspaceFiles": 34,
+    "sourceMaterialization": "rc1 source mirror with reviewed Core adaptations",
+    "innerPageSpaceAlgorithm": "Workbench 17.4 baseline",
+    "conversationMigration": "deferred"
+  },
+  "digests": {
+    "lockfile": "c13619ee21412537a484b46ee6cfd86b8045e01414c64fa10d5cf2cf6bec5727",
+    "patch": "2b7db9fce1bb4e0435c3a514c2549f61503a3df6af23bb86111a57b878c7eba4"
+  },
+  "validation": {
+    "sourceConsistency": "rc1 source mirror and runtime destination recorded",
+    "coreTests": "120 test files / 749 tests passed",
+    "desktopAcceptance": "not run by plan",
+    "typecheck": "passed",
+    "distributionAcceptance": {
+      "status": "passed-private-archive-only",
+      "path": "releases/alpha17.5-rc1-private/dsh-workbench-core-0.2.2-alpha.17.5.tgz",
+      "sha256": "4e56f254b4d9a892d7190f2deb99493c41588736da41d7040bab827c2aa5f361",
+      "archiveFiles": 255,
+      "manifestVersionMatched": true,
+      "buildInputsMatched": true,
+      "rc1DependencyClosureMatched": true,
+      "historicalRc5Files": 0
+    }
+  }
+}

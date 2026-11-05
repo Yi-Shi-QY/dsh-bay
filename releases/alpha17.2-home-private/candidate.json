@@ -9,8 +9,8 @@
     "fullSuite": "108 files / 647 tests passed before final presentation corrections",
     "finalFocused": "8 files / 87 tests passed after final corrections",
     "build": "passed",
-    "rc5Identity": "passed",
-    "typecheck": "112 existing RC5 declaration errors; zero new errors",
+    "rc1Identity": "passed",
+    "typecheck": "112 existing RC1 declaration errors; zero new errors",
     "artifact": "extracted; manifest, Creator, all build inputs, runtime and installed Profile runtime bytes verified",
     "ui": "independent DSH Profile; archive/restore/delete only workbench, dirty guard, empty after service restart, create, settings navigation, export/import roundtrip and explicit open passed",
     "viewports": [
