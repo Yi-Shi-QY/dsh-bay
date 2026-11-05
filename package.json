@@ -26,6 +26,7 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "check:rc1": "node scripts/check-rc1.mjs",
+    "verify:workbench-package": "node scripts/test.mjs packages/workbench-core/tests/workbench-package-service.spec.ts",
     "verify": "pnpm check:rc1 && pnpm test && pnpm build",
     "test": "node scripts/test.mjs",
     "typecheck": "pnpm --filter @dsh-workbench/core build:types",

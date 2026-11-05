@@ -10,6 +10,7 @@ import type { WorkbenchExtensionConsentV1 } from '../workbench-extension-access.
 import type { SessionBindingV1 } from './model.ts'
 import { WORKBENCH_CORE_VERSION } from '../release-compatibility.ts'
 import { areasOf } from './document-v3.ts'
+import type { WorkbenchPackageDependencyV4 } from './workbench-package-v4.ts'
 
 export function createDistributionPackageService(options:{client:DistributionClientV4;settings:WorkbenchSettingsScope<WorkbenchSettingsV4>;directory:WorkbenchDirectory;editors:WorkbenchEditorCatalog;rawEditors:WorkbenchEditorCatalog;registry:WorkbenchExtensionRegistryV1;canExport(id:string):boolean;canImport():boolean}) {
   const core=(row:WorkbenchEditorCatalogRow):WorkbenchEditorCatalogRow=>{
@@ -20,13 +21,60 @@ export function createDistributionPackageService(options:{client:DistributionCli
       // Native resources are rebound locally. Their runtime/session payload never travels.
       portability:{version:1,exportState:()=>({schemaVersion:1}),importState:()=>({schemaVersion:1})}}
   }
+  const identities=async():Promise<readonly WorkbenchPackageDependencyV4[]>=>{
+    try{return await options.client.artifactIdentities()}catch{return []}
+  }
+  const ownerFor=(row:WorkbenchEditorCatalogRow)=>options.registry.getSnapshot().extensions.find(e=>e.moduleId===row.extension?.moduleId
+    && e.editorIds.includes(row.id))
+  /**
+   * Slot metadata and Host artifact metadata arrive through separate seams.
+   * Project one editor through both seams before it reaches a portable layout.
+   * A live `distribution` declaration remains authoritative, while a verified
+   * Host identity fills the common case where Slot registration only carries
+   * the extension contract.
+   */
+  const enrich=(row:WorkbenchEditorCatalogRow, available:readonly WorkbenchPackageDependencyV4[]):WorkbenchEditorCatalogRow=>{
+    const c=core(row);if(c!==row)return c
+    const owner=ownerFor(row)
+    const identity=available.find(d=>d.editorScopes.some(e=>e.editorId===row.id&&e.scope===row.scope)
+      && owner!==undefined && d.packageName===owner.packageName && d.moduleId===owner.moduleId)
+    const packageName=row.distribution?.packageName ?? identity?.packageName ?? owner?.packageName ?? row.provenance?.packageName
+    const packageVersion=row.distribution?.packageVersion ?? identity?.version ?? owner?.packageVersion ?? row.provenance?.packageVersion
+    const digest=identity?.digest ?? row.provenance?.artifactDigest ?? row.provenance?.dynamic?.artifactDigest
+    if(packageName===undefined && packageVersion===undefined && digest===undefined)return row
+    const provenance={
+      version:1 as const,
+      runtimeKind:row.provenance?.runtimeKind ?? 'static' as const,
+      fiberName:row.provenance?.fiberName ?? row.pluginId ?? packageName ?? row.id,
+      ...(row.provenance?.dynamic===undefined?{}:{dynamic:row.provenance.dynamic}),
+      ...(packageName===undefined?{}:{packageName}),
+      ...(packageVersion===undefined?{}:{packageVersion}),
+      ...(digest===undefined?{}:{artifactDigest:digest}),
+    }
+    const distribution=row.distribution===undefined && packageName!==undefined
+      ? {
+          version:1 as const,
+          portableId:identity?.moduleId ?? owner?.moduleId ?? row.extension?.moduleId ?? `${row.scope}:${row.id}`,
+          packageVersion:packageVersion ?? '0.0.0',
+          ...(identity?.digest===undefined?{}:{artifactDigest:identity.digest}),
+          exportPolicy:identity?.exportPolicy === 'embed' ? 'embed' as const : 'reference' as const,
+          sourcePolicy:'binary-only' as const,
+          provides:{editorIds:[row.id]}, requires:[], permissions:[],
+          packageName,
+          ...(identity?.registryUrl===undefined?{}:{registryUrl:identity.registryUrl}),
+          ...(identity?.integrity===undefined?{}:{integrity:identity.integrity}),
+        }
+      : row.distribution===undefined ? undefined : {
+          ...row.distribution,
+          ...(packageName===undefined?{}:{packageName}),
+          ...(packageVersion===undefined?{}:{packageVersion}),
+          ...(identity?.digest===undefined || row.distribution.artifactDigest!==undefined?{}:{artifactDigest:identity.digest}),
+        }
+    return {...row,provenance, ...(distribution===undefined?{}:{distribution})}
+  }
   const catalog=async(raw=false)=>{
-    const identities=await options.client.artifactIdentities()
-    return(raw?options.rawEditors:options.editors).getSnapshot().map(row=>{
-      const c=core(row);if(c!==row)return c
-      const d=identities.find(d=>d.editorScopes.some(e=>e.editorId===row.id&&e.scope===row.scope) && options.registry.getSnapshot().extensions.some(e=>e.packageName===d.packageName&&e.moduleId===row.extension?.moduleId&&e.editorIds.includes(row.id)))
-      return d?{...row,provenance:{version:1 as const,runtimeKind:'static' as const,fiberName:row.pluginId??d.packageName,packageName:d.packageName,packageVersion:d.version,artifactDigest:d.digest}}:row
-    })
+    const available=await identities()
+    return(raw?options.rawEditors:options.editors).getSnapshot().map(row=>enrich(row,available))
   }
   const restore=async(row:DistributionImportStatus,bindings:Readonly<Record<string,SessionBindingV1>>={})=>{
     if(row.state!=='awaiting-restore'||!row.layout)return row
@@ -47,11 +95,8 @@ export function createDistributionPackageService(options:{client:DistributionCli
       if(!await options.directory.flushBeforeLifecycleTransition?.())throw new Error('布局尚未保存，导出停止。')
       const record=options.settings.getSnapshot().value?.workbenches[id];if(!record||!options.canExport(id))throw new Error('工作台不可导出。')
       await options.registry.refresh()
-      const editors=options.editors.getSnapshot().map(row=>{
-        const c=core(row);if(c!==row)return c
-        const owner=options.registry.getSnapshot().extensions.find(e=>e.allowed&&e.moduleId===row.extension?.moduleId&&e.editorIds.includes(row.id))
-        return owner?.packageName&&row.distribution?{...row,distribution:{...row.distribution,packageName:owner.packageName}}:row
-      })
+      const available=await identities()
+      const editors=options.editors.getSnapshot().map(row=>enrich(row,available))
       const layout=projectLayoutPackage(record,editors)
       if(mode!=='layout-only'&&editors.some(e=>layout.modules.some(m=>m.editorId===e.id&&m.scope===e.scope)&&(!e.portability?.importState||!e.portability.exportState)))throw new Error('部分内页缺少配置迁移处理器，无法导出完整包。')
       if(areasOf(record.document.root).some(a=>a.moduleHistory.some(p=>p.pendingDistribution)))throw new Error('尚有配置等待恢复，请先从导入记录完成恢复，再重新导出。')
