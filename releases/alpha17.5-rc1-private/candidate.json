@@ -8,8 +8,8 @@
   "upstreamCommit": "66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db",
   "artifact": {
     "path": "releases/alpha17.5-rc1-private/dsh-workbench-core-0.2.2-alpha.17.5.tgz",
-    "size": 1062622,
-    "sha256": "68ad4d7ca3d5ea995afc1bf7daf45f32e837ce46ac5a4ae169bfcf6202254da8",
-    "integrity": "sha512-PZJlkA4ahuUm7uZEn1KIpKoykPvDqSc4zZjL4oao0cc0tjicltWp8A/7tvwcpTJqggqc3k0Yevvd93RtT+8s6A=="
+    "size": 1062870,
+    "sha256": "4401b0787121309a7c9f7282a2a85f477a55222147ea9b16bc41d0b594ad9736",
+    "integrity": "sha512-TI0CMieEDqIYuQ6b30RNpukMo8lapihrIidi/tkOIUxvXgMUMib3p8GgB82GNuRLzhakAd8C5Bp/40H3qDQsGg=="
   }
 }

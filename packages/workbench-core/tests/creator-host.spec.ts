@@ -16,6 +16,7 @@ describe('Core additions beside the official Creator tools', () => {
     const prompt = section.mock.calls[0]?.[0].text as string
     expect(prompt).toContain('process-local API')
     expect(prompt).toContain('separate test Profile')
+    expect(prompt).toContain('/create-workbench-extension')
     expect(prompt).toContain('Slot registrant')
     expect(prompt).toContain('inject()')
     expect(prompt).toContain('global current Session')
