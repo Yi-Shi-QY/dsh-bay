@@ -7,7 +7,8 @@ import { WORKBENCH_PACKAGE_NAME, WORKBENCH_CORE_VERSION, WORKBENCH_DSH_GENERATIO
 
 const project = fileURLToPath(new URL('../', import.meta.url))
 const readJson = relative => JSON.parse(readFileSync(path.join(project, relative), 'utf8').replace(/^\uFEFF/u, ''))
-const sha256Bytes = bytes => createHash('sha256').update(bytes).digest('hex')
+const canonicalTextBytes = bytes => Buffer.from(bytes.toString('utf8').replace(/\r\n/g, '\n'), 'utf8')
+const sha256Bytes = bytes => createHash('sha256').update(canonicalTextBytes(bytes)).digest('hex')
 const sha256File = relative => sha256Bytes(readFileSync(path.join(project, relative)))
 const walk = root => readdirSync(root, { withFileTypes: true }).flatMap(entry => {
   const full = path.join(root, entry.name)

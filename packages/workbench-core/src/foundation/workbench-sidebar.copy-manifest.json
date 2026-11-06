@@ -28,7 +28,7 @@
   "officialOwnersReplaced": [],
   "sourceDigest": "1ddb4669dbcb52b0a3c93fa1dda418e26994ae83216979849efed76820cd86e3",
   "baselinePatchDigest": "1ddb4669dbcb52b0a3c93fa1dda418e26994ae83216979849efed76820cd86e3",
-  "patchDigest": "2b7db9fce1bb4e0435c3a514c2549f61503a3df6af23bb86111a57b878c7eba4",
+  "patchDigest": "8becd2d0305576e49b0181e6ee9ecba22ce3bb2ab4d59522a9d39893dc2befe1",
   "migration": {
     "targetUpstreamCommit": "66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db",
     "targetGeneration": "0.2.2-rc.1",
