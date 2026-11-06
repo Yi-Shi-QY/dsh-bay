@@ -26,13 +26,16 @@ describe('Workbench editor extension template identity', () => {
     expect(fiber.name).toBe(packageName)
 
     let registration: Record<string, unknown> | undefined
-    ;(plugin.apply as (context: unknown) => void)({
+    await (plugin.apply as (context: unknown) => Promise<void>)({
       slots: {
         inject(_name: string, register: () => unknown) { return register() },
         register(options: Record<string, unknown>) {
           registration = options
           return () => {}
         },
+      },
+      modules: {
+        import: async (name: string) => name === 'react' ? { createElement: () => null, useEffect: () => {} } : undefined,
       },
     })
     expect(registration?.registrant).toBe(packageName)

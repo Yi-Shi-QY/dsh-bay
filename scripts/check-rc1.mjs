@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { WORKBENCH_CORE_VERSION, WORKBENCH_DSH_GENERATION, WORKBENCH_UPSTREAM_COMMIT } from '../packages/workbench-core/src/release-compatibility.ts'
+import { WORKBENCH_PACKAGE_NAME, WORKBENCH_CORE_VERSION, WORKBENCH_DSH_GENERATION, WORKBENCH_UPSTREAM_COMMIT } from '../packages/workbench-core/src/release-compatibility.ts'
 
 const project = fileURLToPath(new URL('../', import.meta.url))
 const readJson = relative => JSON.parse(readFileSync(path.join(project, relative), 'utf8').replace(/^\uFEFF/u, ''))
@@ -33,8 +33,12 @@ assert.deepEqual(identity, {
   commit: core.dsh.workbench.upstreamCommit,
 })
 assert.equal(root.version, identity.version)
+assert.equal(core.name, WORKBENCH_PACKAGE_NAME)
+assert.notEqual(root.name, core.name)
+assert.equal(root.scripts.typecheck, `pnpm --filter ${WORKBENCH_PACKAGE_NAME} build:types`)
 assert.equal(root.devDependencies['@deepseek-ai/dsh'], identity.generation)
-assert.deepEqual(core.dsh.workbench.defaultInstall, ['@dsh-workbench/core'])
+assert.deepEqual(core.dsh.workbench.defaultInstall, ['dsh-bay'])
+assert.deepEqual(provenance.delivery.defaultInstall, [WORKBENCH_PACKAGE_NAME])
 assert.deepEqual(core.dsh.workbench.excludedModules, ['@dsh-workbench/conversation-suite', '@dsh-workbench/svgdeepseek-pet'])
 assert.equal(core.dsh.client.officialMore, 'host-only-rc1-ui-entry-customization')
 assert.equal(core.peerDependencies['@deepseek-ai/dsh-client-ui-context-menu'], identity.generation)

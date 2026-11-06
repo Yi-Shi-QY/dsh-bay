@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
-import { WORKBENCH_CORE_VERSION, WORKBENCH_DSH_GENERATION, WORKBENCH_UPSTREAM_COMMIT } from '../packages/workbench-core/src/release-compatibility.ts'
+import { WORKBENCH_PACKAGE_NAME, WORKBENCH_CORE_VERSION, WORKBENCH_DSH_GENERATION, WORKBENCH_UPSTREAM_COMMIT } from '../packages/workbench-core/src/release-compatibility.ts'
 
 const project = fileURLToPath(new URL('../', import.meta.url))
 const core = path.join(project, 'packages', 'workbench-core')
@@ -11,6 +11,7 @@ const manifestPath = path.join(core, 'package.json')
 const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
 const buildId = process.env.DSH_BAY_BUILD_ID ?? `dsh-bay-${WORKBENCH_CORE_VERSION}-dsh-${WORKBENCH_DSH_GENERATION}`
 
+if (manifest.name !== WORKBENCH_PACKAGE_NAME) throw new Error('DSH Bay package name mismatch')
 if (manifest.version !== WORKBENCH_CORE_VERSION) throw new Error('DSH Bay Core version mismatch')
 if (manifest.dsh.workbench.dshGeneration !== WORKBENCH_DSH_GENERATION) throw new Error('DSH generation mismatch')
 if (manifest.dsh.workbench.upstreamCommit !== WORKBENCH_UPSTREAM_COMMIT) throw new Error('DSH upstream commit mismatch')
@@ -86,6 +87,7 @@ const inputs = [...new Set(Object.keys(result.metafile.inputs))].sort().map(file
 }))
 writeFileSync(path.join(core, 'lib/build-inputs.json'), JSON.stringify({
   candidateId: buildId,
+  packageName: WORKBENCH_PACKAGE_NAME,
   productLine: `DSH Bay ${WORKBENCH_CORE_VERSION}`,
   mode: 'core-only',
   buildId,
@@ -93,7 +95,7 @@ writeFileSync(path.join(core, 'lib/build-inputs.json'), JSON.stringify({
   upstreamCommit: WORKBENCH_UPSTREAM_COMMIT,
   sourceDigest: manifest.dsh.workbench.sourceDigest,
   workbenchVersion: manifest.version,
-  defaultInstall: ['@dsh-workbench/core'],
+  defaultInstall: [WORKBENCH_PACKAGE_NAME],
   excludedModules: ['@dsh-workbench/conversation-suite', '@dsh-workbench/svgdeepseek-pet'],
   more: { workbench: 'deferred', official: 'rc1-ui-entry-customization-only' },
   inputs,

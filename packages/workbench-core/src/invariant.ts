@@ -15,4 +15,4 @@ const install: InvariantInstaller = () => {}
 
 /** Register the companion used by the locked upstream composition tests. */
 export const apply = (ctx: Context): Promise<() => void> =>
-  Promise.resolve((ctx as Context & { invariants: InvariantRegistry }).invariants.register('@dsh-workbench/core', install) as () => void)
+  Promise.resolve((ctx as Context & { invariants: InvariantRegistry }).invariants.register('dsh-bay', install) as () => void)

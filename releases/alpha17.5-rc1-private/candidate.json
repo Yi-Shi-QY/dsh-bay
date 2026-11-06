@@ -2,14 +2,14 @@
   "status": "private-staging",
   "candidateId": "dsh-bay-0.2.2-alpha.17.5-dsh-0.2.2-rc.1",
   "product": "DSH Bay / 湾域",
-  "packageName": "@dsh-workbench/core",
+  "packageName": "dsh-bay",
   "version": "0.2.2-alpha.17.5",
   "dshGeneration": "0.2.2-rc.1",
   "upstreamCommit": "66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db",
   "artifact": {
-    "path": "releases/alpha17.5-rc1-private/dsh-workbench-core-0.2.2-alpha.17.5.tgz",
-    "size": 1062870,
-    "sha256": "4401b0787121309a7c9f7282a2a85f477a55222147ea9b16bc41d0b594ad9736",
-    "integrity": "sha512-TI0CMieEDqIYuQ6b30RNpukMo8lapihrIidi/tkOIUxvXgMUMib3p8GgB82GNuRLzhakAd8C5Bp/40H3qDQsGg=="
+    "path": "releases/alpha17.5-rc1-private/dsh-bay-0.2.2-alpha.17.5.tgz",
+    "size": 1064567,
+    "sha256": "61d13a16bb197e5979856b0fd65cb4c87a8b1f823686cd01e92946f9509f40af",
+    "integrity": "sha512-Q148tDoup9PK3DhxzdTpUYBkIpYkwmMjr0UPhKFvCQlW6iaS8c8nhj0xVKm7qt6UP5Qjk+dI9GgRDJ63NkHbng=="
   }
 }

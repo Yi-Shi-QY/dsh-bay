@@ -189,7 +189,7 @@
           - id: tool-cordis
             name: '@deepseek-ai/dsh-tool-cordis'
           - id: tool-workbench-cordis
-            name: '@dsh-workbench/core/creator-host'
+            name: 'dsh-bay/creator-host'
           - id: skill-filesystem
             name: '@deepseek-ai/dsh-skill-filesystem'
             config:

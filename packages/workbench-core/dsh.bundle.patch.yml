@@ -2,4 +2,4 @@
 # Core owns only its Workbench runtime row; official DSH owners remain intact.
 - insert:
     - id: workbench-layout
-      name: '@dsh-workbench/core'
+      name: 'dsh-bay'

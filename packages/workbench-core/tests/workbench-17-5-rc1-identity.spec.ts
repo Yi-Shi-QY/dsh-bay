@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { WORKBENCH_CORE_VERSION, WORKBENCH_DSH_GENERATION, WORKBENCH_UPSTREAM_COMMIT } from '../src/release-compatibility.ts'
+import { WORKBENCH_PACKAGE_NAME, WORKBENCH_CORE_VERSION, WORKBENCH_DSH_GENERATION, WORKBENCH_UPSTREAM_COMMIT } from '../src/release-compatibility.ts'
+import { parse as parseYaml } from 'yaml'
 
 function json(relative: string) {
   const source = readFileSync(new URL(`../../../${relative}`, import.meta.url), 'utf8').replace(/^\uFEFF/u, '')
@@ -8,6 +9,19 @@ function json(relative: string) {
 }
 
 describe('Workbench 17.5 rc1 identity', () => {
+  it('uses dsh-bay for the installable package and native Bundle entry', () => {
+    const root = json('package.json'), core = json('packages/workbench-core/package.json')
+    expect(WORKBENCH_PACKAGE_NAME).toBe('dsh-bay')
+    expect(core.name).toBe(WORKBENCH_PACKAGE_NAME)
+    expect(root.name).not.toBe(core.name)
+    expect(root.scripts.typecheck).toBe('pnpm --filter dsh-bay build:types')
+    for (const file of ['cordis.patch.yml', 'packages/workbench-core/dsh.bundle.patch.yml']) {
+      const patch = parseYaml(readFileSync(new URL(`../../../${file}`, import.meta.url), 'utf8'))
+      expect(patch.flatMap((op: { insert: { name: string }[] }) => op.insert.map(row => row.name))).toEqual([WORKBENCH_PACKAGE_NAME])
+    }
+    expect(json('provenance/dsh-0.2.2-rc.1.json').delivery.defaultInstall).toEqual([WORKBENCH_PACKAGE_NAME])
+  })
+
   it('keeps runtime metadata, Core dependencies, and migration lock on the same candidate', () => {
     const root = json('package.json')
     const core = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as Record<string, any>
@@ -18,7 +32,7 @@ describe('Workbench 17.5 rc1 identity', () => {
     expect(root.devDependencies['@deepseek-ai/dsh']).toBe(WORKBENCH_DSH_GENERATION)
     expect(core.version).toBe(WORKBENCH_CORE_VERSION)
     expect(core.dsh.workbench).toMatchObject({ dshGeneration: WORKBENCH_DSH_GENERATION, upstreamCommit: WORKBENCH_UPSTREAM_COMMIT, candidateId: provenance.candidateId })
-    expect(core.dsh.workbench.defaultInstall).toEqual(['@dsh-workbench/core'])
+    expect(core.dsh.workbench.defaultInstall).toEqual(['dsh-bay'])
     expect(core.dsh.workbench.excludedModules).toEqual(['@dsh-workbench/conversation-suite', '@dsh-workbench/svgdeepseek-pet'])
     expect(core.dsh.client.officialMore).toBe('host-only-rc1-ui-entry-customization')
     expect(core.dsh.client.external).not.toContain('@deepseek-ai/dsh-api-workspace-controller/default-workspace')

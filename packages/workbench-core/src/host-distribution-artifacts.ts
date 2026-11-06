@@ -14,6 +14,20 @@ import { workbenchEditorDeclarationFailureV1 } from './module-contract.ts'
 import { portableStateSafe } from './foundation/workbench-layout-package.ts'
 
 export const artifactHash = (bytes: Uint8Array | string) => createHash('sha256').update(bytes).digest('hex')
+
+/**
+ * RC1 exposes these browser singletons through the Client module table. They
+ * are not Profile npm packages and therefore cannot be verified by resolving
+ * a peer from the Host's node_modules tree. Keep this list tied to the locked
+ * DSH generation; an unknown client import still needs an explicit peer.
+ */
+const DSH_RC1_CLIENT_SEEDS = new Set([
+  'react', 'react-dom', 'react/jsx-runtime', 'react-dom/client',
+  '@deepseek-ai/cordis', 'zod', '@tanstack/react-virtual',
+  '@deepseek-ai/dsh-client-store', '@deepseek-ai/dsh-client-ui-slots',
+  '@deepseek-ai/dsh-client-modules',
+  '@deepseek-ai/dsh-client-ui-primitives', '@deepseek-ai/dsh-client-ui-dockkit',
+])
 export interface DistributionPackageManifest {
   name: string; version: string; license?:string; exports?: Record<string, unknown>; main?: string
   scripts?: Record<string, string>; dependencies?: Record<string, string>; optionalDependencies?: Record<string, string>; peerDependencies?: Record<string, string>
@@ -84,7 +98,10 @@ export async function inspectDistributionArtifact(bytes: Uint8Array, peerAvailab
     if(source!=='exportfunctionapply(){}')throw new Error('client-only 只能包含空 Host 注册入口；有 Host 功能时须声明 client-host。')
   }
   if (files.size !== d.runtimeFiles.length || d.runtimeFiles.some(f => !files.has(f))) throw new Error('安装包与精确运行文件清单不一致。')
-  for (const [name, range] of Object.entries(manifest.peerDependencies ?? {})) if (!peerAvailable(name, range)) throw new Error(`宿主未提供已验证的依赖：${name}`)
+  for (const [name, range] of Object.entries(manifest.peerDependencies ?? {})) {
+    if (DSH_RC1_CLIENT_SEEDS.has(name)) continue
+    if (!peerAvailable(name, range)) throw new Error(`宿主未提供已验证的依赖：${name}`)
+  }
   if (d.exportPolicy === 'forbid') throw new Error('扩展禁止完整分发。')
   return { files, dependency: { packageName: manifest.name, version: manifest.version, moduleId: manifest.dsh.workbench.moduleId,
     digest: runtimeDigest(files), archiveSha256: artifactHash(bytes), integrity: `sha512-${createHash('sha512').update(bytes).digest('base64')}`, bundleEntries,
@@ -113,6 +130,9 @@ export async function atomicDistributionJson(path: string, value: unknown): Prom
 /** Conservative release closure: no package discovery, install hooks or external file entries. */
 export function verifyDistributionClosure(manifest:DistributionPackageManifest,files:ReadonlyMap<string,Buffer>,peerAvailable:(name:string,range:string)=>boolean):void {
   const allowed=new Set(files.keys()),own=manifest.name,requires=manifest.dsh.workbench.distribution!.requires
+  const clientEntry = typeof manifest.exports?.['./client'] === 'string'
+    ? manifest.exports['./client'].replace(/^[.][/]/u, '')
+    : 'client.js'
   const check=(specifier:string,from:string)=>{
     if(isBuiltin(specifier)){
       if(manifest.dsh.workbench.distribution!.runtimeKind==='client-only')throw new Error('客户端扩展不能依赖 Node Host 能力。')
@@ -125,6 +145,12 @@ export function verifyDistributionClosure(manifest:DistributionPackageManifest,f
     }
     const name=specifier.startsWith('@')?specifier.split('/').slice(0,2).join('/'):specifier.split('/')[0]!
     if(name===own||requires.includes(name))return
+    // DSH's RC1 browser seeds are supplied by the Client module table. A
+    // package.json client declaration and the package's client entry may name
+    // them without a Profile peer; Host entries remain subject to peer checks.
+    if(DSH_RC1_CLIENT_SEEDS.has(specifier) || DSH_RC1_CLIENT_SEEDS.has(name)) {
+      if(from === 'package.json' || from === clientEntry) return
+    }
     const range=manifest.peerDependencies?.[name]
     if(!range||!peerAvailable(name,range))throw new Error('运行制品引用了未验证的宿主依赖：'+name)
   }

@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import { generateKeyPairSync, sign } from 'node:crypto'
-import { mkdtemp, cp, readFile, writeFile, rm } from 'node:fs/promises'
+import { mkdtemp, cp, readFile, writeFile, rm, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, dirname } from 'node:path'
+import { existsSync } from 'node:fs'
 import { projectLayoutPackage,restoreLayoutPackage } from '../src/foundation/workbench-layout-package.ts'
 import { buildWorkbenchPackageV4, inspectWorkbenchPackageV4, publisherKeyIdV4 } from '../src/foundation/workbench-package-v4.ts'
 import { decodeDeterministicZip, encodeDeterministicZip } from '../src/foundation/workbench-sharing.ts'
@@ -11,6 +12,7 @@ import { createHostDistributionService } from '../src/host-distribution-service.
 import { settingsFixture } from './settings-fixtures.ts'
 import { WORKBENCH_CORE_VERSION } from '../src/release-compatibility.ts'
 import {areasOf} from '../src/foundation/document-v3.ts'
+import { workbenchExtensionContractFingerprint } from '../src/workbench-extension-access.ts'
 
 const template=join(import.meta.dirname,'../presets/workbench-creator/skills/workbench-extension-development/templates/workbench-editor')
 const layout=()=>{const r=structuredClone(settingsFixture().workbenches.a!);if(r.document.root.kind!=='area')throw new Error('fixture');r.document.root.moduleHistory=[];delete r.document.root.activeModuleInstanceId;return projectLayoutPackage(r,[])}
@@ -34,9 +36,28 @@ describe('17.2 signed package contract',()=>{
       await expect(inspectWorkbenchPackageV4(encodeDeterministicZip(changed))).rejects.toThrow()
     }
   })
-  it('does not permit an unknown editor to claim Core identity',async()=>{
-    const l=layout();l.modules=[{editorId:'unknown',scope:'root',packageName:'@dsh-workbench/core',version:WORKBENCH_CORE_VERSION}]
+  it.each(['dsh-bay','@dsh-workbench/core'])('does not permit an unknown editor to claim %s identity',async(packageName)=>{
+    const l=layout();l.modules=[{editorId:'unknown',scope:'root',packageName,version:WORKBENCH_CORE_VERSION}]
     await expect(buildWorkbenchPackageV4({layout:l,mode:'offline-embedded',...await signer()})).rejects.toThrow('伪装')
+  })
+  it.each(['dsh-bay','@dsh-workbench/core'])('verifies and restores signed Core pages from %s archives',async(packageName)=>{
+    const l=layout()
+    if(l.document.root.kind!=='area')throw Error('fixture')
+    l.document.root.moduleHistory=[{moduleInstanceId:'guide-page',editorId:'workbench.guide',editorScope:'root',state:{schemaVersion:1},lastKnownTitle:'Guide'}]
+    l.document.root.activeModuleInstanceId='guide-page'
+    l.modules=[{editorId:'workbench.guide',scope:'root',packageName,version:WORKBENCH_CORE_VERSION}]
+    const bytes=await buildWorkbenchPackageV4({layout:l,mode:'offline-embedded',...await signer()})
+    const preview=await inspectWorkbenchPackageV4(bytes)
+    expect(preview.layout.modules[0]?.packageName).toBe(packageName)
+    expect(preview.signature).toBeDefined()
+    const editor:any={id:'workbench.guide',label:'Guide',scope:'root',
+      provenance:{version:1,runtimeKind:'static',fiberName:'dsh-bay',packageName:'dsh-bay',packageVersion:WORKBENCH_CORE_VERSION},
+      declaration:{editorId:'workbench.guide',scope:'root',label:'Guide',requiredBinding:'none',state:{schemaVersion:1,maxBytes:4096,share:'portable',restore:'if-valid'},runtime:{background:'pause',collapsed:'dispose',reacquire:'on-visible'}},
+      portability:{version:1,importState:()=>({schemaVersion:1})}}
+    const restored=restoreLayoutPackage(preview.layout,[editor],{},true,true)
+    expect(restored.warnings).toEqual([])
+    expect(restored.pendingPageIds).toEqual([])
+    expect(areasOf(restored.document.root)[0]!.moduleHistory[0]!.state).toEqual({schemaVersion:1})
   })
 })
 
@@ -50,6 +71,63 @@ describe('explicit runtime artifact preparation',()=>{
     const l=layout(),d={...p.dependency,archivePath:'artifacts/'+p.dependency.archiveSha256+'.tgz'}
     const bytes=await buildWorkbenchPackageV4({layout:l,mode:'offline-embedded',dependencies:[d],artifacts:[{path:d.archivePath,content:p.bytes}],...await signer()})
     expect((await inspectWorkbenchPackageV4(bytes)).manifest.dependencies).toHaveLength(1)
+  })
+  it('accepts RC1 Client seed modules without requiring Profile npm peers',async()=>{
+    const p=await prepareDistributionArtifact(template,()=>false)
+    expect(p.dependency.packageName).toBe('@local/workbench-editor-example')
+    expect(p.dependency.runtimeFiles).toContain('client.js')
+  })
+  it('exports, embeds, imports and restores a custom editor from one offline package',async()=>{
+    const dir=await mkdtemp(join(tmpdir(),'wb172-custom-offline-')),source=join(dir,'source')
+    let value:any=undefined,revision=1,stored:any,sourcePhase=true,active=false
+    try{
+      await cp(template,source,{recursive:true});await rm(join(source,'README.md'))
+      const prepared=await prepareDistributionArtifact(source,()=>false)
+      await writeFile(join(dir,'package.json'),JSON.stringify({name:'offline-receiver',private:true,dependencies:{}}))
+      await writeFile(join(dir,'.npmrc'),['registry=http://127.0.0.1:1/','store-dir='+join(dir,'empty-store'),'manage-package-manager-versions=false',''].join(String.fromCharCode(10)))
+      const w=JSON.parse(await readFile(join(source,'package.json'),'utf8')).dsh.workbench
+      const editor:any={id:'workbench.example',label:'Example',scope:'root',pluginId:'@local/workbench-editor-example',
+        declaration:w.editors[0],extension:{schemaVersion:1,moduleId:w.moduleId,apiVersion:1,editorIds:w.editorIds,coreCompatibility:w.coreCompatibility,dshGeneration:w.dshGeneration},
+        distribution:{version:1,portableId:w.moduleId,packageVersion:w.version,packageName:prepared.dependency.packageName,artifactDigest:prepared.dependency.digest,exportPolicy:'embed',sourcePolicy:'binary-only',provides:{editorIds:w.editorIds},requires:[],permissions:[]},
+        provenance:{version:1,runtimeKind:'client-only',fiberName:prepared.dependency.packageName,packageName:prepared.dependency.packageName,packageVersion:w.version,artifactDigest:prepared.dependency.digest},
+        portability:{version:1,exportState:(state:any)=>({schemaVersion:1,acknowledged:state?.acknowledged===true}),importState:(state:any)=>({schemaVersion:1,acknowledged:state?.acknowledged===true})}}
+      const record=structuredClone(settingsFixture().workbenches.a!);if(record.document.root.kind!=='area')throw Error('fixture')
+      record.document.root.moduleHistory=[{moduleInstanceId:'custom-page',editorId:editor.id,editorScope:'root',state:{schemaVersion:1,acknowledged:true},lastKnownTitle:'Example'}]
+      record.document.root.activeModuleInstanceId='custom-page'
+      const customLayout=projectLayoutPackage(record,[editor])
+      const credentials:any={record:undefined,modifyRecord:async(_key:any,mutate:any)=>{credentials.record=await mutate(credentials.record)??credentials.record;return credentials.record},readRecord:async()=>credentials.record}
+      const installedRoot=join(dir,'node_modules',prepared.dependency.packageName)
+      const selected=async()=>JSON.parse(await readFile(join(dir,'package.json'),'utf8')).dsh?.profile?.bundles??[]
+      const native={
+        listBundles:async()=>sourcePhase?[{name:prepared.dependency.packageName,version:prepared.dependency.version,installed:true,enabled:true,rows:prepared.dependency.bundleEntries.map((entry:any)=>({moduleName:entry.moduleName,entryId:entry.entryId}))}]:existsSync(join(installedRoot,'package.json'))?[{name:prepared.dependency.packageName,version:prepared.dependency.version,installed:true,enabled:(await selected()).includes(prepared.dependency.packageName),rows:prepared.dependency.bundleEntries.map((entry:any)=>({moduleName:entry.moduleName,entryId:entry.entryId}))}]:[],
+        listPlugins:async()=>sourcePhase||active?prepared.dependency.bundleEntries.map((entry:any)=>({moduleName:entry.moduleName,entryId:entry.entryId,enabled:true,fiberPhase:'active'})):[],
+        setBundleEnabled:async()=>({application:'applied'}),
+      }
+      const options:any={profile:{name:'custom-offline',dir,cwd:dir,home:dir,installAnchor:dir,packageManager:{command:process.execPath,args:[join(dirname(process.execPath),'node_modules/corepack/dist/pnpm.js')]}} as any,native,resolve:()=>existsSync(join(installedRoot,'package.json'))?installedRoot:source,peerAvailable:()=>false,credentials,settings:{describe:()=>[{ns:'workbench-layout',value,revision}],mutate:async(_ns:any,ops:any[],expected:any)=>{if(expected!==revision)throw Error('CAS');stored=ops[0].value;value=stored;revision++}}}
+      const service=createHostDistributionService(options)
+      const packageBytes=await service.export({layout:customLayout,mode:'offline-embedded',prepareArtifacts:true})
+      sourcePhase=false
+      const preview=await inspectWorkbenchPackageV4(packageBytes)
+      expect(preview.manifest.mode).toBe('offline-embedded')
+      expect(preview.manifest.dependencies).toHaveLength(1)
+      expect(preview.manifest.dependencies[0]?.exportPolicy).toBe('embed')
+      expect(preview.files.some(file=>file.path===preview.manifest.dependencies[0]?.archivePath)).toBe(true)
+      const row=await service.inspect(packageBytes)
+      expect(row.blockers).toEqual([])
+      const awaiting=await service.consent(row.transactionId,row.archiveSha256)
+      expect(awaiting.state).toBe('restart-required')
+      expect(existsSync(join(installedRoot,'package.json'))).toBe(true)
+      active=true
+      const resumed=await service.resume(row.transactionId)
+      expect(resumed.state).toBe('awaiting-restore')
+      const manifest=JSON.parse(await readFile(join(source,'package.json'),'utf8')).dsh.workbench
+      const consent={ [prepared.dependency.packageName+'::'+prepared.dependency.moduleId]:{packageName:prepared.dependency.packageName,moduleId:prepared.dependency.moduleId,apiVersion:1,editorIds:manifest.editorIds,allowed:true,allowedAt:Date.now(),contractFingerprint:workbenchExtensionContractFingerprint({schemaVersion:1,moduleId:manifest.moduleId,apiVersion:1,editorIds:manifest.editorIds,coreCompatibility:manifest.coreCompatibility,dshGeneration:manifest.dshGeneration},manifest.editors)} }
+      const restored=restoreLayoutPackage(preview.layout,[editor],{},true,true)
+      const done=await service.complete(row.transactionId,restored.document,consent as any,restored.pendingPageIds)
+      expect(done.state).toBe('ready')
+      expect(stored.workbenches[row.workbenchId].packageOrigin.completeness).toBe('complete-offline')
+      expect(areasOf(stored.workbenches[row.workbenchId].document.root)[0]!.moduleHistory[0]!.state).toEqual({schemaVersion:1,acknowledged:true})
+    }finally{await rm(dir,{recursive:true,force:true})}
   })
   it('rejects dependencies, install scripts, source files and escaping entries',async()=>{
     const original=JSON.parse(await readFile(join(template,'package.json'),'utf8'))
@@ -67,10 +145,13 @@ describe('explicit runtime artifact preparation',()=>{
         await writeFile(join(dir,'client.js'),client+';'+extra)
         await expect(prepareDistributionArtifact(dir,peer)).rejects.toThrow()
       }
+      await writeFile(join(dir,'client.js'),client+'\nimport "host-only"')
+      await expect(prepareDistributionArtifact(dir,n=>n==='react')).rejects.toThrow()
       await writeFile(join(dir,'client.js'),client)
-      await expect(prepareDistributionArtifact(dir,n=>n==='react')).rejects.toThrow('宿主依赖')
+      // RC1 browser seeds no longer require a Profile peer.
       await writeFile(join(dir,'index.js'),'export function apply(ctx) { ctx.provide("test", true) }')
       await expect(prepareDistributionArtifact(dir,peer)).rejects.toThrow('空 Host')
+      await writeFile(join(dir,'client.js'),client)
       manifest.dsh.workbench.distribution.runtimeKind='client-host'
       await writeFile(join(dir,'package.json'),JSON.stringify(manifest))
       expect((await prepareDistributionArtifact(dir,peer)).dependency.host).toBe(true)

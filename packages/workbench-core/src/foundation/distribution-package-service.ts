@@ -8,15 +8,15 @@ import type { WorkbenchSettingsScope } from '../client/workbench-settings-contra
 import type { WorkbenchExtensionRegistryV1 } from '../client/workbench-extension-registry.ts'
 import type { WorkbenchExtensionConsentV1 } from '../workbench-extension-access.ts'
 import type { SessionBindingV1 } from './model.ts'
-import { WORKBENCH_CORE_VERSION } from '../release-compatibility.ts'
+import { WORKBENCH_CORE_VERSION, WORKBENCH_PACKAGE_NAME } from '../release-compatibility.ts'
 import { areasOf } from './document-v3.ts'
 import type { WorkbenchPackageDependencyV4 } from './workbench-package-v4.ts'
 
 export function createDistributionPackageService(options:{client:DistributionClientV4;settings:WorkbenchSettingsScope<WorkbenchSettingsV4>;directory:WorkbenchDirectory;editors:WorkbenchEditorCatalog;rawEditors:WorkbenchEditorCatalog;registry:WorkbenchExtensionRegistryV1;canExport(id:string):boolean;canImport():boolean}) {
   const core=(row:WorkbenchEditorCatalogRow):WorkbenchEditorCatalogRow=>{
     if(!(CORE_PORTABLE_EDITORS as readonly string[]).includes(row.id))return row
-    return {...row,distribution:{version:1,portableId:'workbench.core',packageVersion:WORKBENCH_CORE_VERSION,exportPolicy:'reference',sourcePolicy:'binary-only',provides:{editorIds:[row.id]},requires:[],permissions:[],packageName:'@dsh-workbench/core'},
-      provenance:{version:1,runtimeKind:'static',fiberName:'@dsh-workbench/core',packageName:'@dsh-workbench/core',packageVersion:WORKBENCH_CORE_VERSION},
+    return {...row,distribution:{version:1,portableId:'workbench.core',packageVersion:WORKBENCH_CORE_VERSION,exportPolicy:'reference',sourcePolicy:'binary-only',provides:{editorIds:[row.id]},requires:[],permissions:[],packageName:WORKBENCH_PACKAGE_NAME},
+      provenance:{version:1,runtimeKind:'static',fiberName:WORKBENCH_PACKAGE_NAME,packageName:WORKBENCH_PACKAGE_NAME,packageVersion:WORKBENCH_CORE_VERSION},
       declaration:{...row.declaration??{editorId:row.id,label:row.label,scope:row.scope,requiredBinding:row.scope==='session'?'session':'none',runtime:{background:'pause',collapsed:'dispose',reacquire:'on-visible'}},state:{schemaVersion:1,maxBytes:4096,share:'portable',restore:'if-valid'}},
       // Native resources are rebound locally. Their runtime/session payload never travels.
       portability:{version:1,exportState:()=>({schemaVersion:1}),importState:()=>({schemaVersion:1})}}

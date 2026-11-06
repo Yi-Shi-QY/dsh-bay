@@ -18,7 +18,7 @@
   "delivery": {
     "mode": "core-only",
     "defaultInstall": [
-      "@dsh-workbench/core"
+      "dsh-bay"
     ],
     "excludedModules": [
       "@dsh-workbench/conversation-suite",
@@ -40,18 +40,19 @@
   },
   "validation": {
     "sourceConsistency": "rc1 source mirror and runtime destination recorded",
-    "coreTests": "120 test files / 749 tests passed",
+    "coreTests": "122 test files / 761 tests passed",
     "desktopAcceptance": "not run by plan",
     "typecheck": "passed",
     "distributionAcceptance": {
       "status": "passed-private-archive-only",
-      "path": "releases/alpha17.5-rc1-private/dsh-workbench-core-0.2.2-alpha.17.5.tgz",
-      "sha256": "4e56f254b4d9a892d7190f2deb99493c41588736da41d7040bab827c2aa5f361",
+      "path": "releases/alpha17.5-rc1-private/dsh-bay-0.2.2-alpha.17.5.tgz",
+      "sha256": "61d13a16bb197e5979856b0fd65cb4c87a8b1f823686cd01e92946f9509f40af",
       "archiveFiles": 255,
       "manifestVersionMatched": true,
       "buildInputsMatched": true,
       "rc1DependencyClosureMatched": true,
-      "historicalRc5Files": 0
+      "historicalRc5Files": 0,
+      "packageName": "dsh-bay"
     }
   }
 }

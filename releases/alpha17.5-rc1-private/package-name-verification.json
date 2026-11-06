@@ -1,0 +1,32 @@
+{
+  "packageName": "dsh-bay",
+  "version": "0.2.2-alpha.17.5",
+  "archive": "releases/alpha17.5-rc1-private/dsh-bay-0.2.2-alpha.17.5.tgz",
+  "sha256": "61d13a16bb197e5979856b0fd65cb4c87a8b1f823686cd01e92946f9509f40af",
+  "bytes": 1064567,
+  "archiveFiles": 255,
+  "clientModuleId": "dsh-bay",
+  "bundleEntry": "dsh-bay",
+  "manifestMatched": true,
+  "runtimeBytesMatched": true,
+  "buildInputsMatched": true,
+  "clientInputs": 216,
+  "hostInputs": 177,
+  "rc1DependencyClosureMatched": true,
+  "validation": {
+    "testFiles": 122,
+    "tests": 761,
+    "typecheck": "passed",
+    "rc1Identity": "passed",
+    "strictPack": "passed",
+    "archive": "passed",
+    "desktopSmoke": "not-run"
+  },
+  "legacyArchiveCompatibility": {
+    "offlineCoreName": "@dsh-workbench/core",
+    "signedV4": true,
+    "portableStateRestore": true,
+    "unknownCoreEditorRejected": true
+  },
+  "installationMigration": "Disable the old @dsh-workbench/core package before enabling dsh-bay; no Profile was modified."
+}

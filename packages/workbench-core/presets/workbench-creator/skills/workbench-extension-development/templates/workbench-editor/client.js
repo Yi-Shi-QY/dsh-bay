@@ -2,31 +2,32 @@
 window.__ModuleLoader__.load({
   id: '@local/workbench-editor-example',
   factory(require) {
-    const React = require('react')
-    const h = React.createElement
-
     // The owner object is supplied by Workbench Core. It is the only source
     // of Area, Workspace and Session identity for this editor instance.
-    function Editor(owner) {
-      // This example persists edits immediately. Editors with unsaved local
-      // drafts must return false (or ask to save/discard) from this guard.
-      React.useEffect(() => owner.registerCloseGuard?.(() => true), [owner.registerCloseGuard])
-      const binding = owner.sessionId === undefined
-        ? '等待绑定 Session'
-        : `Session ${owner.sessionId}`
-      return h('section', {
-        style: { display: 'grid', gap: 8, padding: 16, minHeight: '100%', color: 'inherit' },
-        'data-workbench-editor-example': true,
-      },
-      h('h2', { style: { margin: 0 } }, 'Workbench 内页示例'),
-      h('p', { style: { margin: 0, opacity: 0.75 } }, binding),
-      h('p', { style: { margin: 0, opacity: 0.75 } }, owner.workspaceId === undefined
-        ? '当前没有工作区绑定。'
-        : `Workspace ${owner.workspaceId}`),
-      h('button', {
-        type: 'button',
-        onClick: () => owner.setState({ schemaVersion: 1, acknowledged: true }),
-      }, '记录本机状态'))
+    function createEditor(React) {
+      const h = React.createElement
+      function Editor(owner) {
+        // This example persists edits immediately. Editors with unsaved local
+        // drafts must return false (or ask to save/discard) from this guard.
+        React.useEffect(() => owner.registerCloseGuard?.(() => true), [owner.registerCloseGuard])
+        const binding = owner.sessionId === undefined
+          ? '等待绑定 Session'
+          : `Session ${owner.sessionId}`
+        return h('section', {
+          style: { display: 'grid', gap: 8, padding: 16, minHeight: '100%', color: 'inherit' },
+          'data-workbench-editor-example': true,
+        },
+        h('h2', { style: { margin: 0 } }, 'Workbench 内页示例'),
+        h('p', { style: { margin: 0, opacity: 0.75 } }, binding),
+        h('p', { style: { margin: 0, opacity: 0.75 } }, owner.workspaceId === undefined
+          ? '当前没有工作区绑定。'
+          : `Workspace ${owner.workspaceId}`),
+        h('button', {
+          type: 'button',
+          onClick: () => owner.setState({ schemaVersion: 1, acknowledged: true }),
+        }, '记录本机状态'))
+      }
+      return Editor
     }
 
     const declaration = {
@@ -53,8 +54,10 @@ window.__ModuleLoader__.load({
       // registrant. Keep it equal to package.json.name so Workbench Core can
       // map the Slot contribution to pluginInventory/listBundles exactly.
       name: '@local/workbench-editor-example',
-      inject: ['slots'],
-      apply(ctx) {
+      inject: ['slots', 'modules'],
+      async apply(ctx) {
+        const React = await ctx.modules.import('react', '', {})
+        const Editor = createEditor(React)
         ctx.slots.inject('workbench.editor.root', () => ctx.slots.register({
           name: 'workbench.editor.root',
           id: 'workbench.example',

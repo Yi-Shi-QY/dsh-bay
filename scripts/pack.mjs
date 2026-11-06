@@ -34,6 +34,7 @@ if (!existsSync(path.join(output, tarball))) throw new Error(`Core package tarba
 const bytes = readFileSync(path.join(output, tarball))
 const buildInputs = JSON.parse(readFileSync(path.join(core, 'lib/build-inputs.json'), 'utf8'))
 if (buildInputs.workbenchVersion !== manifest.version) throw new Error('Build/package version mismatch')
+if (buildInputs.packageName !== manifest.name) throw new Error('Build/package name mismatch')
 const candidate = {
   status: 'private-staging',
   candidateId: buildInputs.candidateId,

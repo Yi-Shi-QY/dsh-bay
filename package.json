@@ -1,5 +1,5 @@
 {
-  "name": "dsh-bay-private-staging",
+  "name": "dsh-bay-workspace",
   "description": "Private staging repository for DSH Bay (湾域) on DSH",
   "private": true,
   "version": "0.2.2-alpha.17.5",
@@ -29,7 +29,7 @@
     "verify:workbench-package": "node scripts/test.mjs packages/workbench-core/tests/workbench-package-service.spec.ts",
     "verify": "pnpm check:rc1 && pnpm test && pnpm build",
     "test": "node scripts/test.mjs",
-    "typecheck": "pnpm --filter @dsh-workbench/core build:types",
+    "typecheck": "pnpm --filter dsh-bay build:types",
     "pack:core": "node scripts/pack.mjs"
   },
   "devDependencies": {

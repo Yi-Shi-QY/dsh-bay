@@ -19,11 +19,13 @@
 | DSH 兼容版本 | `0.2.2-rc.1` |
 | DSH 上游提交 | `66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db` |
 | 默认交付 | Core-only |
-| 默认安装包 | `@dsh-workbench/core` |
+| 默认安装包 | `dsh-bay` |
 | 当前状态 | 私有 staging / experimental-unvalidated |
 | 仓库 | <https://github.com/Yi-Shi-QY/dsh-bay> |
 
-“湾域”表示一个可以停靠、整理和继续工作的独立工作域：每个任务拥有自己的 Area、Session 和内页组合，多个任务可以并行存在，又不会因为全局 Session 或布局状态而互相串线。`DSH Bay` 是对外传播使用的英文品牌；`@dsh-workbench/core` 仍是运行时技术包名，用来准确表达它承担的 Core 职责。
+“湾域”表示一个可以停靠、整理和继续工作的独立工作域：每个任务拥有自己的 Area、Session 和内页组合，多个任务可以并行存在，又不会因为全局 Session 或布局状态而互相串线。`DSH Bay` 是产品展示名，`dsh-bay` 是统一的安装包名和客户端模块名。内部 Core 职责与 `workbench.core` 标识保持不变。
+
+17.5 试用安装包统一命名为 `dsh-bay-0.2.2-alpha.17.5.tgz`。从旧的 `@dsh-workbench/core` 安装迁移时，先在 DSH 插件管理器停用旧包，再安装并启用 `dsh-bay`，避免两个包同时注册工作台。旧工作台分享包中的 Core 名称保留导入兼容，内部布局与设置标识不改名。
 
 DSH Bay 是独立社区项目，不代表 DeepSeek 官方产品。它遵循 DSH 的原生插件、生命周期和 Plugin Manager 契约，尽量以增量方式提供工作台能力。
 
@@ -87,7 +89,7 @@ Settings 继续使用 DSH 原生 Plugin Manager 入口。DSH Bay 不维护第二
 默认候选只安装：
 
 ```text
-@dsh-workbench/core
+dsh-bay
 ```
 
 以下模块明确排除在当前候选之外：
