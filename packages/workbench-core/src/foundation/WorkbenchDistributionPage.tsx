@@ -6,6 +6,7 @@ import type { WorkbenchPackageModeV4 } from './workbench-package-v4.ts'
 import type { DistributionPackageService } from './distribution-package-service.ts'
 import { areasOf } from './document-v3.ts'
 import type {SessionBindingV1} from './model.ts'
+import { WORKBENCH_CORE_VERSION } from '../release-compatibility.ts'
 import css from './WorkbenchSettings.module.css'
 
 const labels:Record<WorkbenchPackageModeV4,string>={'layout-only':'布局分享','online-reference':'在线引用','offline-embedded':'离线嵌入'}
@@ -48,13 +49,13 @@ export function WorkbenchDistributionPage(props:SettingsPageProps & {distributio
       <label className={css.form}>工作台<select aria-label="分享来源工作台" value={id} onChange={e=>{setId(e.target.value);setPrepared(undefined);generation.current++}}>{Object.values(props.value?.workbenches??{}).map(w=><option key={w.workbenchId} value={w.workbenchId}>{w.name}</option>)}</select></label>
       <label className={css.form}>导出模式<select aria-label="导出模式" value={kind} onChange={e=>{setKind(e.target.value as WorkbenchPackageModeV4);setPrepared(undefined);generation.current++}}>{Object.entries(labels).map(([k,v])=><option key={k} value={k}>{v}</option>)}</select></label>
       <p>{kind==='layout-only'?'只分享布局与可迁移配置；接收方自行安装扩展。':kind==='online-reference'?'签名锁定扩展版本和内容；接收方需要访问对应 Registry。':'签名包包含自包含扩展安装制品；缺少依赖或配置迁移能力时阻止导出。'}</p>
-      <button className={css.primaryButton} disabled={!id||actions.states.prepare?.busy} onClick={()=>void actions.run('prepare',async()=>{const gen=generation.current;const next=await service.prepareExport(id,kind,false);if(gen===generation.current)setPrepared(next)})}>保存布局并检查分发内容</button>{actions.feedback('prepare')}
-      {kind!=='layout-only'?<><button disabled={!id||actions.states.artifacts?.busy} onClick={()=>void actions.run('artifacts',async()=>{const gen=generation.current;const next=await service.prepareExport(id,kind,true);if(gen===generation.current)setPrepared(next)})}>准备运行制品并生成签名预览</button><p>仅收集扩展发布清单中的运行文件，不执行构建命令。核对预览后下载发送。</p>{actions.feedback('artifacts')}</>:null}
+      <button className={css.primaryButton} disabled={!id||actions.states.prepare?.busy} onClick={()=>void actions.run('prepare',async()=>{const gen=generation.current;const next=await service.prepareExport(id,kind,kind!=='layout-only');if(gen===generation.current)setPrepared(next)})}>{kind==='layout-only'?'保存布局并生成分享包':'自动准备依赖并生成分享包'}</button>{actions.feedback('prepare')}
+      {kind!=='layout-only'?<p>优先复用已验证制品；缺少时由 Host 准备并校验一次，完成后直接生成包。</p>:null}
       {prepared?<div className={css.detail}><h4>{prepared.preview.layout.name} · {labels[kind]}</h4><LayoutDiagram node={prepared.preview.layout.document.root} editors={props.editors}/><p>{areasOf(prepared.preview.layout.document.root).reduce((n,a)=>n+a.moduleHistory.length,0)} 个内页，保留全部标签</p>
         {prepared.preview.manifest.publisher?<p>发布者指纹：{prepared.preview.manifest.publisher.keyId}</p>:null}
         {prepared.preview.manifest.dependencies.map(d=><p key={d.packageName}>{d.packageName} {d.version} · {d.host?'包含 Host 代码':'客户端扩展'} · 权限：{d.permissions.join('、')||'无额外声明'}</p>)}
         {prepared.preview.layout.warnings.map((w,i)=><p role="status" key={i}>{w}</p>)}
-        <button className={css.primaryButton} onClick={()=>downloadSettingsFile(prepared.preview.layout.name+'-'+labels[kind]+'-17.2.wbpkg',new Uint8Array(prepared.bytes).buffer,'application/zip')}>下载已核对的工作台包</button><p>下载的是此次预览快照；继续编辑后请重新检查生成。</p></div>:null}
+        <button className={css.primaryButton} onClick={()=>downloadSettingsFile(prepared.preview.layout.name+'-'+labels[kind]+'-'+WORKBENCH_CORE_VERSION+'.wbpkg',new Uint8Array(prepared.bytes).buffer,'application/zip')}>下载已核对的工作台包</button><p>下载的是此次预览快照；继续编辑后请重新检查生成。</p></div>:null}
     </>:null}
     {tab==='import'?<>
       <label className={css.form}>工作台包<input aria-label="工作台包文件" type="file" accept=".zip,.wbpkg" disabled={actions.states.inspect?.busy} onChange={e=>{const f=e.target.files?.[0];if(!f)return;setRow(undefined);setConfirmed(false);setBindings({});const gen=++generation.current;void actions.run('inspect',async()=>{if(f.size>128*1024*1024)throw new Error('包超过 128MB 限制。');const bytes=new Uint8Array(await f.arrayBuffer());const next=await (legacy?service.inspectLegacy(bytes):service.inspect(bytes));if(gen===generation.current)setRow(next)})}}/></label>{actions.feedback('inspect')}

@@ -22,10 +22,10 @@ the client Area projection.
 
 ## Source and provenance
 
-The Sidebar/Workspace source index records the DSH rc5 commit and source digest.
+The Sidebar/Workspace source index records the DSH rc1 commit and source digest.
 The private repository provenance file records that this checkout was derived
 from the merged Workbench candidate. It is not a claim that every future
-DSH Bay feature has already been validated in a clean rc5 desktop.
+DSH Bay feature has already been validated in a clean rc1 desktop.
 
 ## Product layers
 

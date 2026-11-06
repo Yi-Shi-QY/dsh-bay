@@ -19,6 +19,9 @@ Profile directly. The Dynamic Cordis runner is a separate process-local API for
 programmatic consumers and UI controls; it is not exposed here as the durable Creator
 Agent installation path and its definitions disappear on restart.
 For a durable, installable inner-page extension, load workbench-extension-development.
+Users can start this workflow from the Creator slash menu with
+/create-workbench-extension; that user-only shortcut loads the same contract and
+keeps the actual authoring, build, and install decisions in the Creator Agent.
 Read the complete Workbench container inner-page extension specification shipped with
 that Skill before writing code. Register only additive workbench.editor.root or
 workbench.editor.session pages. Keep package.json.name, Cordis plugin name, Slot registrant, and

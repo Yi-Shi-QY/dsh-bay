@@ -4,7 +4,8 @@ import type { JsonValue, SessionBindingV1 } from './model.ts'
 import type { WorkbenchRecordV2 } from './persistence.ts'
 import { canonicalJson, decodeDeterministicZip, decodeWorkbenchPackageArchive, encodeDeterministicZip, importPortableWorkbench, sha256Hex, type PortableWorkbenchV1 } from './workbench-sharing.ts'
 import { inspectWorkbenchOfflinePackage } from '../offline-package.ts'
-import { WORKBENCH_CORE_VERSION, WORKBENCH_DSH_GENERATION } from '../release-compatibility.ts'
+import { WORKBENCH_CORE_VERSION, WORKBENCH_DSH_GENERATION, isWorkbenchCorePackageName } from '../release-compatibility.ts'
+import { CORE_PORTABLE_EDITORS } from '../distribution-contract.ts'
 import { workbenchEditorStateFailureV1 } from '../workbench-editor-state.ts'
 
 export interface LayoutPackageModuleV3 { editorId: string; scope: 'root' | 'session'; packageName?: string; version?: string; digest?: string }
@@ -197,9 +198,13 @@ export function restoreLayoutPackage(layout: PortableLayoutV2, editors: readonly
       page.moduleInstanceId = fresh('page')
       if (oldId === current) node.activeModuleInstanceId = page.moduleInstanceId
       const identity = layout.modules.find(m => m.editorId === page.editorId && m.scope === page.editorScope)
+      const coreIdentity = isWorkbenchCorePackageName(identity?.packageName)
+        && identity.version === WORKBENCH_CORE_VERSION && (CORE_PORTABLE_EDITORS as readonly string[]).includes(page.editorId)
       const editor = editors.find(row => row.id === page.editorId && row.scope === page.editorScope
-        && (!verifiedOnly || (identity?.packageName === '@dsh-workbench/core' || !!identity?.digest))
-        && (identity?.packageName === undefined || (row.provenance?.packageName === identity.packageName && row.provenance.packageVersion === identity.version && (identity.digest === undefined || row.provenance.artifactDigest === identity.digest))))
+        && (!verifiedOnly || coreIdentity || !!identity?.digest)
+        && (identity?.packageName === undefined || ((row.provenance?.packageName === identity.packageName
+          || (coreIdentity && isWorkbenchCorePackageName(row.provenance?.packageName)))
+          && row.provenance?.packageVersion === identity.version && (identity.digest === undefined || row.provenance.artifactDigest === identity.digest))))
       const state = page.state
       let migrated = false
       page.state = {}

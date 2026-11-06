@@ -1,9 +1,8 @@
-import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { filterWorkbenchRootSidebarRegistrations, isDeferredOfficialMoreRegistration } from '../src/client/workbench-more-policy.ts'
 
-describe('Workbench 15.2 More policy', () => {
-  it('filters only rc5 entry-customization on the three projected action slots', () => {
+describe('Workbench 17.5 More policy', () => {
+  it('filters only rc1 entry-customization on the three projected action slots', () => {
     for (const slot of [
       'sidebar.panellist.actions',
       'conversation.session.header.views.actions',
@@ -25,10 +24,10 @@ describe('Workbench 15.2 More policy', () => {
     ])).toHaveLength(2)
   })
 
-  it('keeps the global panel-action slot out of the active Workbench root shell', () => {
-    const contract = readFileSync(new URL('../src/foundation/workbench-sidebar/generated/upstream/ui-sidebar/contract/slots.ts', import.meta.url), 'utf8')
-    const shell = readFileSync(new URL('../src/foundation/workbench-sidebar/generated/upstream/ui-sidebar/SidebarRoot.tsx', import.meta.url), 'utf8')
-    expect(contract).not.toContain("'sidebar.panellist.actions'")
-    expect(shell).not.toContain("renderSlot('sidebar.panellist.actions'")
+  it('keeps the global panel-action slot empty in the Workbench root adapter', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const shell = await readFile(new URL('../src/foundation/WorkbenchCoreSidebar.tsx', import.meta.url), 'utf8')
+    expect(shell).toContain('useEntryActions:')
+    expect(shell).toContain('selector(false)')
   })
 })

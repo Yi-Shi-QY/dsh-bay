@@ -1,12 +1,12 @@
 {
   "status": "private-staging",
   "validationStatus": "experimental-unvalidated",
-  "candidateId": "dsh-bay-0.2.2-alpha.17.1-dsh-0.2.1-rc.5",
+  "candidateId": "dsh-bay-0.2.2-alpha.17.1-dsh-0.2.2-rc.1",
   "product": "DSH Bay / 湾域",
   "packageName": "@dsh-workbench/core",
   "version": "0.2.2-alpha.17.1",
-  "dshGeneration": "0.2.1-rc.5",
-  "upstreamCommit": "b830ec950faba0a46dda564be3e2d854afed94f1",
+  "dshGeneration": "0.2.2-rc.1",
+  "upstreamCommit": "66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db",
   "artifact": {
     "path": "releases/alpha17.1-private/dsh-workbench-core-0.2.2-alpha.17.1.tgz",
     "size": 792621,
@@ -16,7 +16,7 @@
     "integrity": "sha512-T1LYRV3ynZg+WNH35FMDVYF2oQwURTR9TZcVBkOXdjcUG73zj/5eys8WmeqkDuCKirSqjFrRmH6oQ5AZGVsnZg=="
   },
   "validation": {
-    "identity": "passed-pnpm-check:rc5",
+    "identity": "passed-pnpm-check:rc1",
     "tests": {
       "command": "pnpm test",
       "exitCode": 0,
@@ -32,7 +32,7 @@
     "typecheck": {
       "command": "pnpm typecheck",
       "exitCode": 1,
-      "status": "blocked-existing-rc5-generated-source",
+      "status": "blocked-existing-rc1-generated-source",
       "diagnosticCount": 112,
       "log": "typecheck.log"
     },
@@ -42,7 +42,7 @@
       "status": "explicit-private-trial",
       "strictReleaseGate": "held-typecheck-not-bypassed-in-pack:core"
     },
-    "desktopAcceptance": "pending-real-dsh-rc5"
+    "desktopAcceptance": "pending-real-dsh-rc1"
   },
   "archiveVerification": {
     "verifiedAt": "2026-11-04T03:21:52.815Z",

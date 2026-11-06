@@ -6,6 +6,9 @@ import { canonicalizeWorkbenchCatalogJsonV1, importWorkbenchSignedCatalogV1, WOR
 import { readWorkbenchOfflineArchive, writeWorkbenchOfflineArchive } from './offline-archive.ts'
 import { areasOf, validateWorkbenchDocumentV3, type WorkbenchDocumentV3, type WorkbenchNodeV3 } from './foundation/document-v3.ts'
 import { decodeWorkbenchHiddenEditorIds, normalizeWorkbenchTags, type WorkbenchRecordV2 } from './foundation/persistence.ts'
+import type { JsonValue } from './foundation/model.ts'
+import type { WorkbenchEditorCatalogRow } from './foundation/catalog.ts'
+import { WORKBENCH_PACKAGE_NAME, WORKBENCH_LEGACY_PACKAGE_NAME, isWorkbenchCorePackageName } from './release-compatibility.ts'
 
 export interface WorkbenchOfflineLayoutV1 {
   readonly schemaVersion: 1
@@ -20,7 +23,7 @@ export interface WorkbenchOfflineLayoutV1 {
 export interface WorkbenchOfflineManifestV1 {
   readonly schemaVersion: 1
   readonly kind: 'dsh-workbench-offline'
-  readonly core: { readonly packageName: '@dsh-workbench/core'; readonly version: string; readonly offlineProtocol: 1 }
+  readonly core: { readonly packageName: typeof WORKBENCH_PACKAGE_NAME | typeof WORKBENCH_LEGACY_PACKAGE_NAME; readonly version: string; readonly offlineProtocol: 1 }
   readonly dsh: { readonly generation: string; readonly upstreamCommit: string }
   readonly layout: { readonly path: 'workbench.json'; readonly sha256: string }
   readonly catalog?: { readonly path: string; readonly sha256: string }
@@ -62,15 +65,28 @@ function boundedDocument(value: unknown, detached = false): WorkbenchDocumentV3 
   return validateWorkbenchDocumentV3(value, { allowDetachedSession: detached })
 }
 
+function portableState(value: unknown, depth = 0): value is JsonValue {
+  if (depth > 16) return false
+  if (value === null || typeof value === 'boolean' || typeof value === 'string') return typeof value !== 'string'
+    || (value.length <= 32768 && !/^(?:[A-Za-z]:[\\/]|\\\\|[/]|~[/\\]|file:)/iu.test(value))
+  if (typeof value === 'number') return Number.isFinite(value)
+  if (Array.isArray(value)) return value.length <= 1024 && value.every(item => portableState(item, depth + 1))
+  if (typeof value !== 'object') return false
+  const entries = Object.entries(value as Record<string, unknown>)
+  return entries.length <= 256 && entries.every(([key, child]) => !/(?:sessionId|workspaceId|credential|password|secret|token|apiKey|process|pid|windowId|draft|messages|history|absolutePath|__proto__|constructor|prototype)/iu.test(key)
+    && portableState(child, depth + 1))
+}
+
 /** Supported Suite V1 has no portable draft or transcript state. Unknown state blocks export. */
 export function projectWorkbenchOfflineLayout(record: WorkbenchRecordV2): WorkbenchOfflineLayoutV1 {
   return projectLayout(record, false)
 }
 
-function projectLayout(record: WorkbenchRecordV2, detached: boolean): WorkbenchOfflineLayoutV1 {
+function projectLayout(record: WorkbenchRecordV2, detached: boolean, editors: readonly WorkbenchEditorCatalogRow[] = [], allowUnknownEditors = false): WorkbenchOfflineLayoutV1 {
   if (boundedDocument(record.document, detached) === undefined) throw new Error('Workbench layout is invalid or exceeds offline limits')
   const hiddenEditorIds = decodeWorkbenchHiddenEditorIds(record.hiddenEditorIds)
-  if (hiddenEditorIds === undefined || hiddenEditorIds.some(id => !WORKBENCH_CONVERSATION_PAGE_METADATA.some(page => page.id === id))) throw new Error('Unknown inner-page visibility preference')
+  if (hiddenEditorIds === undefined || hiddenEditorIds.some(id => !WORKBENCH_CONVERSATION_PAGE_METADATA.some(page => page.id === id)
+    && !editors.some(editor => editor.id === id) && !allowUnknownEditors)) throw new Error('Unknown inner-page visibility preference')
   if (record.externalBindings !== undefined && Object.keys(record.externalBindings).length !== 0) throw new Error('External bindings do not yet have an offline transfer contract')
   const areaKeys = new Map<string, string>()
   const bindingKeys = new Map<string, string>()
@@ -92,14 +108,34 @@ function projectLayout(record: WorkbenchRecordV2, detached: boolean): WorkbenchO
     } else if (existingBinding !== undefined) bindings.find(row => row.key === key)!.areaIds.push(areaId)
     const moduleHistory = node.moduleHistory.map((module, index) => {
       const page = WORKBENCH_CONVERSATION_PAGE_METADATA.find(page => page.id === module.editorId && page.scope === module.editorScope)
-      if (page === undefined) throw new Error('Workbench contains an unsupported inner page')
-      if (module.state !== null && (typeof module.state !== 'object' || Array.isArray(module.state)
+      const editor = page === undefined ? editors.find(editor => editor.id === module.editorId && editor.scope === module.editorScope) : undefined
+      if (page === undefined && editor === undefined && !allowUnknownEditors) throw new Error('Workbench contains an unsupported inner page')
+      let state: JsonValue = {}
+      if (page === undefined && editor?.portability?.version === 1 && editor.portability.exportState !== undefined) {
+        try {
+          const exported = editor.portability.exportState(module.state as never, {
+            version: 1,
+            editor: { id: module.editorId, scope: module.editorScope, moduleInstanceId: module.moduleInstanceId, title: module.lastKnownTitle },
+          })
+          if (exported === undefined || !portableState(exported)) throw new Error('invalid portable state')
+          state = structuredClone(exported)
+        } catch { throw new Error('Inner-page configuration has no portable contract') }
+      } else if (page === undefined && allowUnknownEditors) {
+        // The receiver validates the signed Catalog after this projection, so
+        // preserve the already-portable custom state while it is still opaque
+        // to the Core-only parser. Dropping it here would change workbench.json
+        // and make every custom inner-page package fail its digest check.
+        if (!portableState(module.state)) throw new Error('Inner-page configuration has no portable contract')
+        state = structuredClone(module.state)
+      } else if (page === undefined) {
+        throw new Error('Inner-page configuration has no portable contract')
+      } else if (page !== undefined && module.state !== null && (typeof module.state !== 'object' || Array.isArray(module.state)
         || Object.entries(module.state).some(([name, value]) => !['workbenchConversationDraft', 'draft'].includes(name) || typeof value !== 'string'))) throw new Error('Inner-page configuration has no portable contract')
       const moduleInstanceId = `page-${String(areaNumber)}-${String(index + 1)}`
-      return { moduleInstanceId, editorId: page.id, editorScope: page.scope,
+      return { moduleInstanceId, editorId: module.editorId, editorScope: module.editorScope,
         ...(module.pendingBinding === undefined ? {} : { pendingBinding: module.pendingBinding }),
         // Draft aliases are local Session content, never portable configuration.
-        state: {}, lastKnownTitle: page.label }
+        state, lastKnownTitle: page?.label ?? editor?.label ?? module.lastKnownTitle ?? module.editorId }
     })
     const activeIndex = node.moduleHistory.findIndex(module => module.moduleInstanceId === node.activeModuleInstanceId)
     return { kind: 'area', areaId,
@@ -132,11 +168,19 @@ async function offlineCatalog(bytes: Uint8Array, options: WorkbenchSignedCatalog
 export async function buildWorkbenchOfflinePackage(input: {
   record: WorkbenchRecordV2
   editorModules: ReadonlyMap<string, WorkbenchModuleIdentityV1>
+  editors?: readonly WorkbenchEditorCatalogRow[]
   catalogArchive?: Uint8Array
   catalogOptions?: WorkbenchSignedCatalogImportOptionsV1
 }): Promise<WorkbenchOfflinePackageV1> {
-  const layout = projectWorkbenchOfflineLayout(input.record)
-  const editorIds = [...new Set([...areasOf(layout.document.root).flatMap(area => area.moduleHistory.map(module => module.editorId)), ...layout.hiddenEditorIds])].sort()
+  const editorIds = [...new Set([...areasOf(input.record.document.root).flatMap(area => area.moduleHistory.map(module => module.editorId)),
+    ...(decodeWorkbenchHiddenEditorIds(input.record.hiddenEditorIds) ?? [])])].sort()
+  if (editorIds.some(editorId => {
+    const identity = input.editorModules.get(editorId)
+    return identity !== undefined && identity.moduleId !== 'workbench.conversation-suite'
+  })) {
+    throw new Error('Core-only offline packages support Conversation Suite only. Export custom inner-page modules with the V4 offline-embedded format.')
+  }
+  const layout = projectLayout(input.record, false, input.editors ?? [])
   const modules: WorkbenchModuleIdentityV1[] = []
   const catalog = input.catalogArchive === undefined ? undefined : await offlineCatalog(input.catalogArchive, input.catalogOptions ?? {})
   for (const editorId of editorIds) {
@@ -150,7 +194,7 @@ export async function buildWorkbenchOfflinePackage(input: {
   const catalogBytes = modules.length === 0 ? undefined : input.catalogArchive
   const catalogDigest = catalogBytes === undefined ? undefined : await offlineSha256(catalogBytes)
   const manifest: WorkbenchOfflineManifestV1 = { schemaVersion: 1, kind: 'dsh-workbench-offline',
-    core: { packageName: '@dsh-workbench/core', version: WORKBENCH_CORE_MANIFEST.version, offlineProtocol: 1 },
+    core: { packageName: WORKBENCH_PACKAGE_NAME, version: WORKBENCH_CORE_MANIFEST.version, offlineProtocol: 1 },
     dsh: { generation: WORKBENCH_DSH_PLUGIN_GENERATION_V1, upstreamCommit: WORKBENCH_UPSTREAM_COMMIT_V1 },
     layout: { path: 'workbench.json', sha256: await offlineSha256(layoutBytes) },
     ...(catalogDigest === undefined ? {} : { catalog: { path: `catalogs/${catalogDigest}.zip`, sha256: catalogDigest } }), modules }
@@ -180,9 +224,14 @@ export async function inspectWorkbenchOfflinePackage(archive: Uint8Array, option
   const manifestRaw = jsonRecord(files.get('manifest.json'), 64 * 1024)
   if (manifestRaw.kind !== 'dsh-workbench-offline' || manifestRaw.schemaVersion !== 1) throw new Error('Unsupported offline Workbench package format')
   const manifest = manifestRaw as unknown as WorkbenchOfflineManifestV1
-  if (manifest.core?.packageName !== '@dsh-workbench/core' || manifest.core.version !== WORKBENCH_CORE_MANIFEST.version || manifest.core.offlineProtocol !== 1
+  if (!isWorkbenchCorePackageName(manifest.core?.packageName) || manifest.core.version !== WORKBENCH_CORE_MANIFEST.version || manifest.core.offlineProtocol !== 1
     || manifest.dsh?.generation !== WORKBENCH_DSH_PLUGIN_GENERATION_V1 || manifest.dsh.upstreamCommit !== WORKBENCH_UPSTREAM_COMMIT_V1
-    || manifest.layout?.path !== 'workbench.json' || !Array.isArray(manifest.modules) || manifest.modules.length > 1) throw new Error('Offline Workbench requires a compatible Core and DSH generation')
+    || manifest.layout?.path !== 'workbench.json' || !Array.isArray(manifest.modules) || manifest.modules.length > 1
+    || manifest.modules.some(module => typeof module !== 'object' || module === null || Array.isArray(module)
+      || module.moduleId !== 'workbench.conversation-suite'
+      || typeof module.version !== 'string' || module.version.trim() === ''
+      || typeof module.artifactDigest !== 'string' || !/^[a-f0-9]{64}$/iu.test(module.artifactDigest))
+    || new Set(manifest.modules.map(module => `${module.moduleId}\u0000${module.version}\u0000${module.artifactDigest.toLowerCase()}`)).size !== manifest.modules.length) throw new Error('Offline Workbench requires a compatible Core and DSH generation')
   const layoutBytes = files.get('workbench.json')
   const layoutRaw = jsonRecord(layoutBytes, 256 * 1024)
   if (layoutRaw.schemaVersion !== 1 || !Array.isArray(layoutRaw.tags) || !layoutRaw.tags.every(tag => typeof tag === 'string')
@@ -190,7 +239,7 @@ export async function inspectWorkbenchOfflinePackage(archive: Uint8Array, option
   const document = boundedDocument(layoutRaw.document, true)
   if (document === undefined) throw new Error('Invalid offline Workbench document')
   const projected = projectLayout({ workbenchId: 'shared-workbench', name: portableText(layoutRaw.name, 160), description: portableText(layoutRaw.description, 2000),
-    tags: layoutRaw.tags as string[], hiddenEditorIds: layoutRaw.hiddenEditorIds as string[], document, createdAt: 0, updatedAt: 0 }, true)
+    tags: layoutRaw.tags as string[], hiddenEditorIds: layoutRaw.hiddenEditorIds as string[], document, createdAt: 0, updatedAt: 0 }, true, [], true)
   const requiredAreas = new Set(areasOf(projected.document.root).filter(area => area.moduleHistory.some(module => module.editorScope === 'session')).map(area => area.areaId))
   const bindings = layoutRaw.bindings.map((raw: unknown, index) => {
     if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) throw new Error('Invalid offline binding requirement')
@@ -213,13 +262,20 @@ export async function inspectWorkbenchOfflinePackage(archive: Uint8Array, option
     catalogArchive = files.get(manifest.catalog.path)
     if (catalogArchive === undefined || await offlineSha256(catalogArchive) !== manifest.catalog.sha256) throw new Error('Offline Catalog digest mismatch')
     catalog = await offlineCatalog(catalogArchive, options)
-    const module = manifest.modules[0]
-    const signed = module === undefined ? undefined : catalog.entries.find(entry => identityEqual(entry, module))
-    if (signed === undefined || signed.signedCatalog?.revoked !== false || [...needed].some(id => !signed.manifest?.provides.editorIds.includes(id))) throw new Error('Offline Module identity, revocation or editor ownership mismatch')
-    modules.push({ moduleId: signed.moduleId, version: signed.version, artifactDigest: signed.artifactDigest })
+    const ownedEditors = new Set<string>()
+    for (const module of manifest.modules) {
+      const signed = catalog.entries.find(entry => identityEqual(entry, module))
+      if (signed === undefined || signed.signedCatalog?.revoked !== false) throw new Error('Offline Module identity, revocation or editor ownership mismatch')
+      for (const id of signed.manifest?.provides.editorIds ?? []) {
+        if (ownedEditors.has(id)) throw new Error('Offline Module editor ownership is ambiguous')
+        ownedEditors.add(id)
+      }
+      modules.push({ moduleId: signed.moduleId, version: signed.version, artifactDigest: signed.artifactDigest })
+    }
+    for (const id of needed) if (!ownedEditors.has(id)) throw new Error('Offline Module identity, revocation or editor ownership mismatch')
   }
   const expected: WorkbenchOfflineManifestV1 = { schemaVersion: 1, kind: 'dsh-workbench-offline',
-    core: { packageName: '@dsh-workbench/core', version: WORKBENCH_CORE_MANIFEST.version, offlineProtocol: 1 },
+    core: { packageName: manifest.core.packageName, version: WORKBENCH_CORE_MANIFEST.version, offlineProtocol: 1 },
     dsh: { generation: WORKBENCH_DSH_PLUGIN_GENERATION_V1, upstreamCommit: WORKBENCH_UPSTREAM_COMMIT_V1 },
     layout: { path: 'workbench.json', sha256: manifest.layout.sha256 },
     ...(catalogArchive === undefined ? {} : { catalog: { path: manifest.catalog!.path, sha256: manifest.catalog!.sha256 } }), modules }

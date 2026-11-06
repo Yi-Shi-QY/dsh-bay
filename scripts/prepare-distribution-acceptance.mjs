@@ -34,7 +34,7 @@ for (const kind of ['client', 'host']) {
     await fs.writeFile(path.join(dir, 'client.js'), client)
   }
   await fs.writeFile(path.join(dir, 'package.json'), JSON.stringify(manifest, null, 2))
-  const prepared = await prepareDistributionArtifact(dir, (name, version) => name === 'react' && version === '18.3.1' || name === '@deepseek-ai/dsh-client-ui-slots' && version === '0.2.1-rc.5')
+  const prepared = await prepareDistributionArtifact(dir, (name, version) => name === 'react' && version === '18.3.1' || name === '@deepseek-ai/dsh-client-ui-slots' && version === '0.2.2-rc.1')
   const file = path.join(root, 'private-' + kind + '-' + prepared.dependency.archiveSha256.slice(0, 12) + '.tgz')
   await fs.writeFile(file, prepared.bytes)
   artifacts[kind] = file

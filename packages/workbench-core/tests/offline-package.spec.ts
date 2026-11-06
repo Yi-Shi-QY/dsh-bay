@@ -8,6 +8,22 @@ import { validateWorkbenchDocumentV3 } from '../src/foundation/document-v3.ts'
 import { catalogOptions, record, fixture } from './offline-fixture.ts'
 
 describe('Workbench offline package', () => {
+  it('exports dsh-bay identity and accepts the legacy Core name without rewriting archive bytes', async () => {
+    const built = await buildWorkbenchOfflinePackage(await fixture())
+    expect(built.manifest.core.packageName).toBe('dsh-bay')
+    const files = await readWorkbenchOfflineArchive(built.archive)
+    const legacyManifest = { ...built.manifest, core: { ...built.manifest.core, packageName: '@dsh-workbench/core' } }
+    const manifestBytes = canonicalizeWorkbenchCatalogJsonV1(legacyManifest)
+    files.set('manifest.json', manifestBytes)
+    const archive = await writeWorkbenchOfflineArchive(files)
+    const imported = await inspectWorkbenchOfflinePackage(archive, catalogOptions)
+    expect(imported.manifest.core.packageName).toBe('@dsh-workbench/core')
+    expect(imported.packageId).toBe(await offlineSha256(manifestBytes))
+    expect(imported.archive).toEqual(archive)
+    files.set('manifest.json', canonicalizeWorkbenchCatalogJsonV1({ ...legacyManifest, core: { ...legacyManifest.core, packageName: 'unrelated-plugin' } }))
+    await expect(inspectWorkbenchOfflinePackage(await writeWorkbenchOfflineArchive(files), catalogOptions)).rejects.toThrow('compatible Core')
+  })
+
   it('strips both the frozen draft field and the early new-generation alias without transferring either', () => {
     const input = record()
     if (input.document.root.kind !== 'split' || input.document.root.first.kind !== 'area') throw new Error('Invalid test layout')
@@ -83,6 +99,20 @@ describe('Workbench offline package', () => {
     expect(result.manifest.modules).toEqual([])
     expect(result.catalogArchive).toBeUndefined()
     expect(result.layout.bindings).toEqual([])
+  })
+
+  it('rejects custom inner pages in the legacy Core-only format', async () => {
+    const input = record()
+    input.hiddenEditorIds = []
+    input.document = { version: 3, activeAreaId: 'custom-area', root: {
+      kind: 'area', areaId: 'custom-area', activeModuleInstanceId: 'custom-page', moduleHistory: [{
+        moduleInstanceId: 'custom-page', editorId: 'example.custom', editorScope: 'root',
+        state: { schemaVersion: 1, color: 'blue' }, lastKnownTitle: 'Custom page',
+      }],
+    } }
+    const identity = { moduleId: 'workbench.custom', version: '1.0.0', artifactDigest: 'a'.repeat(64) }
+    await expect(buildWorkbenchOfflinePackage({ record: input, editorModules: new Map([['example.custom', identity]]) }))
+      .rejects.toThrow('Core-only offline packages support Conversation Suite only')
   })
 
   it('rejects symbolic links and unsafe archive paths through structured ZIP metadata', async () => {

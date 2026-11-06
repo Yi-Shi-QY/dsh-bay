@@ -16,7 +16,20 @@
 `Yi-Shi-QY/dsh-bay`。GitHub 会为旧地址保留重定向；新的提交、文档链接、
 package metadata、CI 和后续发布记录统一使用新地址。
 
-## 身份分层
+## 当前命名规范（2026-11-06 更新）
+
+- 产品展示名：`DSH Bay / 湾域`。
+- 正式安装包、客户端模块 ID：`dsh-bay`。
+- 17.5 私有制品：`dsh-bay-0.2.2-alpha.17.5.tgz`。
+- 不发布的根工作区：`dsh-bay-workspace`，与可安装子包区分，防止 pnpm 过滤器选错。
+- 源码目录 `packages/workbench-core`、内部 `workbench.core`、布局设置键和版本不随包名变更。
+- 新导出统一记录 `dsh-bay`；导入端继续识别旧的 `@dsh-workbench/core`，保留原始归档字节、签名和摘要，仍校验版本及内页归属。
+- 旧安装与新安装是两个包身份。迁移时先停用旧包，再安装并启用新包；本次源码改名不会自动修改用户 Profile。
+- 历史 release、验收记录和旧包保留原名，以便按实际内容追溯。
+
+以下为 2026-11-04 的历史记录，其运行时包名约定已由上述规范取代。
+
+## 原身份分层（历史）
 
 仓库和品牌使用 `dsh-bay` / `DSH Bay`，运行时技术包继续使用
 `@dsh-workbench/core`。技术包名表达 Core 的职责和兼容边界，不因为品牌改名
@@ -27,8 +40,8 @@ package metadata、CI 和后续发布记录统一使用新地址。
 
 ```text
 DSH Bay 0.2.2-alpha.17
-DSH 0.2.1-rc.5
-upstream b830ec950faba0a46dda564be3e2d854afed94f1
+DSH 0.2.2-rc.1
+upstream 66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db
 ```
 
 ## 标签和历史证据
@@ -41,7 +54,7 @@ provenance、README 和构建元数据。
 
 - 旧 alpha 制品的版本、digest 和标签仍可独立追溯；
 - 仓库改名不会伪装成新的运行时版本；
-- DSH rc5 兼容契约和 Core-only 交付边界保持不变；
+- DSH rc1 兼容契约和 Core-only 交付边界保持不变；
 - 后续公测版本应使用 `dsh-bay` 仓库和新的 release validation index。
 
 ## 核验

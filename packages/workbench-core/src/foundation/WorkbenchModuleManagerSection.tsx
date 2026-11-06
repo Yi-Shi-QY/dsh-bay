@@ -160,7 +160,7 @@ export function WorkbenchModuleManagerSection({ moduleManager, workbenchDirector
       <article className={css.versionCard} data-workbench-version-card="core">
         <div className={css.versionCardHeading}><h3>Workbench Core</h3><span className={css.badge} data-tone="success">当前运行</span></div>
         <strong className={css.versionNumber}>{WORKBENCH_CORE_VERSION}</strong>
-        <span className={css.subtle}>@dsh-workbench/core</span>
+        <span className={css.subtle}>dsh-bay</span>
       </article>
       <article className={css.versionCard} data-workbench-version-card="native-pages">
         <div className={css.versionCardHeading}><h3>默认 DSH 原生内页</h3><span className={css.badge}>随 Core 交付</span></div>
@@ -197,7 +197,7 @@ export function WorkbenchModuleManagerSection({ moduleManager, workbenchDirector
       <p className={css.subtle}>以下容器内页直接复用 DSH {WORKBENCH_DSH_GENERATION} 原生能力，随 Core 一起提供，不需要单独安装或导入 Conversation Suite。</p>
       <article className={css.module} data-workbench-module-identity="workbench.core">
         <div className={css.moduleSummary}><span className={css.moduleIcon}><IconCordisPluginOutlineMedium size={24} /></span><div className={css.moduleName}><h3>DSH 原生会话工作台</h3><span className={css.subtle}>Core 内置 · {liveEditors.filter(editor => nativeConversationEditorIds.has(editor.id)).length} 个容器内页</span></div><span className={css.badge} data-tone="success"><IconCheckOutlineMedium />随 Core 已就绪</span></div>
-        <dl className={css.trust}><div><dt>能力来源</dt><dd>DSH 原生 Session、Conversation、Trajectory</dd></div><div><dt>Workbench 责任</dt><dd>Area、布局、入口显示和绑定生命周期</dd></div><div><dt>安装方式</dt><dd>随 @dsh-workbench/core 交付</dd></div></dl>
+        <dl className={css.trust}><div><dt>能力来源</dt><dd>DSH 原生 Session、Conversation、Trajectory</dd></div><div><dt>Workbench 责任</dt><dd>Area、布局、入口显示和绑定生命周期</dd></div><div><dt>安装方式</dt><dd>随 dsh-bay 交付</dd></div></dl>
         <p className={css.notice}>会话数据、Composer、工作区选择和轨迹视图由 DSH 原生实现；Workbench 不复制运行时，也不把它们作为社区扩展安装。</p>
         {suite !== undefined ? <p className={css.notice} data-tone="warning">当前受信目录中的 Conversation Suite 是历史迁移包，仅用于旧 Profile 的验证、认领和修复；全新 Profile 不需要安装它。</p> : null}
       </article>

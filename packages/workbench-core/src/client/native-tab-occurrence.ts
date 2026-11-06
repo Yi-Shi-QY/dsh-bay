@@ -138,7 +138,7 @@ export function createWorkbenchNativeTabOccurrence(
       : options.instanceId
     snapshot = {
       sidebar: { expanded: true, fullscreen: false },
-      panel: { id: options.areaId as never },
+      panel: { id: options.areaId as never, isFloating: false },
       tab: {
         id: nativeTabId as never,
         kind: options.kind,

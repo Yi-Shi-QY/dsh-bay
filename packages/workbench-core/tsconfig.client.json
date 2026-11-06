@@ -10,6 +10,8 @@
     "src"
   ],
   "exclude": [
+    "src/foundation/workbench-sidebar/generated/upstream/rc1-source/**",
+    "src/foundation/workbench-sidebar/generated/upstream/rc5-source/**",
     "src/creator-host.ts",
     "src/foundation/workbench-sidebar/generated/upstream/ui-sidebar/index.ts",
     "src/foundation/workbench-sidebar/generated/upstream/ui-workspace/index.ts",

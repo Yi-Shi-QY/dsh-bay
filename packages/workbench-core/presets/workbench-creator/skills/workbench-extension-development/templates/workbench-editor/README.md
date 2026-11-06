@@ -2,7 +2,7 @@
 
 ## 17.3 展示位置与实例生命周期
 
-Core 兼容版本为 `0.2.2-alpha.17.4`。模板扩展自身保留独立的 `0.1.0` 版本，不能把它误当成 Core 版本。
+Core 兼容版本为 `0.2.2-alpha.17.5`。模板扩展自身保留独立的 `0.1.0` 版本，不能把它误当成 Core 版本。
 
 - 声明 `presentation.floating: false` 可禁止浮窗；缺少完整绑定及生命周期声明的内页不能在浮窗运行。
 - `owner.instanceId` 是布局内标签 ID，运行时缓存使用 `owner.runtimeIdentity`；不能跨工作台仅按标签 ID 缓存。`owner.presentation` 为 `floating` 或 `area`，位置变化不是新建实例。
@@ -13,7 +13,7 @@ Core 兼容版本为 `0.2.2-alpha.17.4`。模板扩展自身保留独立的 `0.1
 - 临时标签只在本客户端本次运行中保留；几何存于独立 Profile UI namespace，均不写入 PortableLayout 或分享包。正式固定后才参与布局保存和现有分发。
 - 必测：两个工作台相同标签 ID、最小化和总览往返、退出再进入、固定前后 DOM/控制器一致、关闭取消、固定冲突、权限撤回和旧绑定回调。
 
-模板兼容 DSH `0.2.1-rc.5`，锁定上游提交 `b830ec950faba0a46dda564be3e2d854afed94f1`。
+模板兼容 DSH `0.2.2-rc.1`，锁定上游提交 `66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db`。
 
 完整字段、生命周期、身份校验、权限和验收要求见[Workbench 容器内页扩展插件开发规范](../../WORKBENCH-CONTAINER-INNER-PAGE-EXTENSION-SPEC.zh.md)。
 
@@ -55,8 +55,8 @@ ctx.slots.inject('workbench.editor.session', () => ctx.slots.register({
     moduleId: 'workbench.editor-example',
     apiVersion: 1,
     editorIds: ['workbench.example'],
-    coreCompatibility: '0.2.2-alpha.17.4',
-    dshGeneration: '0.2.1-rc.5',
+    coreCompatibility: '0.2.2-alpha.17.5',
+    dshGeneration: '0.2.2-rc.1',
   } } }),
 }, Editor))
 ```

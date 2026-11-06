@@ -63,7 +63,7 @@ it('rejects oversized or wrong-schema input before invoking the import handler',
 it('uses only recipient credentials and rejects changed online locks and cross-origin downloads',async()=>{
   const root=await mkdtemp(join(tmpdir(),'wb172-online-'))
   try{
-    const p=await prepareDistributionArtifact(join(import.meta.dirname,'../presets/workbench-creator/skills/workbench-extension-development/templates/workbench-editor'),(n,v)=>(n==='react'&&v==='18.3.1')||(n==='@deepseek-ai/dsh-client-ui-slots'&&v==='0.2.1-rc.5'))
+    const p=await prepareDistributionArtifact(join(import.meta.dirname,'../presets/workbench-creator/skills/workbench-extension-development/templates/workbench-editor'),(n,v)=>(n==='react'&&v==='18.3.1')||(n==='@deepseek-ai/dsh-client-ui-slots'&&v==='0.2.2-rc.1'))
     const d={...p.dependency,registryUrl:'https://registry.example/team/'}
     await writeFile(join(root,'.npmrc'),'//registry.example/team/:_authToken=recipient-test-only')
     const requests:any[]=[];let changed=false,cross=false

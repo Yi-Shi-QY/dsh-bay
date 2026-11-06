@@ -1,5 +1,6 @@
 import { useEffect, type ReactNode } from 'react'
 import type { Context } from '@deepseek-ai/cordis'
+import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type { RenderOpts, SlotRendererHost, StoredEntry, StoreInstanceLike } from '@deepseek-ai/dsh-client-ui-slots'
 import { createSlotRenderer } from './renderer/scoped-slots.tsx'
 

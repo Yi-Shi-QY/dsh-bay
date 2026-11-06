@@ -1,6 +1,6 @@
 import { canonicalJson, decodeDeterministicZip, encodeDeterministicZip, sha256Hex as legacySha256, type WorkbenchPackageFileV1 } from './workbench-sharing.ts'
 import { validatePortableLayout, type PortableLayoutV2 } from './workbench-layout-package.ts'
-import { WORKBENCH_CORE_VERSION, WORKBENCH_DSH_GENERATION } from '../release-compatibility.ts'
+import { WORKBENCH_CORE_VERSION, WORKBENCH_DSH_GENERATION, isWorkbenchCorePackageName } from '../release-compatibility.ts'
 import { CORE_PORTABLE_EDITORS } from '../distribution-contract.ts'
 import { areasOf, type WorkbenchDocumentV3, type WorkbenchNodeV3 } from './document-v3.ts'
 
@@ -158,7 +158,7 @@ export async function inspectWorkbenchPackageV4(bytes: Uint8Array): Promise<Work
     const key = await crypto.subtle.importKey('raw', Uint8Array.from(atob(manifest.publisher.publicKey), c => c.charCodeAt(0)), { name: 'Ed25519' }, false, ['verify'])
     if (!await crypto.subtle.verify('Ed25519', key, Uint8Array.from(atob(signature.signature), c => c.charCodeAt(0)), new Uint8Array(signingBytesV4(manifest)))) throw new Error('发布者签名校验失败。')
     for (const m of layout.modules) {
-      if (m.packageName === '@dsh-workbench/core') {
+      if (isWorkbenchCorePackageName(m.packageName)) {
         if (!(CORE_PORTABLE_EDITORS as readonly string[]).includes(m.editorId) || m.version !== WORKBENCH_CORE_VERSION) throw new Error('内页伪装为宿主提供的扩展。')
       } else if (!manifest.dependencies.some(d => d.packageName === m.packageName && d.version === m.version && d.digest === m.digest && d.editorScopes.some(e => e.editorId === m.editorId && e.scope === m.scope))) throw new Error('内页引用没有匹配的锁定扩展。')
     }

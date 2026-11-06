@@ -2,4 +2,4 @@
 # DSH remains the owner of official surfaces and plugin lifecycle.
 - insert:
     - id: dsh-bay-workbench-layout
-      name: '@dsh-workbench/core'
+      name: 'dsh-bay'

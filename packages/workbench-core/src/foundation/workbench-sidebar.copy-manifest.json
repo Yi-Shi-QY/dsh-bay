@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "upstreamCommit": "b830ec950faba0a46dda564be3e2d854afed94f1",
+  "upstreamCommit": "66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db",
   "upstreamPackage": "@deepseek-ai/dsh-client-ui-sidebar",
-  "upstreamVersion": "0.2.1-rc.5",
-  "upstreamGeneration": "0.2.1-rc.5",
+  "upstreamVersion": "0.2.2-rc.1",
+  "upstreamGeneration": "0.2.2-rc.1",
   "entries": [
     {
       "source": "ui-sidebar/src/client",
@@ -20,23 +20,23 @@
     "Keep the upstream SidebarRoot and WorkspaceBrowser visual contract",
     "Route start/open/fork actions through an explicit Workbench Area",
     "Project focused-session emphasis without mutating DSH current Session",
-    "Pass rc.5 agentPreset and keep draft semantics through Area-local placement",
-    "Consume rc.5 Conversation View and Sidebar Guide action contracts through the native Area renderer",
-    "Controlled rebase reviewed against rc5 Sidebar/Workspace source",
+    "Pass rc.1 agentPreset and keep draft semantics through Area-local placement",
+    "Consume rc.1 Conversation View and Sidebar Guide action contracts through the native Area renderer",
+    "Controlled rebase reviewed against rc1 Sidebar/Workspace source",
     "Keep official entry-customization More deferred from Workbench projections"
   ],
   "officialOwnersReplaced": [],
-  "sourceDigest": "28b18fcb45e98bb5a5b4451bb65e4f4f87a4ea6ba727aa9be81cb977c76f78ee",
-  "baselinePatchDigest": "e1c24ca0a3a2b2a1dec8ef7360173f213bc0090041a147517b0ac7965c37c8d4",
-  "patchDigest": "3e43734e6a0ad7c49af608fe91a7275899782accb331647245d59a51a7c32f1c",
+  "sourceDigest": "1ddb4669dbcb52b0a3c93fa1dda418e26994ae83216979849efed76820cd86e3",
+  "baselinePatchDigest": "1ddb4669dbcb52b0a3c93fa1dda418e26994ae83216979849efed76820cd86e3",
+  "patchDigest": "2b7db9fce1bb4e0435c3a514c2549f61503a3df6af23bb86111a57b878c7eba4",
   "migration": {
-    "targetUpstreamCommit": "b830ec950faba0a46dda564be3e2d854afed94f1",
-    "targetGeneration": "0.2.1-rc.5",
-    "sourceMaterialization": "rc5 source index and adapted destination verified",
+    "targetUpstreamCommit": "66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db",
+    "targetGeneration": "0.2.2-rc.1",
+    "sourceMaterialization": "rc1 source index and adapted destination verified",
     "supplementalSource": "packages/client/ui-workspace/src/client/subagent-lineage.ts (historical rc3 supplemental, deferred)"
   },
-  "sourceMirror": "generated/upstream/rc5-source",
-  "sourceMaterialization": "exact rc5 source mirror present; runtime destination retains reviewed Workbench adaptations",
+  "sourceMirror": "generated/upstream/rc1-source",
+  "sourceMaterialization": "exact rc1 source mirror present; runtime destination retains reviewed Workbench adaptations",
   "adaptedFiles": [
     "ui-sidebar/contract/slots.ts",
     "ui-sidebar/index.ts",
@@ -56,12 +56,17 @@
     {
       "path": "ui-workspace/WorkspaceBrowser.module.css",
       "destinations": "all-sidebar-runtime-destinations",
-      "reason": "Workbench Area/session browser remains at its reviewed legacy path while rc5 source uses ui-workspace/rows/WorkspaceBrowser.module.css"
+      "reason": "Workbench Area/session browser remains at its reviewed legacy path while rc1 source uses ui-workspace/rows/WorkspaceBrowser.module.css"
     },
     {
       "path": "ui-workspace/WorkspaceBrowser.tsx",
       "destinations": "all-sidebar-runtime-destinations",
-      "reason": "Workbench Area/session browser preserves explicit Area-local routing and does not consume the rc5 global current Session"
+      "reason": "Workbench Area/session browser preserves explicit Area-local routing and does not consume the rc1 global current Session"
+    },
+    {
+      "path": "ui-workspace/default-workspace.ts",
+      "destinations": "all-sidebar-runtime-destinations",
+      "reason": "RC1 publishes the pure default Workspace label helper as a package subpath without a client module-table row; keep the browser helper local so the bundle inlines it"
     },
     {
       "path": "ui-workspace/subagent-lineage.ts",

@@ -4,12 +4,12 @@
 
 最新补充交付为 **r14 来源栏间距优化**：releases/alpha17.3-source-spacing-private/dsh-workbench-core-0.2.2-alpha.17.3-source-spacing-3eb91ce661f9.tgz，实际打包于 2026-11-05 02:13:04 +08:00。相对 r13 只改动来源栏 CSS 构建输入，保留以下功能与边界。相关 5 项测试、构建及隔离 Web 深浅主题/窄浮窗实测通过；本节以下为 r13 原始验收记录。
 
-合并前于 2026-11-05 对 r14 完整源码重跑 pnpm verify：RC5 检查、119 个文件 / 738 项测试、构建全部通过。该命令不包含类型检查，既有 112 个类型错误仍作为独立正式发布阻断项保留。日志：%TEMP%/dsh-bay-173-merge-verify.log。
+合并前于 2026-11-05 对 r14 完整源码重跑 pnpm verify：RC1 检查、119 个文件 / 738 项测试、构建全部通过。该命令不包含类型检查，既有 112 个类型错误仍作为独立正式发布阻断项保留。日志：%TEMP%/dsh-bay-173-merge-verify.log。
 
 ## 包身份
 
 - 文件：releases/alpha17.3-private/dsh-workbench-core-0.2.2-alpha.17.3-feedback-849ff3f2c775.tgz。
-- 根包与 Core：0.2.2-alpha.17.3；DSH：0.2.1-rc.5。Creator 模板的 Core 兼容声明为 17.3，示例扩展自身版本保留 0.1.0。
+- 根包与 Core：0.2.2-alpha.17.3；DSH：0.2.2-rc.1。Creator 模板的 Core 兼容声明为 17.3，示例扩展自身版本保留 0.1.0。
 - 实际打包时间（源 tgz 写入时间）：2026-11-05 01:49:45.715884 +08:00。文件大小：1,040,978 字节。
 - SHA-256：849ff3f2c7753fb83d8f05a646423be3c114d555ab2a332fad15ad563312d61a。
 - 交付是已安装验收 r13 的逐字节副本，没有在验收后重新封装。保留历史 r8，但它不是当前交付。
@@ -28,7 +28,7 @@
 
 | 检查 | 结果 |
 | --- | --- |
-| pnpm check:rc5 | 通过 |
+| pnpm check:rc1 | 通过 |
 | pnpm test | 119 文件 / 738 测试通过，含相关 client tests |
 | pnpm build | 通过 |
 | pnpm typecheck | 阻断：112 个既有 generated/upstream 错误，0 新增 |
@@ -36,7 +36,7 @@
 
 新增回归覆盖关闭、来源、顶栏落点、待绑定固定/合并、受限交接快照、真实 Host 控制器往返和丢失响应后的终态锁定。固定合法性回归先复现失败，再修复通过。
 
-原始日志：系统临时目录 dsh-bay-173-feedback-final3-{tests,rc5,build,types}.log；基线为 dsh-bay-173-type-baseline.log。源码测试、构建和真实安装结果分别记录。
+原始日志：系统临时目录 dsh-bay-173-feedback-final3-{tests,rc1,build,types}.log；基线为 dsh-bay-173-type-baseline.log。源码测试、构建和真实安装结果分别记录。
 
 ## 实际安装验证
 

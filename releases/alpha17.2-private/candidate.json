@@ -1,8 +1,8 @@
 {
   "status": "private-staging / experimental; release-gate-held",
-  "candidateId": "dsh-bay-0.2.2-alpha.17.2-dsh-0.2.1-rc.5",
+  "candidateId": "dsh-bay-0.2.2-alpha.17.2-dsh-0.2.2-rc.1",
   "version": "0.2.2-alpha.17.2",
-  "dshGeneration": "0.2.1-rc.5",
+  "dshGeneration": "0.2.2-rc.1",
   "recordedAt": "2026-11-04T07:33:33.675Z",
   "artifact": {
     "path": "dsh-workbench-core-0.2.2-alpha.17.2-339c85d01866.tgz",
@@ -49,7 +49,7 @@
       "tests": 642,
       "result": "passed",
       "clientTests": "included in full suite",
-      "rc5Identity": "passed"
+      "rc1Identity": "passed"
     },
     "build": "passed",
     "typecheck": {
@@ -79,7 +79,7 @@
     "network": "Unreachable registry; independent empty pnpm store; Node non-loopback connect/DNS rejected in Host and pnpm; browser external HTTP blocked. No OS-wide or physical network isolation.",
     "online": "Real local HTTPS registry passed: recipient credentials, locked download, changed integrity, cross-origin rejection. No external private registry acceptance.",
     "remaining": [
-      "existing RC5 declaration migration",
+      "existing RC1 declaration migration",
       "broader official inner-page and real desktop application smoke",
       "external private registry deployment acceptance",
       "physical or OS-wide offline test if required for release"

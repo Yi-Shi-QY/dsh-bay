@@ -330,7 +330,7 @@ function WorkspaceFilesEditor({ owner, ctx }: { owner: AreaProps; ctx: Context }
       const signal = lifetime.signal
       setPreview({ address, claim, implementationId: definition.id, info: {
         sidebar: { expanded: true, fullscreen: false },
-        panel: { id: (owner.areaId ?? owner.instanceId) as never },
+        panel: { id: (owner.areaId ?? owner.instanceId) as never, isFloating: false },
         tab: {
           id: `workbench-file-${owner.instanceId}` as never,
           kind: claim.kind,

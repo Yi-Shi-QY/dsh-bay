@@ -1,9 +1,9 @@
 {
   "status": "experimental-private-trial; typecheck-blocked; earlier-intermittent-ui-blank-unresolved",
   "version": "0.2.2-alpha.17.3",
-  "dshGeneration": "0.2.1-rc.5",
+  "dshGeneration": "0.2.2-rc.1",
   "packageName": "@dsh-workbench/core",
-  "candidateId": "dsh-bay-0.2.2-alpha.17.3-dsh-0.2.1-rc.5",
+  "candidateId": "dsh-bay-0.2.2-alpha.17.3-dsh-0.2.2-rc.1",
   "revision": "r13",
   "artifact": {
     "filename": "dsh-workbench-core-0.2.2-alpha.17.3-feedback-849ff3f2c775.tgz",
@@ -17,7 +17,7 @@
     "deliveryMethod": "Exact byte copy of r13 installed and tested; no repacking"
   },
   "validation": {
-    "rc5": "passed",
+    "rc1": "passed",
     "tests": {
       "filesPassed": 119,
       "testsPassed": 738

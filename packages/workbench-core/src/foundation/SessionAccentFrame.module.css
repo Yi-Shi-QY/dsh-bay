@@ -31,7 +31,9 @@
    card treatment back: draw a slightly inset, quiet edge inside the Area. */
 .frame[data-session-frame='area'][data-layout-locked='true']::after {
   inset: 1px;
-  z-index: 90;
+  /* Keep the locked Area marker above its own content but below the
+     WorkbenchFloatingWorkspace layer (z-index: 45). */
+  z-index: 44;
   padding: 1px;
   border-radius: 3px;
   background: linear-gradient(135deg,

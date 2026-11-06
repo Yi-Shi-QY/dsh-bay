@@ -14,7 +14,7 @@ function fixture(): WorkbenchCreatorInspectOptions {
   }
   return {
     settings: { getSnapshot: () => ({ status: 'ready', writable: true, revision: 17, mode: 'host', value }), subscribe: () => () => {}, set: async () => {}, unset: async () => {} },
-    editorCatalog: { getSnapshot: () => [{ id: 'workbench.conversation', label: '对话', scope: 'session', pluginId: '@dsh-workbench/core' }], subscribe: () => () => {} },
+    editorCatalog: { getSnapshot: () => [{ id: 'workbench.conversation', label: '对话', scope: 'session', pluginId: 'dsh-bay' }], subscribe: () => () => {} },
     sessions: { list: { getSnapshot: () => ({ ids: ['main-session', 'bound-session'], byId: {
       'bound-session': { displayTitle: '本区域对话', running: true, updatedAt: 3, agentPreset: 'workbench-creator' },
       'main-session': { displayTitle: '官方主对话', running: false, updatedAt: 4 },

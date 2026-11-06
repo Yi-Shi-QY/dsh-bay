@@ -17,7 +17,7 @@ import { canonicalJson } from './foundation/workbench-sharing.ts'
 import { createDistributionInstaller, DistributionInstallError, type DistributionNativeManager } from './host-distribution-installer.ts'
 import { atomicDistributionJson, artifactHash, prepareDistributionArtifact, inspectDistributionArtifact, readRuntimeFiles, runtimeDigest } from './host-distribution-artifacts.ts'
 import { CORE_PORTABLE_EDITORS, type DistributionImportStatus } from './distribution-contract.ts'
-import { WORKBENCH_CORE_VERSION, WORKBENCH_DSH_GENERATION } from './release-compatibility.ts'
+import { WORKBENCH_CORE_VERSION, WORKBENCH_DSH_GENERATION, WORKBENCH_PACKAGE_NAME, isWorkbenchCorePackageName } from './release-compatibility.ts'
 import type { WorkbenchSettingsV4 } from './foundation/persistence.ts'
 import { decodeWorkbenchSettingsV4 } from './foundation/persistence.ts'
 import type { WorkbenchExtensionConsentV1 } from './workbench-extension-access.ts'
@@ -244,7 +244,7 @@ export function createHostDistributionService(options: HostDistributionOptions) 
       if(input.mode==='layout-only'){
         const layout=structuredClone(input.layout)
         for(const m of layout.modules){
-          if(m.packageName==='@dsh-workbench/core')continue
+          if(isWorkbenchCorePackageName(m.packageName)){m.packageName=WORKBENCH_PACKAGE_NAME;continue}
           const pkg=m.packageName&&options.resolve(m.packageName)
           if(!pkg){delete m.digest;continue}
           try{
@@ -276,7 +276,7 @@ export function createHostDistributionService(options: HostDistributionOptions) 
       }
       if(blockers.length)throw new Error('分发检查未通过：'+blockers.join('；')+'。请补齐运行制品、处理器或来源后重试，也可主动选择布局分享。')
       for(const m of layout.modules){
-        if((CORE_PORTABLE_EDITORS as readonly string[]).includes(m.editorId)){m.packageName='@dsh-workbench/core';m.version=WORKBENCH_CORE_VERSION;delete m.digest;continue}
+        if((CORE_PORTABLE_EDITORS as readonly string[]).includes(m.editorId)){m.packageName=WORKBENCH_PACKAGE_NAME;m.version=WORKBENCH_CORE_VERSION;delete m.digest;continue}
         const d=dependencies.find(d=>d.packageName===m.packageName && d.editorScopes.some(e=>e.editorId===m.editorId&&e.scope===m.scope))
         if(!d)throw new Error('内页声明与 Host 验证的扩展身份不一致。');m.version=d.version;m.digest=d.digest
       }
