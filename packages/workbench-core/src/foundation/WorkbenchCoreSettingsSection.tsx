@@ -32,6 +32,7 @@ export type WorkbenchCoreSettingsSectionProps = ComponentProps<typeof WorkbenchS
   offlinePackage?: WorkbenchOfflinePackageServiceV1
   nativePluginNavigation?: WorkbenchNativePluginNavigation
   updateInteractionPolicy?: (policy: WorkbenchConversationInteractionPolicyV1) => Promise<boolean>
+  loadModelCatalog?: () => Promise<import('@deepseek-ai/dsh-api-session-controller').ModelCatalog>
 }
 
 

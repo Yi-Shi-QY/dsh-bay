@@ -4,9 +4,9 @@
 >
 > DSH Bay（中文名：湾域）是面向 [DeepSeek Harness（DSH）](https://github.com/deepseek-ai/deepseek-harness) 的多区域插件工作台。它把 DSH 原生 Session、Workspace Files、Terminal、Browser 及其他官方内页组织到相互隔离、可恢复的工作区域中，让插件作者可以在一个清晰的边界内开发和验证自己的扩展。
 
-当前仓库是 DSH Bay `0.2.2-alpha.17` 的私有候选仓库，目标宿主为 DSH `0.2.2-rc.1`。仓库已经从研究、迁移和历史验收材料中独立出来，方便进行来源审计、兼容性验证和后续公测准备。
+当前仓库是 DSH Bay `0.2.2-alpha.17.5` 的私有候选仓库，目标宿主为 DSH `0.2.2-rc.1`。仓库已经从研究、迁移和历史验收材料中独立出来，方便进行来源审计、兼容性验证和后续公测准备。
 
-> 当前候选仍处于 `private-staging / experimental-unvalidated`。`pnpm test`、运行时构建和 rc1 身份检查已通过；Sidebar/Workspace 复制源的类型声明门禁和真实 rc1 桌面 smoke 仍是发布前置条件。请不要把当前构建当作已发布的稳定包。
+> 当前候选仍处于 `private-staging / experimental-unvalidated`。候选记录已包含 rc1 身份、类型检查、严格打包和归档核对；真实 rc1 桌面 smoke 仍未完成。请不要把当前构建当作已发布的稳定包。
 
 ## 产品身份
 
@@ -15,7 +15,7 @@
 | 产品展示名 | **DSH Bay** |
 | 中文名 | **湾域** |
 | 产品定位 | DSH 插件开发、验证、组合和分享的多区域工作台 |
-| 当前版本 | `0.2.2-alpha.17` |
+| 当前版本 | `0.2.2-alpha.17.5` |
 | DSH 兼容版本 | `0.2.2-rc.1` |
 | DSH 上游提交 | `66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db` |
 | 默认交付 | Core-only |
@@ -71,7 +71,7 @@ Settings 继续使用 DSH 原生 Plugin Manager 入口。DSH Bay 不维护第二
 
 ### More 菜单隔离
 
-`0.2.2-alpha.17` 采用 Core-only 方向：Workbench 不显示、不消费 Workbench More。DSH 官方页面仍可使用 rc1 的 `ui-entry-customization`；在 Workbench projection boundary 只过滤官方 `entry-customization` 注册，不屏蔽整个 actions Slot，也不影响其他合法的官方或第三方 action。
+`0.2.2-alpha.17.5` 采用 Core-only 方向：Workbench 不显示、不消费 Workbench More。DSH 官方页面仍可使用 rc1 的 `ui-entry-customization`；在 Workbench projection boundary 只过滤官方 `entry-customization` 注册，不屏蔽整个 actions Slot，也不影响其他合法的官方或第三方 action。
 
 因此，官方页面、Workbench 页面和模式切换分别遵循以下行为：
 
@@ -149,8 +149,8 @@ pnpm pack:core   # 生成 Core 包（依赖类型声明门禁）
 
 - DSH generation：`0.2.2-rc.1`
 - upstream commit：`66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db`
-- Sidebar/Workspace source digest：`bdda51647a9bf715c3ee4662e8259fe6b266ab6f949025190dd1de9c03745df1`
-- lockfile digest：`f8ccc800d6fe1a70a985f8e1dab7878b2c18926023c5cf63434ab3b624fb5fca`
+- Sidebar/Workspace source digest：`1ddb4669dbcb52b0a3c93fa1dda418e26994ae83216979849efed76820cd86e3`
+- lockfile digest：`c13619ee21412537a484b46ee6cfd86b8045e01414c64fa10d5cf2cf6bec5727`
 
 详细记录见：
 
@@ -168,10 +168,12 @@ pnpm pack:core   # 生成 Core 包（依赖类型声明门禁）
 packages/workbench-core/   当前唯一交付的运行时包
 compat/                    DSH rc1 兼容 manifest
 provenance/                DSH 与候选身份、来源和 digest 记录
-releases/                  本地候选索引与构建产物记录
+releases/                  当前候选身份与发布记录
 scripts/                   可复现的检查、测试、构建和打包入口
-docs/                      产品方向、生态参考、仓库结构和验收记录
+docs/                      产品方向、发布清单和当前验证记录
 ```
+
+对外发布时请同时阅读 [当前验证记录](docs/VALIDATION.md) 和 [发布清单](docs/PUBLISHING.zh-CN.md)。
 
 仓库刻意不包含研究总仓库、launcher、community hub、Conversation Suite 运行时和历史迁移树。这样可以让 alpha 候选的安装边界、来源和发布状态保持清晰。
 

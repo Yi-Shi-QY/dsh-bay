@@ -4,6 +4,82 @@ export type { WorkbenchEditorOwnerProps } from './editor-slots.ts'
 export type { WorkbenchEditorSvgIconV1 } from '../foundation/workbench-editor-icons.ts'
 export { normalizeWorkbenchEditorSvgIcon } from '../foundation/workbench-editor-icons.ts'
 export type { WorkbenchEditorRegistrationMetadataV1 } from './workbench-editor-slot-catalog.ts'
+export type { WorkbenchAreaMetadataV1, WorkbenchAreaOwnershipV1 } from '../foundation/persistence.ts'
+export {
+  WorkbenchControlPlane,
+  WORKBENCH_CONTROL_PLANE_SERVICE_NAME,
+} from '../foundation/workbench-control-plane.ts'
+export {
+  projectPortableWorkbenchContext,
+  restorePortableWorkbenchContext,
+  validatePortableWorkbenchContext,
+} from '../foundation/workbench-context-portability.ts'
+export type {
+  PortableWorkbenchContextV1,
+  RestoredPortableWorkbenchContextV1,
+  WorkbenchContextExportPolicyV1,
+} from '../foundation/workbench-context-portability.ts'
+export type {
+  CreateAreaInputV1,
+  CreateAreaResultV1,
+  CreateSessionInputV1,
+  CreateSessionResultV1,
+  EnsureEditorInputV1,
+  EnsureEditorResultV1,
+  WorkbenchControlPlaneActor,
+  WorkbenchControlPlaneAreaV1,
+  WorkbenchControlPlaneEditorV1,
+  WorkbenchControlPlaneModuleV1,
+  WorkbenchControlPlaneOptions,
+  WorkbenchControlPlaneReadContext,
+  WorkbenchControlPlaneRejectionReason,
+  WorkbenchControlPlaneSettings,
+  WorkbenchControlPlaneSnapshotV1,
+  WorkbenchControlPlaneWriteResult,
+} from '../foundation/workbench-control-plane.ts'
+export {
+  WorkbenchSuperAgentAdapter,
+  buildWorkbenchAgentPromptContext,
+  captureWorkbenchAgentExecutionLease,
+  isWorkbenchAgentExecutionCurrent,
+  renderWorkbenchAgentPromptContext,
+  workbenchAgentExecutionStaleReason,
+} from '../foundation/workbench-superagent-adapter.ts'
+export {
+  WorkbenchBayAgentAdapter,
+  buildWorkbenchBayAgentPromptContext,
+  captureWorkbenchBayAgentExecutionLease,
+  isWorkbenchBayAgentExecutionCurrent,
+  renderWorkbenchBayAgentPromptContext,
+  workbenchBayAgentExecutionStaleReason,
+} from '../foundation/workbench-bay-agent-adapter.ts'
+export * from '../foundation/workbench-bay-agent-work.ts'
+export { WorkbenchBayAgentPanel } from '../foundation/WorkbenchBayAgentPanel.tsx'
+export type { WorkbenchBayAgentPanelProps } from '../foundation/WorkbenchBayAgentPanel.tsx'
+export type {
+  ApplyWorkbenchBayAreaAgentReportInputV1,
+  BuildWorkbenchBayAgentPromptContextInputV1,
+  CaptureWorkbenchBayAgentExecutionLeaseInputV1,
+  CaptureWorkbenchBayAgentPromptInputV1,
+  WorkbenchBayAgentExecutionLeaseV1,
+  WorkbenchBayAgentExecutionStaleReason,
+  WorkbenchBayAgentPromptContextV1,
+  WorkbenchBayAgentReportResult,
+  WorkbenchBayAgentWorkItemV1,
+  WorkbenchBayAgentAdapterControlPlane,
+} from '../foundation/workbench-bay-agent-adapter.ts'
+export type {
+  ApplyWorkbenchAreaAgentReportInputV1,
+  BuildWorkbenchAgentPromptContextInputV1,
+  CaptureWorkbenchAgentExecutionLeaseInputV1,
+  CaptureWorkbenchAgentPromptInputV1,
+  WorkbenchAgentExecutionLeaseV1,
+  WorkbenchAgentExecutionStaleReason,
+  WorkbenchAgentPromptContextV1,
+  WorkbenchAgentReportResult,
+  WorkbenchAgentWorkItemV1,
+  WorkbenchSuperAgentAdapterControlPlane,
+} from '../foundation/workbench-superagent-adapter.ts'
 export type {
   WorkbenchEditorBackgroundRuntimeV1,
   WorkbenchEditorBindingPolicyV1,

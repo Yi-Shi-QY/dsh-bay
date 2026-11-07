@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent, type RefObject } from 'react'
+import { WorkbenchBayAgentTasks } from './WorkbenchBayAgentTasks.tsx'
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent, type RefObject } from 'react'
 import { IconCloseOutlineMedium, IconPlusOutlineMedium, IconEllipsisOutlineMedium } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { FloatingWorkspaceRuntime, FloatingRect, FloatingInstance } from '../client/floating-workspace-runtime.ts'
 import { clampFloatingRect, defaultFloatingRect } from '../client/floating-workspace-runtime.ts'
@@ -21,8 +22,10 @@ import type { SessionMarkerRecord } from './persistence.ts'
 import { allocateSessionMarker } from './session-markers.ts'
 import frameCss from './WorkbenchFrame.module.css'
 import accentFrameCss from './SessionAccentFrame.module.css'
+import type { BayAgentControllerV1 } from './workbench-bay-agent-work.ts'
 
 const uid = () => 'floating-' + globalThis.crypto.randomUUID()
+const EMPTY_BAY_AGENT_SNAPSHOT = { workbenchId: '', areas: [], workItems: [], assignments: [], attention: [] } as const
 export function FloatingWorkspaceIcon({ size = 24, className }: { size?: number; className?: string } = {}) {
   return <svg className={className} width={size} height={size} style={{ width: size, height: size, display: 'block', flex: '0 0 auto' }} viewBox="0 0 1024 1024" fill="none" aria-hidden="true">
     <path d="M814 377 784 317 751 273 697 224 638 190 593 174 530 163 446 167 377 186 319 215 267 255 225 302 190 362 168 427 161 481 166 551 187 619 225 608 204 537 201 478 213 414 238 356 269 311 312 269 355 240 405 218 469 204 523 203 555 207 602 220 643 239 673 258 723 304 761 359 775 389 787 428 828 428Z" fill="var(--dsw-alias-label-link, #0b4596)" />
@@ -73,14 +76,20 @@ interface Props {
   selectedAreaBinding?: SessionBindingV1 | undefined
   commit: (command: Parameters<typeof applyLayoutCommand>[1]) => boolean | void
   pin: (tab: TabDocument, areaId: string, edge: DropEdge) => Promise<boolean>
+  bayAgent?: BayAgentControllerV1
 }
 
 /** Temporary content belongs to the client runtime, never to layout autosave. */
 export function WorkbenchFloatingWorkspace(props: Props) {
-  const { runtime, workbenchId, canvasRef, visible, editors, frame } = props
+  const { runtime, workbenchId, canvasRef, visible, editors, frame, bayAgent } = props
   const runtimeRevision = useSyncExternalStore(runtime.subscribe, runtime.getSnapshot, runtime.getSnapshot)
+  const subscribeBayAgent = useCallback((listener: () => void) => bayAgent?.subscribe(listener) ?? (() => {}), [bayAgent])
+  const getBayAgentSnapshot = useCallback(() => bayAgent?.getSnapshot() ?? EMPTY_BAY_AGENT_SNAPSHOT, [bayAgent])
+  const baySnapshot = useSyncExternalStore(subscribeBayAgent, getBayAgentSnapshot, getBayAgentSnapshot)
   const space = runtime.workspace(workbenchId)
   const rows = [...runtime.instances.values()].filter(row => row.workbenchId === workbenchId && row.location === 'floating')
+  const [bayRetry, setBayRetry] = useState(0)
+  const [bayError, setBayError] = useState('')
   const [size, setSize] = useState({ width: 900, height: 600 })
   const [menu, setMenu] = useState<'add' | 'window' | 'pin' | 'tabs' | 'binding'>()
   const [drop, setDrop] = useState<{ areaId: string; edge: DropEdge; rect: DOMRect; reason?: string | undefined }>()
@@ -95,15 +104,30 @@ export function WorkbenchFloatingWorkspace(props: Props) {
   const sessions = frame.useSessions(state => state.byId)
   const workspaces = frame.useWorkspaces(state => state.items)
   const archived = frame.useWorkspaces(state => state.archivedSessionIds)
+  useEffect(() => {
+    if (!bayAgent) return
+    let current = true
+    setBayError('')
+    if (!runtime.find('bay-agent-main', workbenchId)) runtime.open(workbenchId, { id: 'bay-agent-main', editorId: 'workbench.conversation', editorScope: 'session', state: {}, lastKnownTitle: 'Bay Agent' }, false, false)
+    void bayAgent.ensureMainSession(workbenchId).then(sessionId => {
+      if (!current || !sessionId) return
+      const existing = runtime.find('bay-agent-main', workbenchId)
+      if (existing?.tab.sessionId === sessionId) return
+      const workspace = workspaces.find(item => item.sessionIds.includes(sessionId as never))
+      const binding: SessionBindingV1 = { sessionId, ...(workspace ? { workspaceId: workspace.workspaceId } : {}) }
+      runtime.update('bay-agent-main', createSessionTab('bay-agent-main', 'workbench.conversation', binding, 'Bay Agent'), workbenchId)
+    }).catch(error => { if (current) setBayError(String(error)) })
+    return () => { current = false }
+  }, [bayAgent, workbenchId, runtime, bayRetry])
   const binding = active?.tab.binding
   const sessionId = binding?.sessionId ?? active?.tab.sessionId
   const sourceWorkspace = binding?.workspaceId
     ? workspaces.find(workspace => workspace.workspaceId === binding.workspaceId)
     : workspaces.find(workspace => workspace.sessionIds.includes(sessionId as never))
-  const sourceTitle = sourceWorkspace?.title || sourceWorkspace?.path?.split(/[\\/]/).filter(Boolean).at(-1)
+  const sourceTitle = active?.tab.id === 'bay-agent-main' ? '当前工作台' : sourceWorkspace?.title || sourceWorkspace?.path?.split(/[\\/]/).filter(Boolean).at(-1)
     || (binding?.workspaceId ? '项目不可用' : sessionId ? '未分组项目' : '未绑定项目')
   const sourceSession = sessionId ? sessions[sessionId as keyof typeof sessions] : undefined
-  const sessionTitle = sourceSession?.displayTitle || (sessionId ? '对话不可用' : '未绑定对话')
+  const sessionTitle = active?.tab.id === 'bay-agent-main' ? 'Bay Agent · 持久主控会话' : sourceSession?.displayTitle || (sessionId ? '对话不可用' : '未绑定对话')
   const markerFor = (target: SessionBindingV1 | undefined) => {
     if (!target) return undefined
     const workspaceId = target.workspaceId ?? workspaces.find(workspace => workspace.sessionIds.includes(target.sessionId as never))?.workspaceId
@@ -115,6 +139,7 @@ export function WorkbenchFloatingWorkspace(props: Props) {
   const menuTitle = menu === 'add' ? '添加内页' : menu === 'window' ? '浮动工作区' : menu === 'pin' ? '放入区域' : menu === 'tabs' ? '临时内页' : menu === 'binding' ? '绑定来源对话' : undefined
   const notice = (error: string) => runtime.patch(workbenchId, { error })
   const pinReason = (tab: TabDocument, areaId: string, edge: DropEdge) => {
+    if (tab.id === 'bay-agent-main') return 'Bay Agent 主控页签保留在浮动工作区。'
     if (runtime.hasControl?.(workbenchId) === false) return '此页面已失去工作台控制权'
     if (runtime.canUseEditor?.(workbenchId, tab.editorId) === false) return '内页授权已变化'
     const group = groupsOf(props.layout.root).find(row => row.id === areaId)
@@ -130,6 +155,7 @@ export function WorkbenchFloatingWorkspace(props: Props) {
     return undefined
   }
   const bind = async (id: string, sessionId: string) => {
+    if (id === 'bay-agent-main') return
     const row = runtime.find(id, workbenchId)
     if (!row || row.busy || runtime.hasControl?.(workbenchId) === false || !sessions[sessionId as keyof typeof sessions] || archived.includes(sessionId as never)) return
     const before = row.tab
@@ -291,11 +317,13 @@ export function WorkbenchFloatingWorkspace(props: Props) {
     window.addEventListener('pointermove', move); window.addEventListener('pointerup', end); window.addEventListener('pointercancel', cancel); window.addEventListener('keydown', key)
   }
   const pin = async (id: string, areaId: string, edge: DropEdge) => {
+    if (id === 'bay-agent-main') { notice('Bay Agent 主控页签始终保留在浮动工作区。'); return }
     setMenu(undefined)
     try { if (!await runtime.transfer(id, tab => props.pin(tab, areaId, edge), workbenchId)) notice('未能放入区域，请检查连接、保存状态及会话绑定。临时内容仍保留。') }
     catch (error) { notice(error instanceof Error ? error.message : '放入区域失败，内容仍保留') }
   }
   const closeTab = async (id: string) => {
+    if (id === 'bay-agent-main') return
     try {
       if (await runtime.close(id, workbenchId)) runtime.patch(workbenchId, { error: undefined })
       else if (runtime.find(id, workbenchId)) notice('内页尚未关闭：关闭已取消、仍有未处理内容，或操作正在进行。')
@@ -327,14 +355,16 @@ export function WorkbenchFloatingWorkspace(props: Props) {
     const commands: AreaContentCommandHandlersV1 = {
       commit(command) {
         if (row.busy) return false
-        if (command.type === 'close-tab') { void closeTab(tab.id); return true }
+        if (tab.id === 'bay-agent-main' && command.type !== 'activate') return false
+        if (command.type === 'close-tab') { if (tab.id === 'bay-agent-main') return false; void closeTab(tab.id); return true }
         if (command.type === 'activate') { if (visible && runtime.enabled) activate(tab.id); return true }
         const next = applyLayoutCommand({ version: 2, root: { kind: 'group', id: areaId, tabs: [runtime.find(tab.id, workbenchId)?.tab ?? tab], activeTabId: tab.id }, activeGroupId: areaId }, command)
         const updated = tabsOf(next.root)[0]; if (updated) runtime.update(tab.id, updated, workbenchId)
         return true
       },
-      openBindingPicker: () => { activate(tab.id); setMenu('binding') },
+      openBindingPicker: () => { if (tab.id !== 'bay-agent-main') { activate(tab.id); setMenu('binding') } },
       placeConversation: async input => {
+        if (tab.id === 'bay-agent-main') throw new Error('Bay Agent 使用工作台持久主控会话。')
         const create = frame.createWorkspaceSession
         if (!create) throw new Error('当前无法准备新对话。')
         return runtime.prepareConversation(tab.id, workbenchId, async () => {
@@ -354,11 +384,16 @@ export function WorkbenchFloatingWorkspace(props: Props) {
     }
     const shown = visible && space.expanded && active?.tab.id === tab.id
     const focusBinding = () => { if (tab.editorId === 'workbench.conversation' || tab.editorId === 'workbench.conversation.start') { runtime.focusedWorkbenchId = workbenchId; runtime.focusedBinding = tab.binding; runtime.invalidate() } }
-    return <div key={tab.id} className={css.body} onPointerDown={focusBinding} onFocusCapture={focusBinding} style={{ display: shown ? 'block' : 'none' }}><RetainedEditorTarget id={tab.id} workbenchId={workbenchId}>
+    return <div key={tab.id} className={css.body} onPointerDown={focusBinding} onFocusCapture={focusBinding} style={{ display: shown ? 'flex' : 'none', flexDirection: 'column' }}>{tab.id === 'bay-agent-main' && bayAgent && baySnapshot.workbenchId === workbenchId ? <WorkbenchBayAgentTasks key={workbenchId} controller={bayAgent} snapshot={baySnapshot} workspaces={workspaces} openWorker={sessionId => {
+      const workspace = workspaces.find(row => row.sessionIds.includes(sessionId as never))
+      const id = 'bay-worker:' + sessionId
+      if (!runtime.find(id, workbenchId)) runtime.open(workbenchId, createSessionTab(id, 'workbench.conversation', { sessionId, ...(workspace ? { workspaceId: workspace.workspaceId } : {}) }, 'Worker 对话'), false, true)
+      activate(id)
+    }} /> : null}{tab.id === 'bay-agent-main' && !tab.sessionId ? <div className={css.empty} role={bayError ? 'alert' : 'status'}><strong>Bay Agent</strong><p>{bayError || '正在恢复工作台主控会话…'}</p>{bayError ? <button onClick={() => setBayRetry(value => value + 1)}>重试连接</button> : null}</div> : <div style={{ flex: 1, minHeight: 0, position: 'relative' }}><RetainedEditorTarget id={tab.id} workbenchId={workbenchId}>
       <MemoizedEditor workbenchId={workbenchId} sharePresenceEnabled={false} tab={tab} renderSlot={frame.renderSlot} editors={editors} editor={editor} editorAvailable={!!editor} extensionAccess={props.extensionAccess}
         projection={{ areaId, tabId: tab.id, editorId: tab.editorId, editorScope: tab.editorScope, state: tab.state, lastKnownTitle: tab.lastKnownTitle, availability: editor ? 'available' : 'unsupported', ...(tab.sessionId ? { sessionId: tab.sessionId } : {}), ...(tab.pendingBinding ? { pendingBinding: tab.pendingBinding } : {}) }}
         commands={commands} areaClaim={'floating:' + tab.id + ':' + (tab.bindingGeneration ?? 0)} lifecycle={{ visibility: shown ? 'visible' : 'background', focused: shown && runtime.focusedBinding?.sessionId === tab.sessionId, background: editor?.declaration?.runtime.background ?? 'keep', collapsed: editor?.declaration?.runtime.collapsed ?? 'keep' }} />
-    </RetainedEditorTarget></div>
+    </RetainedEditorTarget></div>}</div>
   }
   const chooser = selectableWorkbenchEditors(editors, props.hidden)
   const unavailable = (editor: WorkbenchEditorCatalogRow) => editor.declaration?.presentation?.floating === false
@@ -369,7 +404,7 @@ export function WorkbenchFloatingWorkspace(props: Props) {
     <div ref={windowRef} className={css.window + ' ' + accentFrameCss.frame} data-session-frame={sourceMarker ? 'floating' : undefined} data-accent={sourceMarker?.accentToken} data-workbench-floating-window role="region" aria-label="浮动工作区" style={{ display: space.expanded ? undefined : 'none', left: rect.x, top: rect.y, width: rect.width, height: rect.height }}
       onKeyDown={event => { if (event.key === 'Escape' && menu) { event.stopPropagation(); setMenu(undefined) } if (event.altKey && event.key === 'm') { event.preventDefault(); runtime.patch(workbenchId, { expanded: false }) } }}>
       <header className={css.header} onPointerDown={e => pointerGesture(e, 'move')} onDoubleClick={e => { if (!(e.target as HTMLElement).closest('button,[role=tab]')) runtime.patch(workbenchId, { maximized: !space.maximized }) }}>
-        <div ref={strip} className={css.tabs} role="tablist" aria-label="临时内页">{rows.map((row, index) => { const presentation = resolveWorkbenchEditorPresentation(editors.find(e => e.id === row.tab.editorId)); return <div key={row.tab.id} className={css.tab} role="tab" aria-selected={active?.tab.id === row.tab.id} tabIndex={active?.tab.id === row.tab.id ? 0 : -1} title={row.tab.lastKnownTitle} onPointerDown={e => dragTab(e, row)} onClick={() => { if (suppressClick.current) { suppressClick.current = false; return }; activate(row.tab.id) }} onKeyDown={e => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) { e.preventDefault(); const next = e.key === 'Home' ? 0 : e.key === 'End' ? rows.length - 1 : (index + (e.key === 'ArrowRight' ? 1 : -1) + rows.length) % rows.length; activate(rows[next]!.tab.id); strip.current?.querySelectorAll<HTMLElement>('[role=tab]')[next]?.focus() } if (e.key === 'Delete') { e.preventDefault(); e.stopPropagation(); void closeTab(row.tab.id) } }}><WorkbenchEditorIcon name={presentation.icon} iconSvg={presentation.iconSvg} /><span>{row.tab.lastKnownTitle}</span>{row.unread ? <i className={css.dot} /> : null}<button type="button" disabled={row.busy} aria-label={'关闭 ' + row.tab.lastKnownTitle} title={'关闭 ' + row.tab.lastKnownTitle} onClick={e => { e.stopPropagation(); void closeTab(row.tab.id) }}><IconCloseOutlineMedium size={12} /></button></div> })}</div>
+        <div ref={strip} className={css.tabs} role="tablist" aria-label="临时内页">{rows.map((row, index) => { const presentation = resolveWorkbenchEditorPresentation(editors.find(e => e.id === row.tab.editorId)); const systemTab = row.tab.id === 'bay-agent-main'; return <div key={row.tab.id} className={css.tab} role="tab" aria-selected={active?.tab.id === row.tab.id} tabIndex={active?.tab.id === row.tab.id ? 0 : -1} title={row.tab.lastKnownTitle} onPointerDown={e => { if (!systemTab) dragTab(e, row) }} onClick={() => { if (suppressClick.current) { suppressClick.current = false; return }; activate(row.tab.id) }} onKeyDown={e => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) { e.preventDefault(); const next = e.key === 'Home' ? 0 : e.key === 'End' ? rows.length - 1 : (index + (e.key === 'ArrowRight' ? 1 : -1) + rows.length) % rows.length; activate(rows[next]!.tab.id); strip.current?.querySelectorAll<HTMLElement>('[role=tab]')[next]?.focus() } if (e.key === 'Delete' && !systemTab) { e.preventDefault(); e.stopPropagation(); void closeTab(row.tab.id) } }}><WorkbenchEditorIcon name={presentation.icon} iconSvg={presentation.iconSvg} /><span>{row.tab.lastKnownTitle}</span>{row.unread ? <i className={css.dot} /> : null}{systemTab ? <i aria-label="Bay Agent 主控页签" title="Bay Agent 主控页签" style={{ fontStyle: 'normal', fontSize: 10, opacity: .7 }}>●</i> : <button type="button" disabled={row.busy} aria-label={'关闭 ' + row.tab.lastKnownTitle} title={'关闭 ' + row.tab.lastKnownTitle} onClick={e => { e.stopPropagation(); void closeTab(row.tab.id) }}><IconCloseOutlineMedium size={12} /></button>}</div> })}</div>
         <button type="button" className={css.add} aria-label="添加临时内页" title="添加内页" onClick={() => setMenu(menu === 'add' ? undefined : 'add')}><IconPlusOutlineMedium size={16} /></button>
         <div className={css.headerActions} role="group" aria-label="浮动工作区窗口操作">
           <button type="button" aria-label="浮动工作区菜单" title="浮动工作区菜单" aria-expanded={menu === 'window'} onClick={() => setMenu(menu === 'window' ? undefined : 'window')}><IconEllipsisOutlineMedium size={16} /></button>
@@ -390,10 +425,10 @@ export function WorkbenchFloatingWorkspace(props: Props) {
       {menu ? <div className={css.menu} role={menu === 'binding' ? 'dialog' : 'menu'} aria-label="浮动工作区操作" data-floating-menu-view={menu}>
         <div className={css.menuHeader}><strong>{menuTitle}</strong><button type="button" className={css.menuClose} aria-label="关闭浮窗菜单" title="关闭菜单" onClick={() => setMenu(undefined)}><IconCloseOutlineMedium size={14} /></button></div>
         {menu === 'add' ? <WorkbenchEditorPicker editors={chooser} mode="add" unavailable={unavailable} onSelect={editor => { setMenu(undefined); open(editor, runtime.focusedWorkbenchId === workbenchId ? runtime.focusedBinding : undefined) }} /> : null}
-        {menu === 'window' ? <><button disabled={!active || active.busy} onClick={() => setMenu('pin')}>放入区域</button><button onClick={() => setMenu('tabs')}>全部临时内页</button><button disabled={!active} onClick={() => setMenu('binding')}>选择来源对话</button><button onClick={() => { runtime.patch(workbenchId, { rect: defaultFloatingRect(size.width, size.height), launcher: { x: size.width - 54, y: size.height - 54 }, maximized: false }, true); setMenu(undefined) }}>重置位置</button></> : null}
+        {menu === 'window' ? <><button disabled={!active || active.busy || active.tab.id === 'bay-agent-main'} onClick={() => setMenu('pin')}>放入区域</button><button onClick={() => setMenu('tabs')}>全部临时内页</button><button disabled={!active || active.tab.id === 'bay-agent-main'} onClick={() => setMenu('binding')}>选择来源对话</button><button onClick={() => { runtime.patch(workbenchId, { rect: defaultFloatingRect(size.width, size.height), launcher: { x: size.width - 54, y: size.height - 54 }, maximized: false }, true); setMenu(undefined) }}>重置位置</button></> : null}
         {menu === 'pin' && active ? groupsOf(props.layout.root).map((group, i) => <div key={group.id}><strong>区域 {i + 1}</strong>{(['center', 'left', 'right', 'top', 'bottom'] as const).map((edge, j) => { const reason = pinReason(active.tab, group.id, edge); return <button key={edge} disabled={active.busy || !!reason} title={reason} onClick={() => void pin(active.tab.id, group.id, edge)}>{['加入标签', '左侧分屏', '右侧分屏', '上方分屏', '下方分屏'][j]}</button> })}</div>) : null}
         {menu === 'tabs' ? rows.map(row => <button key={row.tab.id} onClick={() => { activate(row.tab.id); setMenu(undefined) }}>{row.tab.lastKnownTitle}</button>) : null}
-        {menu === 'binding' && active ? <><p>选择已有对话</p>{Object.values(sessions).filter(row => !archived.includes(row.id)).map(row => <button key={row.id} onClick={() => bind(active.tab.id, row.id)}>{row.displayTitle ?? row.id}</button>)}</> : null}
+        {menu === 'binding' && active && active.tab.id !== 'bay-agent-main' ? <><p>选择已有对话</p>{Object.values(sessions).filter(row => !archived.includes(row.id)).map(row => <button key={row.id} onClick={() => bind(active.tab.id, row.id)}>{row.displayTitle ?? row.id}</button>)}</> : null}
       </div> : null}
       {!space.maximized ? ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'].map(edge => <div key={edge} className={css.resize + ' ' + css[edge]} data-floating-resize={edge} onPointerDown={e => pointerGesture(e, edge)} />) : null}
     </div>

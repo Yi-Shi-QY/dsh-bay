@@ -7,10 +7,12 @@ import { inspectWorkbenchOfflinePackage } from '../offline-package.ts'
 import { WORKBENCH_CORE_VERSION, WORKBENCH_DSH_GENERATION, isWorkbenchCorePackageName } from '../release-compatibility.ts'
 import { CORE_PORTABLE_EDITORS } from '../distribution-contract.ts'
 import { workbenchEditorStateFailureV1 } from '../workbench-editor-state.ts'
+import { areaContextOf } from './workbench-context.ts'
+import { projectPortableWorkbenchContext, renderPortableAreaContextMarkdown, renderPortableWorkbenchContextMarkdown, restorePortableWorkbenchContext, validatePortableWorkbenchContext, type PortableWorkbenchContextV1, type WorkbenchContextExportPolicyV1 } from './workbench-context-portability.ts'
 
 export interface LayoutPackageModuleV3 { editorId: string; scope: 'root' | 'session'; packageName?: string; version?: string; digest?: string }
 export interface PortableLayoutV2 {
-  schemaVersion: 2
+  schemaVersion: 2 | 3
   format: 'dsh-portable-workbench'
   retention: 'all-retained-tabs'
   name: string
@@ -19,13 +21,18 @@ export interface PortableLayoutV2 {
   document: WorkbenchDocumentV3
   modules: LayoutPackageModuleV3[]
   warnings: string[]
+  context?: PortableWorkbenchContextV1
+  modelPreference?: PortableWorkbenchV1['modelPreference']
 }
 export interface LayoutPackageManifestV3 {
   schemaVersion: 3
   format: 'dsh-workbench-package'
   mode: 'layout-only'
-  compatibility: { dsh: string; core: string; portableLayout: 2 }
-  files: { path: 'workbench.json'; size: number; sha256: string }[]
+  compatibility: { dsh: string; core: string; portableLayout: 2 | 3 }
+  files: { path: string; size: number; sha256: string }[]
+  contextPath?: 'context.json'
+  contextPolicy?: WorkbenchContextExportPolicyV1
+  contextDigest?: string
 }
 export interface LayoutPackagePreview { digest: string; layout: PortableLayoutV2; warnings: string[]; legacy: boolean }
 const text = new TextEncoder()
@@ -48,7 +55,11 @@ export function portableStateSafe(value: unknown, depth = 0): value is JsonValue
     && portableStateSafe(child, depth + 1))
 }
 
-export function projectLayoutPackage(record: WorkbenchRecordV2, editors: readonly WorkbenchEditorCatalogRow[]): PortableLayoutV2 {
+export function projectLayoutPackage(
+  record: WorkbenchRecordV2,
+  editors: readonly WorkbenchEditorCatalogRow[],
+  options: { contextPolicy?: WorkbenchContextExportPolicyV1 } = {},
+): PortableLayoutV2 {
   const warnings: string[] = []
   const modules = new Map<string, LayoutPackageModuleV3>()
   let ordinal = 0
@@ -82,13 +93,20 @@ export function projectLayoutPackage(record: WorkbenchRecordV2, editors: readonl
     return { kind: 'area', areaId, moduleHistory, ...(activeModuleInstanceId ? { activeModuleInstanceId } : {}) }
   }
   const root = visit(record.document.root)
-  return { schemaVersion: 2, format: 'dsh-portable-workbench', retention: 'all-retained-tabs', name: record.name, description: record.description,
-    tags: [...record.tags ?? []], document: { version: 3, root, activeAreaId: areaIds.get(record.document.activeAreaId)! }, modules: [...modules.values()], warnings: [...new Set(warnings)] }
+  const contextAreas = Object.fromEntries([...areaIds.entries()].map(([sourceAreaId, packageAreaKey]) => [packageAreaKey, {
+    context: areaContextOf(record.areaContexts?.[sourceAreaId]),
+    ...(record.areaMetadata?.[sourceAreaId]?.ownership === undefined ? {} : { ownership: record.areaMetadata[sourceAreaId].ownership }),
+  }]))
+  const context = projectPortableWorkbenchContext(record.context, contextAreas, options.contextPolicy ?? 'human')
+  return { schemaVersion: context === undefined ? 2 : 3, format: 'dsh-portable-workbench', retention: 'all-retained-tabs', name: record.name, description: record.description,
+    tags: [...record.tags ?? []], document: { version: 3, root, activeAreaId: areaIds.get(record.document.activeAreaId)! }, modules: [...modules.values()], warnings: [...new Set(warnings)],
+    ...(context === undefined ? {} : { context }),
+    ...(record.workbenchAi === undefined ? {} : { modelPreference: record.workbenchAi }) }
 }
 
 export function validatePortableLayout(value: unknown): asserts value is PortableLayoutV2 {
-  if (!record(value) || !keys(value, ['schemaVersion', 'format', 'retention', 'name', 'description', 'tags', 'document', 'modules', 'warnings'])
-    || value.schemaVersion !== 2 || value.format !== 'dsh-portable-workbench' || value.retention !== 'all-retained-tabs'
+  if (!record(value) || !keys(value, ['schemaVersion', 'format', 'retention', 'name', 'description', 'tags', 'document', 'modules', 'warnings', 'context', 'modelPreference'])
+    || ![2, 3].includes(value.schemaVersion as number) || value.format !== 'dsh-portable-workbench' || value.retention !== 'all-retained-tabs'
     || typeof value.name !== 'string' || !value.name.trim() || value.name.length > 160 || typeof value.description !== 'string' || value.description.length > 4000
     || !Array.isArray(value.tags) || value.tags.length > 32 || value.tags.some(tag => typeof tag !== 'string' || tag.length > 64)
     || !Array.isArray(value.warnings) || value.warnings.length > 512 || value.warnings.some(warning => typeof warning !== 'string' || warning.length > 1024)
@@ -122,6 +140,11 @@ export function validatePortableLayout(value: unknown): asserts value is Portabl
     }
     if (node.activeModuleInstanceId !== undefined && !node.moduleHistory.some(page => page.moduleInstanceId === node.activeModuleInstanceId)) throw new Error('当前内页不在区域中。')
   }
+  if (value.context !== undefined) validatePortableWorkbenchContext(value.context)
+  if (value.modelPreference !== undefined && (typeof value.modelPreference !== 'object' || value.modelPreference === null || Array.isArray(value.modelPreference)
+    || Object.keys(value.modelPreference).some(key => !['provider', 'model', 'label', 'reasoningEffort'].includes(key))
+    || Object.values(value.modelPreference).some(item => item !== undefined && (typeof item !== 'string' || item.length > 256)))) throw new Error('模型配置无效。')
+  if ((value.schemaVersion === 2 && value.context !== undefined) || (value.schemaVersion === 3 && value.context === undefined)) throw new Error('布局版本与 Context 不一致。')
   if (!record(value.document) || !keys(value.document, ['version', 'root', 'activeAreaId']) || value.document.version !== 3) throw new Error('布局版本无效。')
   visit(value.document.root, 0)
   if (!validateWorkbenchDocumentV3(value.document)) throw new Error('布局校验失败。')
@@ -130,9 +153,18 @@ export function validatePortableLayout(value: unknown): asserts value is Portabl
 export async function buildLayoutPackage(layout: PortableLayoutV2): Promise<Uint8Array> {
   validatePortableLayout(layout)
   const content = json(layout)
+  const files: { path: string; content: Uint8Array }[] = [{ path: 'workbench.json', content }]
+  const contextBytes = layout.context === undefined ? undefined : json(layout.context)
+  if (layout.context !== undefined && contextBytes !== undefined) {
+    files.push({ path: 'context.json', content: contextBytes })
+    files.push({ path: 'context/工作台整体背景说明.md', content: new TextEncoder().encode(renderPortableWorkbenchContextMarkdown(layout.context)) })
+    for (const areaKey of Object.keys(layout.context.areas).sort()) files.push({ path: `context/areas/${areaKey}-区域说明.md`, content: new TextEncoder().encode(renderPortableAreaContextMarkdown(layout.context, areaKey)) })
+  }
+  const declaredFiles = await Promise.all(files.map(async file => ({ path: file.path, size: file.content.length, sha256: await sha256Hex(file.content) })))
   const manifest: LayoutPackageManifestV3 = { schemaVersion: 3, format: 'dsh-workbench-package', mode: 'layout-only',
-    compatibility: { dsh: WORKBENCH_DSH_GENERATION, core: WORKBENCH_CORE_VERSION, portableLayout: 2 }, files: [{ path: 'workbench.json', size: content.length, sha256: await sha256Hex(content) }] }
-  return encodeDeterministicZip([{ path: 'manifest.json', content: json(manifest) }, { path: 'workbench.json', content }])
+    compatibility: { dsh: WORKBENCH_DSH_GENERATION, core: WORKBENCH_CORE_VERSION, portableLayout: layout.context === undefined ? 2 : 3 }, files: declaredFiles,
+    ...(layout.context === undefined ? {} : { contextPath: 'context.json' as const, contextPolicy: layout.context.policy, contextDigest: await sha256Hex(contextBytes!) }) }
+  return encodeDeterministicZip([{ path: 'manifest.json', content: json(manifest) }, ...files])
 }
 
 /** Older parsers validate their own formats. No embedded plugin payload is executed. */
@@ -147,15 +179,46 @@ export async function inspectLayoutPackage(bytes: Uint8Array): Promise<LayoutPac
     return { digest: preview.digest, layout: preview.layout, warnings: preview.layout.warnings, legacy: false }
   }
   if (manifest.schemaVersion === 3) {
-    if (!keys(manifest, ['schemaVersion', 'format', 'mode', 'compatibility', 'files']) || manifest.format !== 'dsh-workbench-package' || manifest.mode !== 'layout-only'
+    if (!keys(manifest, ['schemaVersion', 'format', 'mode', 'compatibility', 'files', 'contextPath', 'contextPolicy', 'contextDigest']) || manifest.format !== 'dsh-workbench-package' || manifest.mode !== 'layout-only'
       || !record(manifest.compatibility) || !keys(manifest.compatibility, ['dsh', 'core', 'portableLayout']) || manifest.compatibility.dsh !== WORKBENCH_DSH_GENERATION
-      || ![WORKBENCH_CORE_VERSION, '0.2.2-alpha.17.1'].includes(manifest.compatibility.core as string) || manifest.compatibility.portableLayout !== 2) throw new Error('分享协议或 Core／DSH 代际不兼容，需要迁移。')
-    if (entries.length !== 2 || !Array.isArray(manifest.files) || manifest.files.length !== 1) throw new Error('布局分享包包含未声明文件。')
+      || ![WORKBENCH_CORE_VERSION, '0.2.2-alpha.17.1'].includes(manifest.compatibility.core as string) || ![2, 3].includes(manifest.compatibility.portableLayout as number)
+      || (manifest.contextPath !== undefined && manifest.contextPath !== 'context.json')
+      || (manifest.contextPolicy !== undefined && !['human', 'handoff'].includes(String(manifest.contextPolicy)))
+      || (manifest.contextDigest !== undefined && (typeof manifest.contextDigest !== 'string' || !/^[A-Fa-f0-9]{64}$/u.test(manifest.contextDigest)))) throw new Error('Layout package manifest is invalid')
+    if (!Array.isArray(manifest.files) || manifest.files.length < 1) throw new Error('Layout package file list is invalid')
+    const declaredPaths = new Set<string>(['manifest.json'])
+    for (const declared of manifest.files) {
+      if (!record(declared) || !keys(declared, ['path', 'size', 'sha256']) || typeof declared.path !== 'string' || declared.path === 'manifest.json'
+        || declaredPaths.has(declared.path) || !Number.isSafeInteger(declared.size as number) || (declared.size as number) < 0
+        || typeof declared.sha256 !== 'string' || !/^[A-Fa-f0-9]{64,128}$/u.test(declared.sha256)) throw new Error('Layout package file declaration is invalid')
+      declaredPaths.add(declared.path)
+      const payload = entries.find(file => file.path === declared.path)
+      if (!payload || (declared.size as number) !== payload.content.length || declared.sha256 !== await sha256Hex(payload.content)) throw new Error('文件大小或摘要不符。')
+    }
+    if (declaredPaths.size !== entries.length || entries.some(file => !declaredPaths.has(file.path))) throw new Error('Layout package contains undeclared files')
     const file = entries.find(file => file.path === 'workbench.json')
-    const declared = manifest.files[0]
-    if (!file || !record(declared) || !keys(declared, ['path', 'size', 'sha256']) || declared.path !== file.path || declared.size !== file.content.length || declared.sha256 !== await sha256Hex(file.content)) throw new Error('文件大小或摘要不符。')
+    if (!file) throw new Error('workbench.json is missing')
     const layout = parse(file.content)
     validatePortableLayout(layout)
+    if (manifest.compatibility.portableLayout === 2) {
+      if (entries.length !== 2 || manifest.files.length !== 1 || layout.context !== undefined || manifest.contextPath !== undefined || manifest.contextPolicy !== undefined || manifest.contextDigest !== undefined) throw new Error('Legacy layout package cannot contain Context')
+    } else {
+      if (entries.length < 4 || layout.context === undefined || manifest.contextPath !== 'context.json' || manifest.contextPolicy !== layout.context.policy || manifest.contextDigest === undefined) throw new Error('Context file set is incomplete')
+      const contextFile = entries.find(entry => entry.path === 'context.json')
+      if (!contextFile) throw new Error('context.json is missing')
+      const context = parse(contextFile.content)
+      validatePortableWorkbenchContext(context)
+      if (canonicalJson(context) !== canonicalJson(layout.context)) throw new Error('context.json does not match workbench.json')
+      if (manifest.contextDigest !== await sha256Hex(contextFile.content)) throw new Error('context.json digest mismatch')
+      const workbenchMarkdown = entries.find(entry => entry.path === 'context/工作台整体背景说明.md')
+      if (!workbenchMarkdown || new TextDecoder('utf-8', { fatal: true }).decode(workbenchMarkdown.content) !== renderPortableWorkbenchContextMarkdown(context)) throw new Error('Workbench Context Markdown is missing or stale')
+      for (const areaKey of Object.keys(context.areas)) {
+        const areaMarkdown = entries.find(entry => entry.path === 'context/areas/' + areaKey + '-区域说明.md')
+        if (!areaMarkdown || new TextDecoder('utf-8', { fatal: true }).decode(areaMarkdown.content) !== renderPortableAreaContextMarkdown(context, areaKey)) throw new Error('Area Context Markdown is missing or stale: ' + areaKey)
+      }
+      const expectedPaths = new Set(['manifest.json', 'workbench.json', 'context.json', 'context/工作台整体背景说明.md', ...Object.keys(context.areas).map(areaKey => `context/areas/${areaKey}-区域说明.md`)] )
+      if (entries.length !== expectedPaths.size || entries.some(entry => !expectedPaths.has(entry.path))) throw new Error('Context package contains undeclared files')
+    }
     return { digest, layout, warnings: layout.warnings, legacy: false }
   }
   let document: WorkbenchDocumentV3
@@ -178,7 +241,13 @@ export async function inspectLayoutPackage(bytes: Uint8Array): Promise<LayoutPac
   return { digest, layout: sanitized, warnings: sanitized.warnings, legacy: true }
 }
 
-export function restoreLayoutPackage(layout: PortableLayoutV2, editors: readonly WorkbenchEditorCatalogRow[], bindings: Readonly<Record<string, SessionBindingV1>> = {}, strict = false, verifiedOnly = false): { document: WorkbenchDocumentV3; warnings: string[]; pendingPageIds: string[] } {
+export function restoreLayoutPackage(layout: PortableLayoutV2, editors: readonly WorkbenchEditorCatalogRow[], bindings: Readonly<Record<string, SessionBindingV1>> = {}, strict = false, verifiedOnly = false): {
+  document: WorkbenchDocumentV3
+  warnings: string[]
+  pendingPageIds: string[]
+  modelPreference?: PortableWorkbenchV1['modelPreference']
+  context?: ReturnType<typeof restorePortableWorkbenchContext>
+} {
   validatePortableLayout(layout)
   const warnings: string[] = []
   const document = structuredClone(layout.document)
@@ -228,5 +297,5 @@ export function restoreLayoutPackage(layout: PortableLayoutV2, editors: readonly
   visit(document.root)
   document.activeAreaId = areaIds.get(layout.document.activeAreaId)!
   if (!validateWorkbenchDocumentV3(document)) throw new Error('恢复后的布局无效。')
-  return { document, warnings, pendingPageIds }
+  return { document, warnings, pendingPageIds, ...(layout.modelPreference === undefined ? {} : { modelPreference: structuredClone(layout.modelPreference) }), ...(layout.context === undefined ? {} : { context: restorePortableWorkbenchContext(layout.context, areaIds) }) }
 }

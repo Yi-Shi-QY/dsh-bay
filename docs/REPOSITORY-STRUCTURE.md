@@ -2,16 +2,18 @@
 
 This repository follows the useful conventions seen in active DSH plugin
 repositories: a bilingual README, a small root package manifest, a single
-plugin package, `cordis.patch.yml`, tests, docs, provenance and a release
-manifest. The repository deliberately keeps the runtime package small and
-does not include the launcher or a second plugin marketplace.
+plugin package, `dsh.bundle.patch.yml`, tests, docs, provenance and one
+current release manifest. The repository deliberately keeps the runtime
+package small and does not include the launcher or a second plugin marketplace.
 
 The ecosystem choices behind this shape are recorded in
 [ECOSYSTEM-REFERENCE.md](ECOSYSTEM-REFERENCE.md). The repository identity change
 from the original private candidate is recorded in
 [REPOSITORY-RENAME.md](REPOSITORY-RENAME.md). The repository is private
 staging for now, but its identity, install boundary and validation record are
-already explicit enough to support a later catalog submission.
+already explicit enough to support a later catalog submission. Historical
+candidate folders and obsolete compatibility snapshots are kept in Git history
+rather than in the current release tree.
 
 ## Runtime package
 
@@ -26,6 +28,11 @@ The Sidebar/Workspace source index records the DSH rc1 commit and source digest.
 The private repository provenance file records that this checkout was derived
 from the merged Workbench candidate. It is not a claim that every future
 DSH Bay feature has already been validated in a clean rc1 desktop.
+
+The current tree contains only the rc1 compatibility manifest, rc1 source
+mirror, current candidate record and active build/test entry points. Generated
+`node_modules`, `lib`, `tmp` and `output` content is ignored and is never part
+of the published package.
 
 ## Product layers
 

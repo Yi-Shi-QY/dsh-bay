@@ -13,12 +13,25 @@ import { settingsFixture } from './settings-fixtures.ts'
 import { WORKBENCH_CORE_VERSION } from '../src/release-compatibility.ts'
 import {areasOf} from '../src/foundation/document-v3.ts'
 import { workbenchExtensionContractFingerprint } from '../src/workbench-extension-access.ts'
+import { createAreaContext, createWorkbenchContext } from '../src/foundation/workbench-context.ts'
 
 const template=join(import.meta.dirname,'../presets/workbench-creator/skills/workbench-extension-development/templates/workbench-editor')
 const layout=()=>{const r=structuredClone(settingsFixture().workbenches.a!);if(r.document.root.kind!=='area')throw new Error('fixture');r.document.root.moduleHistory=[];delete r.document.root.activeModuleInstanceId;return projectLayoutPackage(r,[])}
 async function signer(){const pair=generateKeyPairSync('ed25519');const publicKey=pair.publicKey.export({format:'der',type:'spki'}).subarray(-32).toString('base64');return{publisher:{displayName:'测试房主',publicKey,keyId:await publisherKeyIdV4(publicKey)},sign:async(bytes:Uint8Array)=>sign(null,bytes,pair.privateKey).toString('base64')}}
 
 describe('17.2 signed package contract',()=>{
+  it('carries Workbench and Area Context through V4 package files and rejects stale projections',async()=>{
+    const record=structuredClone(settingsFixture().workbenches.a!)
+    const workbenchContext=createWorkbenchContext();workbenchContext.human.goal='V4 工作台目标';record.context=workbenchContext
+    const areaContext=createAreaContext();areaContext.human.objective='V4 区域目标';record.areaContexts={'area-a':areaContext}
+    const projected=projectLayoutPackage(record,[])
+    const bytes=await buildWorkbenchPackageV4({layout:projected,mode:'layout-only'})
+    const preview=await inspectWorkbenchPackageV4(bytes)
+    expect(preview.manifest.compatibility.portableLayout).toBe(3)
+    expect(preview.files.map(file=>file.path)).toEqual(expect.arrayContaining(['context.json','context/工作台整体背景说明.md','context/areas/area-1-区域说明.md']))
+    const files=decodeDeterministicZip(bytes).map(file=>file.path==='context/工作台整体背景说明.md'?{...file,content:new TextEncoder().encode('stale')}:file)
+    await expect(inspectWorkbenchPackageV4(encodeDeterministicZip(files))).rejects.toThrow()
+  })
   it('round trips three modes and keeps the layout payload',async()=>{
     for(const mode of ['layout-only','online-reference','offline-embedded'] as const){
       const bytes=await buildWorkbenchPackageV4({layout:layout(),mode,...mode==='layout-only'?{}:await signer()})
@@ -255,16 +268,19 @@ describe('Host distribution transaction boundaries',()=>{
       const service=createHostDistributionService({profile:{name:'test',dir,cwd:dir,home:dir,installAnchor:join(dir,'package.json')} as any,
         native:{listBundles:async()=>[],listPlugins:async()=>[],setBundleEnabled:async()=>({application:'applied'})},resolve:()=>undefined,peerAvailable:()=>false,
         settings:{describe:()=>[{ns:'workbench-layout',value,revision}],mutate:async(_ns:any,ops:any[],expected:any)=>{expect(expected).toBe(revision);value=ops[0].value;revision++;writes++}} as any})
-      const bytes=await buildWorkbenchPackageV4({layout:layout(),mode:'layout-only'})
+      const source=structuredClone(settingsFixture().workbenches.a!);if(source.document.root.kind!=='area')throw Error('fixture');source.document.root.moduleHistory=[];delete source.document.root.activeModuleInstanceId;const context=createWorkbenchContext();context.human.goal='Host 导入目标';source.context=context
+      const contextLayout=projectLayoutPackage(source,[])
+      const bytes=await buildWorkbenchPackageV4({layout:contextLayout,mode:'layout-only'})
       const first=await service.inspect(bytes)
       expect(writes).toBe(0)
       await expect(service.resume(first.transactionId)).rejects.toThrow('先确认')
       await expect(service.consent(first.transactionId,'0'.repeat(64))).rejects.toThrow('不一致')
       const approved=await service.consent(first.transactionId,first.archiveSha256)
       expect(approved.state).toBe('awaiting-restore');expect(writes).toBe(0)
-      const result=await service.complete(first.transactionId,layout().document,{})
+      const result=await service.complete(first.transactionId,contextLayout.document,{})
       expect(result.state).toBe('ready');expect(value.openWorkbenchIds).toEqual([]);expect(writes).toBe(1)
-      await service.complete(first.transactionId,layout().document,{})
+      expect(value.workbenches[first.workbenchId].context.human.goal).toBe('Host 导入目标')
+      await service.complete(first.transactionId,contextLayout.document,{})
       expect(writes).toBe(1)
       expect((await service.history())[0]?.state).toBe('ready')
     }finally{await rm(dir,{recursive:true,force:true})}

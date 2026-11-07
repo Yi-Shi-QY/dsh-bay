@@ -1,6 +1,13 @@
 node_modules/
 lib/
 .tmp-*/
+tmp/
+output/
+prototypes/
+releases/*-private/
+!releases/alpha17.5-rc1-private/
+!releases/alpha17.5-rc1-private/**
+docs/RELEASE-READINESS-*.md
 .turbo/
 *.tsbuildinfo
 *.tgz

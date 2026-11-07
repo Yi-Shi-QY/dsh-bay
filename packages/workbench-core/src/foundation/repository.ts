@@ -4,7 +4,11 @@ import {
   areasOf, normalizeWorkbenchDocument, type AreaNode, type ModuleInstanceDocument,
   type WorkbenchDocumentV3, type WorkbenchNodeV3,
 } from './document-v3.ts'
-import type { WorkbenchRecordV2, WorkbenchSettingsV4 } from './persistence.ts'
+import type { WorkbenchAreaMetadataV1, WorkbenchRecordV2, WorkbenchSettingsV4 } from './persistence.ts'
+import {
+  areaContextOf, patchAreaContext, patchWorkbenchContext, workbenchContextOf,
+  type AreaContextV1, type ContextPatchOptions, type ContextPatchResult, type WorkbenchContextV1,
+} from './workbench-context.ts'
 
 /** Runtime-only ownership token for one asynchronous Area placement. */
 export interface AreaClaimV1 {
@@ -72,6 +76,65 @@ export class WorkbenchRepository {
    */
   getWorkbench(workbenchId: string): WorkbenchRecordV2 | undefined {
     return this.settings.workbenches[workbenchId]
+  }
+
+  /** Read a Workbench Context without exposing the mutable Settings object. */
+  getWorkbenchContext(workbenchId: string): WorkbenchContextV1 | undefined {
+    const record = this.settings.workbenches[workbenchId]
+    return record === undefined ? undefined : workbenchContextOf(record.context)
+  }
+
+  /** Read one Area Context, returning a safe default for legacy Areas. */
+  getAreaContext(workbenchId: string, areaId: string): AreaContextV1 | undefined {
+    const record = this.settings.workbenches[workbenchId]
+    if (record === undefined || !areasOf(record.document.root).some(area => area.areaId === areaId)) return undefined
+    return areaContextOf(record.areaContexts?.[areaId])
+  }
+
+  /** Apply a checked Workbench Context patch to the page-local repository. */
+  patchWorkbenchContext(
+    workbenchId: string,
+    options: ContextPatchOptions<'human'> | ContextPatchOptions<'agent'>,
+  ): ContextPatchResult<WorkbenchContextV1> {
+    const record = this.settings.workbenches[workbenchId]
+    if (record === undefined) return { status: 'rejected', reason: 'patch-invalid' }
+    const source = workbenchContextOf(record.context)
+    const result = options.section === 'human'
+      ? patchWorkbenchContext(source, options)
+      : patchWorkbenchContext(source, options)
+    if (result.status !== 'committed') return result
+    this.replaceRecord(workbenchId, { ...record, context: result.context })
+    return result
+  }
+
+  /** Apply a checked Area Context patch to the page-local repository. */
+  patchAreaContext(
+    workbenchId: string,
+    areaId: string,
+    options: ContextPatchOptions<'human'> | ContextPatchOptions<'agent'>,
+  ): ContextPatchResult<AreaContextV1> {
+    const record = this.settings.workbenches[workbenchId]
+    if (record === undefined || !areasOf(record.document.root).some(area => area.areaId === areaId)) {
+      return { status: 'rejected', reason: 'patch-invalid' }
+    }
+    const current = areaContextOf(record.areaContexts?.[areaId])
+    const result = options.section === 'human'
+      ? patchAreaContext(current, options)
+      : patchAreaContext(current, options)
+    if (result.status !== 'committed') return result
+    this.replaceRecord(workbenchId, {
+      ...record,
+      areaContexts: { ...(record.areaContexts ?? {}), [areaId]: result.context },
+    })
+    return result
+  }
+
+  /** Persist Area ownership metadata in the page-local repository. */
+  setAreaMetadata(workbenchId: string, areaId: string, metadata: WorkbenchAreaMetadataV1): boolean {
+    const record = this.settings.workbenches[workbenchId]
+    if (record === undefined || !areasOf(record.document.root).some(area => area.areaId === areaId)) return false
+    this.replaceRecord(workbenchId, { ...record, areaMetadata: { ...(record.areaMetadata ?? {}), [areaId]: structuredClone(metadata) } })
+    return true
   }
 
   /**
@@ -371,15 +434,16 @@ export class WorkbenchRepository {
     if (workbench === undefined) return false
     const normalized = normalizeWorkbenchDocument(document)
     if (invalidateChangedAreas) this.reconcileAreaGenerations(workbenchId, workbench.document, normalized)
-    const updated: WorkbenchRecordV2 = {
-      ...workbench, document: normalized, updatedAt: Date.now(),
-    }
+    this.replaceRecord(workbenchId, { ...workbench, document: normalized })
+    return true
+  }
+
+  private replaceRecord(workbenchId: string, record: WorkbenchRecordV2): void {
     this.settings = {
       ...this.settings,
-      workbenches: { ...this.settings.workbenches, [workbenchId]: updated },
+      workbenches: { ...this.settings.workbenches, [workbenchId]: { ...record, updatedAt: Date.now() } },
     }
     this.publish()
-    return true
   }
 
   private validateClaim(claim: AreaClaimV1): StalePlacementReason | undefined {

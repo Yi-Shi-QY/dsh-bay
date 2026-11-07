@@ -87,7 +87,7 @@ export function createDistributionPackageService(options:{client:DistributionCli
       consents[`${d.packageName}::${d.moduleId}`]={packageName:d.packageName,moduleId:d.moduleId,apiVersion:1,editorIds:d.editorScopes.map(e=>e.editorId),contractFingerprint:access.contractFingerprint,allowedAt:Date.now(),allowed:true}
     }
     const restored=restoreLayoutPackage(row.layout,row.mode==='layout-only'?await catalog():editors,bindings,row.mode!=='layout-only',true)
-    return options.client.complete(row.transactionId,restored.document,consents,restored.pendingPageIds)
+    return options.client.complete(row.transactionId,restored.document,consents,restored.pendingPageIds,restored.context)
   }
   return {
     async prepareExport(id:string,mode:WorkbenchPackageModeV4,prepareArtifacts=false){

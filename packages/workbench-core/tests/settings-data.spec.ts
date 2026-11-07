@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { buildWorkbenchInventory } from '../src/foundation/workbench-inventory.ts'
 import { decodeWorkbenchSettingsV4, type WorkbenchSettingsV4 } from '../src/foundation/persistence.ts'
 import { createProjectNeutralFrameSettings } from '../src/foundation/frame-settings-adapter.ts'
+import { WorkbenchControlPlane } from '../src/foundation/workbench-control-plane.ts'
 import { scopeSettingsSnapshot, settingsTargetWritable } from '../src/foundation/settings-context.ts'
 import { createWorkbenchSettingsScope, type SettingsScopeSnapshot, type SettingsScopePathOperation } from '../src/client/workbench-settings-contracts.ts'
 import type { WorkbenchDocumentV3 } from '../src/foundation/document-v3.ts'
@@ -86,5 +87,25 @@ describe('settings data scope and persistence', () => {
     const scope = createWorkbenchSettingsScope({ ...source, mutate: async (ops: readonly any[], expectedRevision?: number) => (await source.patch({ operation: 'set', path: ops[0].path, value: ops[0].value, expectedRevision })).status === 'committed' } as never, {} as never, () => {})
     await Promise.all(['file', 'browser'].map(key => scope.patch({ operation: 'set', path: ['interactionPolicy', 'conversationResources', key], value: { enabled: true, placement: 'new-tab' } })))
     expect(source.getSnapshot().value?.interactionPolicy?.conversationResources).toMatchObject({ file: { placement: 'new-tab' }, browser: { placement: 'new-tab' } })
+  })
+  it('routes human background edits through the Control Plane Context CAS seam', async () => {
+    const { source } = mutableSettings()
+    const controlPlane = new WorkbenchControlPlane({ settings: source })
+    const { directory } = createProjectNeutralFrameSettings(source, {
+      contextPatch: async input => {
+        const result = await controlPlane.context.patch({
+          scope: input.scope,
+          workbenchId: input.workbenchId,
+          ...(input.areaId === undefined ? {} : { areaId: input.areaId }),
+          writer: 'human', section: 'human', expectedRevision: input.expectedRevision, patch: input.patch,
+        })
+        if (result.status === 'committed') return { status: 'committed', revision: result.settingsRevision }
+        if (result.status === 'conflict') return { status: 'conflict', expectedRevision: input.expectedRevision, actualRevision: result.currentSettingsRevision }
+        return { status: 'unavailable' }
+      },
+    })
+    expect(await directory.updateWorkbenchBackground?.('a', '新的工作台目标')).toMatchObject({ status: 'committed' })
+    expect(source.getSnapshot().value?.workbenches.a?.context?.human.goal).toBe('新的工作台目标')
+    expect(source.getSnapshot().value?.workbenches.a?.context?.revision).toBe(1)
   })
 })

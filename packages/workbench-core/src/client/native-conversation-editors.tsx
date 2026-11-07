@@ -492,11 +492,15 @@ export function createWorkbenchNativeConversationEditors(ctx: Context) {
     // including settling while history is opening and continuable subagent
     // parent availability is still being resolved.
     const presentation = conversationPresentationOf(owner.sessionId, session as SessionSnapshot, conversation, summaryBlank)
+    // Main already belongs to its Workbench. The native new-conversation hero
+    // asks for a Workspace and can replace the Session, so use its persistent
+    // chat presentation even before the first message. Workers keep the hero.
+    const hero = presentation.hero && owner.instanceId !== 'bay-agent-main'
     const { SessionProvider, renderFactorySlot } = owner
     const content = nativeRenderer === undefined
-      ? renderFactorySlot('conversation.content', { variant: 'embedded', phase: presentation.phase, hero: presentation.hero },
+      ? renderFactorySlot('conversation.content', { variant: 'embedded', phase: presentation.phase, hero },
         view === 'trajectory' ? { slots: { views: TrajectoryView } } : undefined)
-      : nativeRenderer.renderFactory('conversation.content', { variant: 'embedded', phase: presentation.phase, hero: presentation.hero },
+      : nativeRenderer.renderFactory('conversation.content', { variant: 'embedded', phase: presentation.phase, hero },
         (view === 'trajectory' ? { slots: { views: TrajectoryView } } : undefined) as never)
     // `conversation.content` is the DSH transcript/composer body. The native
     // page owner normally renders `conversation.header` beside it;
@@ -517,36 +521,36 @@ export function createWorkbenchNativeConversationEditors(ctx: Context) {
   function Bound({ owner: suppliedOwner, view }: { owner: NativeOwner; view: 'chat' | 'trajectory' }) {
     const owner = suppliedOwner.runtimeIdentity ? { ...suppliedOwner, areaId: suppliedOwner.runtimeIdentity, areaClaim: suppliedOwner.runtimeIdentity + ':' + (suppliedOwner.bindingGeneration ?? 0) } : suppliedOwner
     const [reference, setReference] = useState<SessionReference>()
-    const [error, setError] = useState(false)
+    const [error, setError] = useState('')
+    const [retry, setRetry] = useState(0)
     const leaseLifetime = useRef<{ lease: ReturnType<typeof retainWorkbenchArea>; token: number }>()
     useEffect(() => {
       setReference(undefined)
-      setError(false)
+      setError('')
       if (!owner.sessionId || !owner.areaId || !owner.areaClaim) {
-        setError(true)
+        setError('缺少对话标识或容器归属。')
         return
       }
       let live = true
       let lease: ReturnType<typeof retainWorkbenchArea>
       try {
         lease = retainWorkbenchArea(ctx.sessions, { sessionId: owner.sessionId as SessionId, areaId: owner.areaId, claim: owner.areaClaim })
-      } catch {
-        setError(true)
+      } catch (reason) {
+        setError(reason instanceof Error ? reason.message : String(reason))
         return
       }
       const token = (leaseLifetime.current?.token ?? 0) + 1
       leaseLifetime.current = { lease, token }
-      void lease.ready.then(value => { if (live) setReference(value) }, () => { if (live) setError(true) })
+      void lease.ready.then(value => { if (live) setReference(value) }, reason => { if (live) setError(reason instanceof Error ? reason.message : String(reason)) })
       return () => {
         live = false
         queueMicrotask(() => {
           const current = leaseLifetime.current
-          if (current?.lease !== lease || current.token !== token) return
           lease.release()
-          leaseLifetime.current = undefined
+          if (current?.lease === lease && current.token === token) leaseLifetime.current = undefined
         })
       }
-    }, [owner.sessionId, owner.areaId, owner.areaClaim])
+    }, [owner.sessionId, owner.areaId, owner.areaClaim, retry])
     const openConversationResourceRef = useRef(owner.openConversationResource)
     openConversationResourceRef.current = owner.openConversationResource
     const onOpenResource = useCallback((address: string, placement?: Record<string, unknown>, source?: Parameters<NonNullable<NativeOwner['openConversationResource']>>[2]) =>
@@ -576,7 +580,7 @@ export function createWorkbenchNativeConversationEditors(ctx: Context) {
         readInspectCallId,
       }), [ctx, onInspectCall, owner.areaId, owner.instanceId, onOpenResource, owner.sessionId, reference])
     useNativeRendererLifetime(nativeRenderer)
-    if (error) return <p role="alert">当前对话绑定已失效，请在此容器重新选择对话。</p>
+    if (error) return <div role="alert"><p>暂时无法连接此对话：{error}</p><button type="button" onClick={() => setRetry(value => value + 1)}>重新连接对话</button></div>
     if (!reference) return <p role="status">正在连接 DSH 原生对话…</p>
     return <Content owner={owner} reference={reference} view={view} nativeRenderer={nativeRenderer} />
   }

@@ -6,7 +6,8 @@ import { WorkbenchEditorIcon as EditorIcon } from './WorkbenchEditorIcon.tsx'
 import { resolveWorkbenchEditorPresentation, type WorkbenchEditorCatalogRow } from './catalog.ts'
 import { buildWorkbenchInventory } from './workbench-inventory.ts'
 import { areasOf, type WorkbenchNodeV3 } from './document-v3.ts'
-import type { WorkbenchRecordV2, WorkbenchSettingsV4 } from './persistence.ts'
+import type { WorkbenchRecordV2, WorkbenchSettingsV4, WorkbenchAiSelectionV1 } from './persistence.ts'
+import type { ModelCatalog } from '@deepseek-ai/dsh-api-session-controller'
 import { normalizeWorkbenchTags } from './persistence.ts'
 import { DESKTOP_SETTINGS_CONTEXT, settingsTargetWritable, type SettingsViewMemory, type WorkbenchSettingsOpenOptionsV1 } from './settings-context.ts'
 import { WORKBENCH_CORE_VERSION, WORKBENCH_DSH_GENERATION } from '../release-compatibility.ts'
@@ -141,6 +142,14 @@ function WorkbenchDetails(props: SettingsPageProps & { record: WorkbenchRecordV2
   const dirty = name.trim() !== record.name || description.trim() !== record.description
     || JSON.stringify(normalizedTags) !== JSON.stringify(record.tags ?? [])
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [modelCatalog, setModelCatalog] = useState<ModelCatalog>()
+  const [aiSelection, setAiSelection] = useState<WorkbenchAiSelectionV1 | undefined>(record.workbenchAi)
+  const [aiDirty, setAiDirty] = useState(false)
+  useEffect(() => {
+    if (props.loadModelCatalog === undefined) return
+    void props.loadModelCatalog().then(setModelCatalog).catch(() => {})
+  }, [props.loadModelCatalog])
+  useEffect(() => { setAiSelection(record.workbenchAi); setAiDirty(false) }, [record.workbenchAi])
   const save = useCallback(async () => {
     if (!directory) return false
     return action.run('metadata', () => directory.updateMetadata(record.workbenchId, { name, description, tags: tags.split(/[,，]/u).map(tag => tag.trim()).filter(Boolean) }))
@@ -150,6 +159,12 @@ function WorkbenchDetails(props: SettingsPageProps & { record: WorkbenchRecordV2
   const discardRef = useRef(discard); discardRef.current = discard
   useEffect(() => { props.onDirty(dirty ? { save: () => saveRef.current(), discard: () => discardRef.current() } : undefined); return () => props.onDirty(undefined) }, [dirty, props.onDirty])
   const mutate = (key: string, fn: () => Promise<unknown>) => void action.run(key, fn)
+  const saveAi = () => mutate('ai-model', async () => {
+    if (!directory?.updateWorkbenchAi) throw new Error('当前环境不支持保存 Workbench AI 配置。')
+    const result = await directory.updateWorkbenchAi(record.workbenchId, aiSelection)
+    if (result.status === 'committed') setAiDirty(false)
+    return result
+  })
   const openIds = props.value?.openWorkbenchIds ?? []
   const statusLabel = !writable ? '浏览器运行中' : record.archivedAt !== undefined ? '已归档' : openIds.includes(record.workbenchId) ? '已打开' : '未打开'
   return <div className={css.detail}>
@@ -179,7 +194,16 @@ function WorkbenchDetails(props: SettingsPageProps & { record: WorkbenchRecordV2
       <button className={css.secondaryButton} disabled={!writable || !directory} onClick={() => mutate('archive', () => record.archivedAt ? directory!.restore(record.workbenchId) : directory!.archive(record.workbenchId))}>{record.archivedAt ? '恢复工作台' : '归档工作台'}</button>
       {['pin', 'unload', 'archive'].map(key => <span key={key}>{action.feedback(key)}</span>)}
     </div> : null}</section>
-    <section className={css.previewSection}><div className={css.sectionHeader}><div><h4>布局预览</h4><p>显示每个区域的分屏比例和当前内页。</p></div><span className={css.sectionCount}>{inventory.areas.length} 个区域</span></div><div className={css.largePreview}><LayoutDiagram node={record.document.root} editors={props.editors} /></div><div className={css.previewSummary}><span>{inventory.pageCount} 个保留内页</span><span>{inventory.missingPageCount ? `${inventory.missingPageCount} 个内页不可用` : '全部内页已就绪'}</span></div></section>
+    <section className={css.metadataSection}><div className={css.sectionHeader}><div><h4>AI 与 Bay Agent</h4><p>背景草稿和 Bay Agent 共用这个 Workbench 的 DSH 原生模型配置。只保存供应商、模型和思考强度，不保存凭据。</p></div></div>
+      <div className={css.form}>
+        <label>模型供应商<select value={aiSelection?.provider ?? ''} disabled={!writable || !props.loadModelCatalog} onChange={event => { const provider = event.target.value; const group = modelCatalog?.groups.find(row => row.id === provider); const model = group?.models[0]; setAiSelection(provider === '' || model === undefined ? undefined : { provider, model: model.id, ...(model.reasoning?.defaultEffort === undefined ? {} : { reasoningEffort: model.reasoning.defaultEffort }) }); setAiDirty(true) }}><option value="">跟随 DSH 默认</option>{modelCatalog?.groups.map(group => <option key={group.id} value={group.id}>{group.name}</option>)}</select></label>
+        <label>模型<select value={aiSelection?.model ?? ''} disabled={!aiSelection || !modelCatalog} onChange={event => { const model = modelCatalog?.groups.find(group => group.id === aiSelection?.provider)?.models.find(row => row.id === event.target.value); if (model && aiSelection) { setAiSelection({ ...aiSelection, model: model.id, ...(model.reasoning?.defaultEffort === undefined ? {} : { reasoningEffort: model.reasoning.defaultEffort }) }); setAiDirty(true) } }}><option value="">请选择模型</option>{modelCatalog?.groups.find(group => group.id === aiSelection?.provider)?.models.map(model => <option key={model.id} value={model.id}>{model.name}</option>)}</select></label>
+        <label>思考强度<select value={aiSelection?.reasoningEffort ?? ''} disabled={!aiSelection || !modelCatalog} onChange={event => { if (aiSelection) { const value = event.target.value; setAiSelection(value === '' ? { provider: aiSelection.provider, model: aiSelection.model } : { ...aiSelection, reasoningEffort: value }); setAiDirty(true) } }}><option value="">模型默认</option>{modelCatalog?.groups.find(group => group.id === aiSelection?.provider)?.models.find(model => model.id === aiSelection?.model)?.reasoning?.efforts.map(effort => <option key={effort.id} value={effort.id}>{effort.name}</option>)}</select></label>
+        <div className={css.stickyActions}><button disabled={!aiDirty || action.states['ai-model']?.busy || !directory?.updateWorkbenchAi} onClick={saveAi}>保存 AI 配置</button>{action.feedback('ai-model')}</div>
+        {modelCatalog?.failures.length ? <p className={css.notice}>部分供应商暂时无法读取：{modelCatalog.failures.map(row => `${row.name}: ${row.message}`).join('；')}</p> : null}
+      </div>
+    </section>
+     <section className={css.previewSection}><div className={css.sectionHeader}><div><h4>布局预览</h4><p>显示每个区域的分屏比例和当前内页。</p></div><span className={css.sectionCount}>{inventory.areas.length} 个区域</span></div><div className={css.largePreview}><LayoutDiagram node={record.document.root} editors={props.editors} /></div><div className={css.previewSummary}><span>{inventory.pageCount} 个保留内页</span><span>{inventory.missingPageCount ? `${inventory.missingPageCount} 个内页不可用` : '全部内页已就绪'}</span></div></section>
     <section className={css.pagesSection}><div className={css.sectionHeader}><div><h4>区域与内页</h4><p>保留的标签和当前内页会随工作台一起保存。</p></div><span className={css.sectionCount}>{inventory.pageCount} 个内页</span></div>{inventory.areas.map(area => <div key={area.areaId} className={css.group}><div className={css.groupHeader}><h5>区域 {area.ordinal}</h5><span>{area.pages.length} 个内页</span></div>{area.pages.map((page, index) => {
       const editor = props.editors.find(editor => editor.id === page.editorId && editor.scope === page.editorScope)
       return <div className={css.row} key={page.moduleInstanceId}><PageIcon editor={editor ?? { id: page.editorId, scope: page.editorScope, label: page.name }} /><div><strong>{index + 1}. {page.name}{page.active ? ' · 当前' : ''}</strong><p><BindingRequirement editor={editor} /> · {page.available ? '就绪' : '未安装、未允许或无法核实，布局引用已保留'}</p><small>{page.editorId}</small></div></div>

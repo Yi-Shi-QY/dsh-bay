@@ -88,7 +88,7 @@ function useWorkbenchDesktopGeometry(): WorkbenchDesktopGeometryV1 {
 export type WorkbenchCoreInnerPageInjection =
   Pick<WorkbenchFrameProps,
     'settings' | 'editorCatalog' | 'extensionRegistry' | 'sidebarCompatibility' | 'workbenchDirectory' | 'runtimeMetrics' | 'floatingRuntime'
-     | 'connectWorkspace' | 'createWorkspaceSession' | 'createWorkspace' | 'pickDirectory' | 'openOfficialSession' | 'windowController' | 'browserView' | 'browserWorkbenchId' | 'requestBrowserReclaim' | 'toolGateway' | 'shareController'>
+     | 'connectWorkspace' | 'createWorkspaceSession' | 'createWorkspace' | 'pickDirectory' | 'openOfficialSession' | 'windowController' | 'browserView' | 'browserWorkbenchId' | 'requestBrowserReclaim' | 'toolGateway' | 'shareController' | 'bayAgent' | 'generateContextDraft'>
   & {
     modeController: WorkbenchModeControllerV1
     extensionRegistry?: import('../client/workbench-extension-registry.ts').WorkbenchExtensionRegistryV1

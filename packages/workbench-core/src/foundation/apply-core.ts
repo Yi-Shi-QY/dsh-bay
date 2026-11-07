@@ -33,7 +33,7 @@ import { createAreaSessionCreator } from '../client/session-placement.ts'
 import { createWorkbenchSettingsScope, type SettingsScope } from '../client/workbench-settings-contracts.ts'
 import type { WorkbenchEditorCatalog, WorkbenchEditorCatalogRow } from './catalog.ts'
 import { decodeWorkbenchSettingsV4, type WorkbenchSettingsV4 } from './persistence.ts'
-import { createProjectNeutralFrameSettings } from './frame-settings-adapter.ts'
+import { createProjectNeutralFrameSettings, type WorkbenchDirectoryContextPatch } from './frame-settings-adapter.ts'
 import type { SidebarCompatibilityProbe } from './WorkbenchFrame.tsx'
 import { WorkbenchCoreSettingsSection } from './WorkbenchCoreSettingsSection.tsx'
 import { WorkbenchCoreInnerPage, type WorkbenchCoreInnerPageInjection } from './WorkbenchCoreInnerPage.tsx'
@@ -53,6 +53,7 @@ import {
   createWorkbenchCreatorInspectProvider,
   type WorkbenchCreatorInspectRegistryLike,
 } from '../client/workbench-creator-inspect.ts'
+import { WorkbenchControlPlane, WORKBENCH_CONTROL_PLANE_SERVICE_NAME } from './workbench-control-plane.ts'
 import { createWorkbenchRuntimeMetrics, type WorkbenchRuntimeMetricsSnapshotV1 } from './workbench-runtime-metrics.ts'
 import type { WorkbenchConversationInteractionPolicyV1 } from '../workbench-interaction-policy.ts'
 import {
@@ -68,6 +69,10 @@ import { createWorkbenchToolGatewayManager, type WorkbenchToolGatewayManagerV1 }
 import type { WorkbenchToolUsageServiceV1 } from '../tool-usage.ts'
 import { createWorkbenchShareController } from '../client/workbench-share-controller.ts'
 import { isWorkbenchShareGuestPage } from '../client/workbench-share-guest.ts'
+import { createRemoteBayAgentController } from '../client/bay-agent-controller.ts'
+import type { BayAgentControllerV1 } from './workbench-bay-agent-work.ts'
+import { BAY_AGENT_DRAFT_ROUTE } from '../bay-agent-contract.ts'
+import { createRemoteWorkbenchAiDraftGenerator } from './workbench-ai.ts'
 
 export const inject = [
   'connection', 'slots', 'layout', 'sessions', 'workspaces', 'uiWorkspace', 'uiSession', 'configForms', 'modules', 'locale', 'conversation',
@@ -137,7 +142,7 @@ export function applyWorkbenchCoreFoundation(
   modeController: WorkbenchModeControllerV1 = createWorkbenchModeController(),
   moduleManager?: WorkbenchModuleManagerV1,
   runtime?: WorkbenchCoreRuntimeV1,
-): { flush: () => Promise<boolean>; runtimeMetrics: { getSnapshot(): WorkbenchRuntimeMetricsSnapshotV1 }; floatingRuntime: ReturnType<typeof createFloatingWorkspaceRuntime> } {
+): { flush: () => Promise<boolean>; runtimeMetrics: { getSnapshot(): WorkbenchRuntimeMetricsSnapshotV1 }; floatingRuntime: ReturnType<typeof createFloatingWorkspaceRuntime>; bayAgent?: BayAgentControllerV1 } {
   const runtimeMetrics = createWorkbenchRuntimeMetrics()
   const floatingRuntime = createFloatingWorkspaceRuntime()
   if (!isWorkbenchShareGuestPage()) ctx.effect(() => installNativeAutomaticIsolation(ctx, modeController), 'workbench: automatic review isolation')
@@ -291,8 +296,17 @@ export function applyWorkbenchCoreFoundation(
       && (!binding.workspaceId || workspaces.items.some(row => row.workspaceId === binding.workspaceId && row.sessionIds.includes(binding.sessionId as never)))
   }
   if (!shareGuest) ctx.effect(() => connectFloatingUiPreferences(floatingRuntime, windowView !== undefined), 'workbench: floating UI preferences')
+  let contextPatch: WorkbenchDirectoryContextPatch | undefined
   const { settings: frameSettings, directory } = createProjectNeutralFrameSettings(settings,
-    windowView === undefined ? { isBrowserOwned: id => !settingsTargetWritable(DESKTOP_SETTINGS_CONTEXT, id, windowController) } : { workbenchId: windowView.workbenchId })
+    windowView === undefined
+      ? {
+        isBrowserOwned: id => !settingsTargetWritable(DESKTOP_SETTINGS_CONTEXT, id, windowController),
+        contextPatch: input => contextPatch === undefined ? Promise.resolve({ status: 'unavailable' as const }) : contextPatch(input),
+      }
+      : {
+        workbenchId: windowView.workbenchId,
+        contextPatch: input => contextPatch === undefined ? Promise.resolve({ status: 'unavailable' as const }) : contextPatch(input),
+      })
   for (const operation of ['archive', 'remove'] as const) {
     const original = directory[operation].bind(directory)
     directory[operation] = async id => {
@@ -358,6 +372,83 @@ export function applyWorkbenchCoreFoundation(
     sessions: ctx.sessions,
     workspaces: ctx.workspaces,
   })
+  let controlPlane: WorkbenchControlPlane
+  let suppliedControlPlane: unknown
+  try {
+    suppliedControlPlane = (ctx as unknown as { get(name: string, strict?: boolean): unknown })
+      .get(WORKBENCH_CONTROL_PLANE_SERVICE_NAME, false)
+  } catch { /* The first Core instance owns the local Control Plane service. */ }
+  if (suppliedControlPlane !== undefined) {
+    controlPlane = suppliedControlPlane as WorkbenchControlPlane
+  } else {
+    controlPlane = new WorkbenchControlPlane({
+      settings: {
+        getSnapshot: settings.getSnapshot,
+        patch: async operation => {
+          const result = await settings.patch(operation)
+          if (result.status === 'committed') return { status: 'committed' as const, revision: result.revision }
+          if (result.status === 'conflict') return {
+            status: 'conflict' as const,
+            ...(result.actualRevision === undefined ? {} : { actualRevision: result.actualRevision }),
+          }
+          return { status: 'unavailable' as const }
+        },
+      },
+      editors: editorCatalog,
+      createSession: async input => {
+        if (input.workspaceId === undefined) throw new Error('Control Plane Session creation requires a Workspace')
+        const sessionId = await ctx.sessions.create({
+          workspaceId: input.workspaceId as WorkspaceId,
+          ...(input.agentPreset === undefined ? {} : { agentPreset: input.agentPreset }),
+        })
+        return { target: { workspaceId: input.workspaceId, sessionId }, reusedBlank: false }
+      },
+    })
+    ;(ctx as unknown as { provide?: (name: string, value: unknown) => unknown }).provide?.(WORKBENCH_CONTROL_PLANE_SERVICE_NAME, controlPlane)
+  }
+  const bayAgent = createRemoteBayAgentController(windowView?.workbenchId ?? settings.getSnapshot().value?.activeWorkbenchId ?? 'main', fetch, () => ctx.sessions.refresh())
+  const aiDraftGenerator = createRemoteWorkbenchAiDraftGenerator({
+    route: BAY_AGENT_DRAFT_ROUTE,
+    fetcher: fetch,
+    getSelection: workbenchId => settings.getSnapshot().value?.workbenches[workbenchId]?.workbenchAi,
+  })
+  ;(ctx as unknown as { provide?: (name: string, value: unknown) => unknown }).provide?.('bayAgentController', bayAgent)
+  ctx.effect(() => {
+    const sync = () => {
+      const workbenchId = windowView?.workbenchId ?? settings.getSnapshot().value?.activeWorkbenchId
+      if (workbenchId === undefined || !settings.getSnapshot().value?.workbenches[workbenchId] || isWorkbenchShareGuestPage()) return
+      bayAgent.setWorkbenchId(workbenchId)
+    }
+    const off = settings.subscribe(sync)
+    sync()
+    return off
+  }, 'workbench: persistent bay-agent main session')
+  ctx.effect(() => () => bayAgent.dispose(), 'workbench: bay-agent controller')
+  contextPatch = async input => {
+    const result = await controlPlane.context.patch({
+      scope: input.scope,
+      workbenchId: input.workbenchId,
+      ...(input.areaId === undefined ? {} : { areaId: input.areaId }),
+      writer: 'human',
+      section: 'human',
+      expectedRevision: input.expectedRevision,
+      patch: input.patch,
+    })
+    if (result.status === 'committed') return { status: 'committed', revision: result.settingsRevision }
+    if (result.status === 'conflict') return {
+      status: 'conflict' as const,
+      expectedRevision: input.expectedRevision,
+      actualRevision: result.currentSettingsRevision,
+    }
+    if (result.status === 'unavailable') return { status: 'unavailable' as const }
+    if (result.reason === 'workbench-not-found' || result.reason === 'area-not-found') {
+      return { status: 'rejected' as const, reason: 'not-found' as const }
+    }
+    if (result.reason === 'workbench-archived' || result.reason === 'area-archived') {
+      return { status: 'rejected' as const, reason: 'archived' as const }
+    }
+    return { status: 'unavailable' as const }
+  }
   let inspectRegistry: WorkbenchCreatorInspectRegistryLike | undefined
   try {
     inspectRegistry = (ctx as unknown as { get(name: string): unknown }).get('cordisInspect') as WorkbenchCreatorInspectRegistryLike | undefined
@@ -397,6 +488,7 @@ export function applyWorkbenchCoreFoundation(
     }),
     ...(windowView === undefined ? { sessionList: ctx.sessions.list, workspaceList: ctx.workspaces.list } : {}),
     workbenchDirectory: directory,
+     loadModelCatalog: async (): Promise<import('@deepseek-ai/dsh-api-session-controller').ModelCatalog> => unwrapRemoteResult<import('@deepseek-ai/dsh-api-session-controller').ModelCatalog>(await ctx.remote.session.modelCatalog(), 'model catalog'),
     ...(windowView === undefined ? { extensionRegistry } : {}),
     updateInteractionPolicy: async (policy: WorkbenchConversationInteractionPolicyV1) => {
       if (windowView !== undefined) return false
@@ -439,6 +531,8 @@ export function applyWorkbenchCoreFoundation(
     },
     inject: (): WorkbenchCoreInnerPageInjection => ({
       modeController,
+      bayAgent,
+      generateContextDraft: aiDraftGenerator.generateContextDraft,
       floatingRuntime,
       toolGateway,
       ...(suppliedToolUsageService === undefined ? {} : { toolUsageService: suppliedToolUsageService }),
@@ -505,6 +599,7 @@ export function applyWorkbenchCoreFoundation(
   }, WorkbenchCoreSettingsSection))
   return {
     floatingRuntime,
+    bayAgent,
     flush: () => directory.flushBeforeLifecycleTransition!(),
     runtimeMetrics: Object.freeze({ getSnapshot: runtimeMetrics.getSnapshot }),
   }

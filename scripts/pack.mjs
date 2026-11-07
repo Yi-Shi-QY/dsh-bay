@@ -9,7 +9,9 @@ const core = path.join(project, 'packages', 'workbench-core')
 const manifest = JSON.parse(readFileSync(path.join(core, 'package.json'), 'utf8'))
 const prerelease = manifest.version.split('-')[1]?.replace(/^alpha\./u, 'alpha') ?? manifest.version
 const trialSuffix = manifest.dsh?.workbench?.dshGeneration === '0.2.2-rc.1' ? '-rc1' : ''
-const output = path.join(project, 'releases', `${prerelease}${trialSuffix}-private`)
+const outputArgument = process.argv.find(arg => arg.startsWith('--output='))?.slice('--output='.length)
+const output = outputArgument ? path.resolve(project, outputArgument) : path.join(project, 'releases', `${prerelease}${trialSuffix}-private`)
+if (!output.startsWith(path.join(project, 'releases') + path.sep)) throw new Error('Package output must be a directory inside releases/')
 const tarball = `${manifest.name.replace(/^@/u, '').replaceAll('/', '-')}-${manifest.version}.tgz`
 mkdirSync(output, { recursive: true })
 // TypeScript's incremental build does not remove declarations emitted by a

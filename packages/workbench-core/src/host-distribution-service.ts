@@ -14,6 +14,7 @@ import {workbenchEditorStateFailureV1} from './workbench-editor-state.ts'
 import type {WorkbenchEditorDeclarationV1} from './module-contract.ts'
 import { areasOf, validateWorkbenchDocumentV3, type WorkbenchDocumentV3, type ModuleInstanceDocument } from './foundation/document-v3.ts'
 import { canonicalJson } from './foundation/workbench-sharing.ts'
+import { restorePortableWorkbenchContext } from './foundation/workbench-context-portability.ts'
 import { createDistributionInstaller, DistributionInstallError, type DistributionNativeManager } from './host-distribution-installer.ts'
 import { atomicDistributionJson, artifactHash, prepareDistributionArtifact, inspectDistributionArtifact, readRuntimeFiles, runtimeDigest } from './host-distribution-artifacts.ts'
 import { CORE_PORTABLE_EDITORS, type DistributionImportStatus } from './distribution-contract.ts'
@@ -302,7 +303,7 @@ export function createHostDistributionService(options: HostDistributionOptions) 
       }); return resume(id)
     },
     async cancel(id:string){aborts.get(id)?.abort();await inFlight.get(id);return serialized(id,async()=>{const row=await load(id);if(finished.has(row.state)||await reconcileCommit(row))return publicRow(row);try{await reconcile(row);await rollback(row)}catch(e){row.state='recovery-required';row.blockers=[(e as Error).message];await save(row)}return publicRow(row)})},
-    complete(id:string,document:WorkbenchDocumentV3,consents:Record<string,WorkbenchExtensionConsentV1>,pendingPageIds:string[]=[]){return serialized(id,async()=>{
+    complete(id:string,document:WorkbenchDocumentV3,consents:Record<string,WorkbenchExtensionConsentV1>,pendingPageIds:string[]=[],_context?:import('./foundation/workbench-context-portability.ts').RestoredPortableWorkbenchContextV1){return serialized(id,async()=>{
       const row=await load(id);if(row.state==='ready'||row.state==='needs-input')return publicRow(row)
       if(await reconcileCommit(row))return publicRow(row)
       if(row.state!=='awaiting-restore'||row.consentDigest!==approvedDigest(row))throw new Error('请先完成安装和运行验证。')
@@ -351,7 +352,17 @@ export function createHostDistributionService(options: HostDistributionOptions) 
       if(existing&&existing.offlineOrigin?.archiveSha256!==row.archiveSha256)throw new Error('导入目标工作台已被其他操作占用。')
       if(!existing){
         let name=preview.layout.name;for(let n=2;Object.values(value?.workbenches??{}).some(w=>w.name===name);n++)name=`${preview.layout.name.slice(0,145)} ${n}`
-        const record={workbenchId:row.workbenchId,name,description:preview.layout.description,tags:preview.layout.tags,document,createdAt:row.createdAt,updatedAt:Date.now(),offlineOrigin:{schemaVersion:1 as const,packageId:row.archiveSha256,archiveSha256:row.archiveSha256}}
+        const sourceAreas=areasOf(preview.layout.document.root), targetAreas=areasOf(document.root)
+        const areaIds=new Map(sourceAreas.map((area,index)=>[area.areaId,targetAreas[index]?.areaId]).filter((entry):entry is [string,string] => entry[1] !== undefined))
+        const restoredContext=preview.layout.context === undefined ? undefined : restorePortableWorkbenchContext(preview.layout.context,areaIds)
+        const record={workbenchId:row.workbenchId,name,description:preview.layout.description,tags:preview.layout.tags,document,
+          ...(preview.layout.modelPreference?.provider === undefined || preview.layout.modelPreference.model === undefined ? {} : { workbenchAi: {
+            provider: preview.layout.modelPreference.provider,
+            model: preview.layout.modelPreference.model,
+            ...(preview.layout.modelPreference.reasoningEffort === undefined ? {} : { reasoningEffort: preview.layout.modelPreference.reasoningEffort }),
+          } }),
+          ...(restoredContext === undefined ? {} : { context: restoredContext.context, areaContexts: restoredContext.areaContexts, areaMetadata: restoredContext.areaMetadata }),
+          createdAt:row.createdAt,updatedAt:Date.now(),offlineOrigin:{schemaVersion:1 as const,packageId:row.archiveSha256,archiveSha256:row.archiveSha256}}
         const packageOrigin={packageId:preview.manifest.packageId,version:preview.manifest.version,archiveSha256:row.archiveSha256,completeness:row.mode==='layout-only'?'layout-only' as const:row.mode==='offline-embedded'?'complete-offline' as const:'complete-online' as const,dependencies:row.dependencies.map(d=>({portableId:d.moduleId,version:d.version,digest:d.digest,kind:'static' as const,sourcePolicy:'binary-only' as const,exportPolicy:d.exportPolicy,editorIds:d.editorScopes.map(e=>e.editorId),editorScopes:d.editorScopes,permissions:d.permissions,requiredBy:[],packageName:d.packageName,...d.registryUrl?{registryUrl:d.registryUrl}:{},integrity:d.integrity}))}
         const next:WorkbenchSettingsV4={...value??{version:4,activeWorkbenchId:row.workbenchId,openWorkbenchIds:[],layoutTemplates:{},invalidWorkbenches:{},sessionMarkers:{}},workbenches:{...value?.workbenches,[row.workbenchId]:{...record,packageOrigin}},extensionConsents:{...value?.extensionConsents,...consents}}
         // Persist target mapping before CAS; retries can reconcile a committed document.

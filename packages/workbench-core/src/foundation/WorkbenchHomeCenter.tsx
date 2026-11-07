@@ -22,6 +22,7 @@ export type WorkbenchHomeCenterProps = WorkbenchCoreSettingsPage & Pick<Workbenc
   onCreated(workbenchId: string): void
   registerNavigation?: (navigate: HomeNavigation) => (() => void)
   registerBeforeLeave?: (guard: () => Promise<boolean>) => (() => void)
+  generateContextDraft?: import('./workbench-ai.ts').WorkbenchAiDraftGeneratorV1['generateContextDraft']
 }
 
 /** Desktop root: management and distribution live here, outside Settings. */
@@ -78,7 +79,7 @@ export function WorkbenchHomeCenter(props: WorkbenchHomeCenterProps) {
           : props.distributionPackage ? <WorkbenchDistributionPage key={destination?.shareMode + ':' + destination?.workbenchId} {...pageProps} distributionPackage={props.distributionPackage} />
             : <WorkbenchLayoutSharingPage key={destination?.shareMode + ':' + destination?.workbenchId} {...pageProps} />}
       </div>
-    </main> : <WorkbenchHome directory={props.directory} editors={editors} navigate={navigate} {...(props.windowController ? { windowController: props.windowController } : {})} onOpenWorkbench={openWorkbench} onCreated={props.onCreated} />}
+    </main> : <WorkbenchHome directory={props.directory} editors={editors} navigate={navigate} {...(props.windowController ? { windowController: props.windowController } : {})} onOpenWorkbench={openWorkbench} onCreated={props.onCreated} {...(props.generateContextDraft === undefined ? {} : { generateContextDraft: props.generateContextDraft })} />}
     {pending && form.current ? <div className={pageCss.settingsRoot} style={{ height: 0, minHeight: 0 }}><UnsavedFormPrompt form={form.current} onContinue={() => finish(false)} onLeave={() => finish(true)} /></div> : null}
   </div>
 }

@@ -21,6 +21,13 @@
     "src/foundation/workbench-package-v4.ts",
     "src/foundation/workbench-sharing.ts",
     "src/foundation/workbench-portability.ts",
+    "src/foundation/workbench-context.ts",
+    "src/foundation/workbench-context-portability.ts",
+    "src/foundation/workbench-control-plane.ts",
+    "src/foundation/workbench-bay-agent-adapter.ts",
+    "src/foundation/workbench-bay-agent-work.ts",
+    "src/foundation/workbench-superagent-adapter.ts",
+    "src/foundation/workbench-ai.ts",
     "src/foundation/workbench-package-trust.ts"
   ],
   "exclude": [

@@ -58,6 +58,8 @@ const result = await build({
   define: {
     '__WORKBENCH_BUILD_ID__': JSON.stringify(buildId),
     'process.env.NODE_ENV': '"production"',
+    'process.env.DSH_CLIENT_VERSION': JSON.stringify(WORKBENCH_DSH_GENERATION),
+    'process.env.DSH_CLIENT_GIT_DIRTY': '"false"',
     'process.env.DSH_CLIENT_COMMIT_HASH': JSON.stringify(WORKBENCH_UPSTREAM_COMMIT),
     '__WORKBENCH_XTERM_CSS__': JSON.stringify(readFileSync(path.join(project, 'node_modules/@xterm/xterm/css/xterm.css'), 'utf8')),
   },
@@ -72,6 +74,7 @@ const result = await build({
 
 const js = result.outputFiles.find(file => file.path.endsWith('.js'))?.text
 if (js === undefined) throw new Error('Client bundle did not produce JavaScript')
+if (/\bprocess\.env\.DSH_CLIENT_/u.test(js)) throw new Error('Browser bundle retains unresolved DSH build metadata')
 const css = result.outputFiles.find(file => file.path.endsWith('.css'))?.text ?? ''
 const imports = [...new Set(Object.values(result.metafile.outputs).flatMap(output => output.imports.filter(item => item.external).map(item => item.path)))].sort()
 if (imports.includes('@deepseek-ai/dsh-api-workspace-controller/default-workspace')) {

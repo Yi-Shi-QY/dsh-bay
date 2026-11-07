@@ -62,6 +62,16 @@ export function createWorkbenchLayoutPackageService(options: {
         let name = preview.layout.name
         for (let index = 2; occupied.has(name); index++) name = `${preview.layout.name.slice(0, 145)} ${index}`
         const imported = { workbenchId: receipt.workbenchId, name, description: preview.layout.description, tags: preview.layout.tags, document: restored.document,
+          ...(restored.modelPreference?.provider === undefined || restored.modelPreference.model === undefined ? {} : { workbenchAi: {
+            provider: restored.modelPreference.provider,
+            model: restored.modelPreference.model,
+            ...(restored.modelPreference.reasoningEffort === undefined ? {} : { reasoningEffort: restored.modelPreference.reasoningEffort }),
+          } }),
+          ...(restored.context === undefined ? {} : {
+            context: restored.context.context,
+            areaContexts: restored.context.areaContexts,
+            areaMetadata: restored.context.areaMetadata,
+          }),
           createdAt: receipt.createdAt, updatedAt: receipt.createdAt, offlineOrigin: { schemaVersion: 1, packageId: preview.digest, archiveSha256: preview.digest } }
         const result = await options.settings.patch({ operation: 'set', path: value ? ['workbenches', receipt.workbenchId] : [],
           value: value ? imported : { version: 4, activeWorkbenchId: receipt.workbenchId, openWorkbenchIds: [], workbenches: { [receipt.workbenchId]: imported }, layoutTemplates: {}, invalidWorkbenches: {}, sessionMarkers: {} },

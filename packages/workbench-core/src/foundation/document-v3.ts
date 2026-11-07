@@ -539,9 +539,12 @@ export function validateWorkbenchDocumentV3(value: unknown, options: { allowDeta
       if (candidate.areaBinding !== undefined && !isSessionBinding(candidate.areaBinding)) return undefined
       const sessionModules = moduleHistory.filter(module => module.editorScope === 'session'
         || (module.editorId === 'workbench.conversation.start' && module.binding !== undefined))
-      const areaBinding = candidate.areaBinding === undefined ? sessionModules[0]?.binding : candidate.areaBinding
-      if (areaBinding !== undefined && !sessionModules.every(module => module.binding?.sessionId === areaBinding.sessionId
-        && module.binding?.workspaceId === areaBinding.workspaceId)) return undefined
+      const inferred = candidate.areaBinding ?? sessionModules[0]?.binding
+      const matches = inferred === undefined || sessionModules.every(module => module.binding?.sessionId === inferred.sessionId && module.binding?.workspaceId === inferred.workspaceId)
+      // Explicit shared binding remains strict. Without it each module may own
+      // a separate conversation, as normalization and the V2 model already allow.
+      if (candidate.areaBinding !== undefined && !matches) return undefined
+      const areaBinding = matches ? inferred : undefined
       if (candidate.areaBindingGeneration !== undefined && (typeof candidate.areaBindingGeneration !== 'number'
         || !Number.isSafeInteger(candidate.areaBindingGeneration) || candidate.areaBindingGeneration < 0)) return undefined
       return {

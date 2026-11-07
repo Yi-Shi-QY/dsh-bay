@@ -189,6 +189,7 @@ export type WorkbenchActivationResultV1 =
 
 export interface WorkbenchPackageExportOptionsV1 {
   distributionMode?: 'online-reference' | 'offline-embedded'
+  contextPolicy?: import('./workbench-context-portability.ts').WorkbenchContextExportPolicyV1
 }
 
 export type WorkbenchPackageExportResultV1 =
@@ -1434,6 +1435,11 @@ function createLegacyWorkbenchPackageService(
           statePolicy: 'sanitized',
           dependencySnapshot,
           sessions: projectWorkbenchSessionsAndAgentPresetsForSharing(record.document, options.sessionTemplateResolver).sessions,
+          ...(record.context === undefined ? {} : { workbenchContext: record.context }),
+          ...(record.workbenchAi === undefined ? {} : { modelPreference: record.workbenchAi }),
+          ...(record.areaContexts === undefined ? {} : { areaContexts: record.areaContexts }),
+          ...(record.areaMetadata === undefined ? {} : { areaMetadata: record.areaMetadata }),
+          contextPolicy: exportOptions.contextPolicy ?? 'human',
           ...(options.sessionTemplateResolver === undefined ? {} : { sessionTemplateResolver: options.sessionTemplateResolver }),
           artifacts: distributionMode === 'offline-embedded'
             ? [...(options.artifacts ?? []), ...runtimeArtifacts(), ...storedArtifacts(), ...preparedExportArtifacts.values()]

@@ -3,7 +3,7 @@ import { migrateOuterShellEditors, validateLayout } from './model.ts'
 import type { WorkbenchDocumentV3 } from './document-v3.ts'
 import {
   normalizeWorkbenchDocument, migrateDocumentV2ToV3, removeRetiredWorkbenchEditors,
-  validateWorkbenchDocumentV3,
+  validateWorkbenchDocumentV3, areasOf,
 } from './document-v3.ts'
 import {
   DEFAULT_WORKBENCH_CONVERSATION_INTERACTION_POLICY,
@@ -13,9 +13,24 @@ import {
 import type { WorkbenchExtensionConsentV1 } from '../workbench-extension-access.ts'
 import type { WorkbenchToolUsageAggregateV1 } from '../tool-usage.ts'
 import type { WorkbenchToolGatewayUsageAggregateV1 } from '../tool-gateway-usage.ts'
+import { decodeAreaContexts, decodeWorkbenchContext, type AreaContextV1, type WorkbenchContextV1 } from './workbench-context.ts'
 
 /** Settings key for a Workspace-scoped or ungrouped layout. */
 export type WorkspaceAccountKey = `workspace:${string}` | 'ungrouped'
+
+/** Which actor is allowed to manage one Area through the Control Plane. */
+/** `superagent-managed` remains readable for packages/settings written by the
+ * early alpha. New records use the Bay Agent-owned spelling. */
+export type WorkbenchAreaOwnershipV1 = 'user-owned' | 'bay-agent-managed' | 'superagent-managed' | 'shared' | 'archived'
+
+/** Durable metadata for one Area. The visual document remains layout-only. */
+export interface WorkbenchAreaMetadataV1 {
+  label: string
+  ownership: WorkbenchAreaOwnershipV1
+  createdAt: number
+  updatedAt: number
+  archivedAt?: number
+}
 
 /** Persisted Workbench Settings namespace. */
 export interface WorkbenchSettings {
@@ -76,11 +91,24 @@ export interface WorkbenchExternalBindingRecordV1 {
   reference: string
 }
 
+/** Workbench-scoped DSH model route shared by Bay Agent and AI assistance. */
+export interface WorkbenchAiSelectionV1 {
+  provider: string
+  model: string
+  reasoningEffort?: string
+}
+
 /** One named, project-neutral visual Workbench. */
 export interface WorkbenchRecordV2 {
   workbenchId: string
   name: string
   description: string
+  /** Human and Bay Agent context; absent on pre-Control-Plane records. */
+  context?: WorkbenchContextV1
+  /** Area context keyed by the stable Area id in `document`. */
+  areaContexts?: Record<string, AreaContextV1>
+  /** Area ownership and display metadata keyed by the stable Area id. */
+  areaMetadata?: Record<string, WorkbenchAreaMetadataV1>
   /** User-defined discovery labels; persisted as a bounded, de-duplicated list. */
   tags?: string[]
   document: WorkbenchDocumentV3
@@ -94,6 +122,15 @@ export interface WorkbenchRecordV2 {
   packageOrigin?: WorkbenchPackageOriginV1
   offlineOrigin?: { schemaVersion: 1; packageId: string; archiveSha256: string }
   externalBindings?: Record<string, WorkbenchExternalBindingRecordV1>
+  /** Portable model route preference; credentials never belong here. */
+  workbenchAi?: WorkbenchAiSelectionV1
+  /** Stable Workbench-owned Bay Agent Main Session identity. */
+  bayAgentSession?: {
+    sessionId: string
+    workspaceId?: string
+    createdAt: number
+    updatedAt: number
+  }
   pinnedAt?: number
   archivedAt?: number
 }
@@ -475,18 +512,42 @@ function decodeSettingsV4(value: unknown): WorkbenchSettingsV4 | undefined {
       invalidWorkbenches[key] = retainedInvalid(key, raw)
       continue
     }
+    const bayAgentSession = raw.bayAgentSession === undefined ? undefined : decodeBayAgentSession(raw.bayAgentSession)
+    if (raw.bayAgentSession !== undefined && bayAgentSession === undefined) {
+      invalidWorkbenches[key] = retainedInvalid(key, raw)
+      continue
+    }
+    const workbenchAi = raw.workbenchAi === undefined ? undefined : decodeWorkbenchAi(raw.workbenchAi)
+    if (raw.workbenchAi !== undefined && workbenchAi === undefined) {
+      invalidWorkbenches[key] = retainedInvalid(key, raw)
+      continue
+    }
+    const context = raw.context === undefined ? undefined : decodeWorkbenchContext(raw.context)
+    const areaIds = areasOf(normalizeWorkbenchDocument(document).root).map(area => area.areaId)
+    const areaContexts = raw.areaContexts === undefined ? undefined : decodeAreaContexts(raw.areaContexts, areaIds)
+    const areaMetadata = raw.areaMetadata === undefined ? undefined : decodeAreaMetadata(raw.areaMetadata, areaIds)
+    if ((raw.context !== undefined && context === undefined) || (raw.areaContexts !== undefined && areaContexts === undefined)
+      || (raw.areaMetadata !== undefined && areaMetadata === undefined)) {
+      invalidWorkbenches[key] = retainedInvalid(key, raw)
+      continue
+    }
     const retiredCleaned = removeRetiredWorkbenchEditors(document)
     const normalized = normalizeWorkbenchDocument(retiredCleaned)
     if (retiredCleaned !== document || normalized !== retiredCleaned) migrationRequired = true
     workbenches[key] = {
       workbenchId: key, name: raw.name, description: raw.description,
       document: normalized, createdAt: raw.createdAt, updatedAt: raw.updatedAt,
+      ...(context === undefined ? {} : { context }),
+      ...(areaContexts === undefined || Object.keys(areaContexts).length === 0 ? {} : { areaContexts }),
+      ...(areaMetadata === undefined || Object.keys(areaMetadata).length === 0 ? {} : { areaMetadata }),
       ...(hiddenEditorIds.length === 0 ? {} : { hiddenEditorIds }),
       ...(raw.layoutLocked === true ? { layoutLocked: true } : {}),
       ...(tags.length === 0 ? {} : { tags }),
       ...(packageOrigin === undefined ? {} : { packageOrigin }),
       ...(offlineOrigin === undefined ? {} : { offlineOrigin: { schemaVersion: 1, packageId: offlineOrigin.packageId as string, archiveSha256: offlineOrigin.archiveSha256 as string } }),
       ...(externalBindings === undefined ? {} : { externalBindings }),
+      ...(bayAgentSession === undefined ? {} : { bayAgentSession }),
+      ...(workbenchAi === undefined ? {} : { workbenchAi }),
       ...(raw.pinnedAt === undefined ? {} : { pinnedAt: raw.pinnedAt }),
       ...(raw.archivedAt === undefined ? {} : { archivedAt: raw.archivedAt }),
     }
@@ -552,6 +613,30 @@ function decodeSettingsV4(value: unknown): WorkbenchSettingsV4 | undefined {
     ...(Object.keys(toolUsageAggregates).length === 0 ? {} : { toolUsageAggregates }),
     ...(Object.keys(toolGatewayUsageAggregates).length === 0 ? {} : { toolGatewayUsageAggregates }),
     ...(migrateLegacyVisibility || migrationRequired ? { migrationRequired: true } : {}) }
+}
+
+function decodeBayAgentSession(value: unknown): WorkbenchRecordV2['bayAgentSession'] | undefined {
+  if (!isRecord(value) || typeof value.sessionId !== 'string' || value.sessionId.trim() === ''
+    || (value.workspaceId !== undefined && typeof value.workspaceId !== 'string')
+    || typeof value.createdAt !== 'number' || !Number.isFinite(value.createdAt)
+    || typeof value.updatedAt !== 'number' || !Number.isFinite(value.updatedAt)) return undefined
+  return {
+    sessionId: value.sessionId,
+    ...(value.workspaceId === undefined ? {} : { workspaceId: value.workspaceId }),
+    createdAt: value.createdAt,
+    updatedAt: value.updatedAt,
+  }
+}
+
+function decodeWorkbenchAi(value: unknown): WorkbenchAiSelectionV1 | undefined {
+  if (!isRecord(value) || typeof value.provider !== 'string' || value.provider.trim() === ''
+    || typeof value.model !== 'string' || value.model.trim() === ''
+    || (value.reasoningEffort !== undefined && (typeof value.reasoningEffort !== 'string' || value.reasoningEffort.trim() === ''))) return undefined
+  return {
+    provider: value.provider.trim().slice(0, 256),
+    model: value.model.trim().slice(0, 256),
+    ...(value.reasoningEffort === undefined ? {} : { reasoningEffort: value.reasoningEffort.trim().slice(0, 128) }),
+  }
 }
 
 function decodeToolGatewayPolicies(value: unknown): WorkbenchSettingsV4['toolGatewayPolicies'] | undefined {
@@ -663,6 +748,31 @@ export function decodeWorkbenchHiddenEditorIds(value: unknown): string[] | undef
   if (!Array.isArray(value) || value.length > 128
     || !value.every((id): id is string => typeof id === 'string' && /^[a-zA-Z0-9._:-]{1,128}$/u.test(id))) return undefined
   return [...new Set(value)].sort()
+}
+
+function decodeAreaMetadata(
+  value: unknown,
+  areaIds: readonly string[],
+): Record<string, WorkbenchAreaMetadataV1> | undefined {
+  if (!isRecord(value)) return undefined
+  const known = new Set(areaIds)
+  const result: Record<string, WorkbenchAreaMetadataV1> = {}
+  for (const [areaId, raw] of Object.entries(value)) {
+    if (!known.has(areaId) || !isRecord(raw)
+      || typeof raw.label !== 'string' || raw.label.trim().length > 160
+      || !['user-owned', 'bay-agent-managed', 'superagent-managed', 'shared', 'archived'].includes(raw.ownership as string)
+      || typeof raw.createdAt !== 'number' || !Number.isFinite(raw.createdAt)
+      || typeof raw.updatedAt !== 'number' || !Number.isFinite(raw.updatedAt)
+      || (raw.archivedAt !== undefined && (typeof raw.archivedAt !== 'number' || !Number.isFinite(raw.archivedAt)))) return undefined
+    result[areaId] = {
+      label: raw.label.trim().normalize('NFKC'),
+      ownership: raw.ownership as WorkbenchAreaMetadataV1['ownership'],
+      createdAt: raw.createdAt,
+      updatedAt: raw.updatedAt,
+      ...(raw.archivedAt === undefined ? {} : { archivedAt: raw.archivedAt }),
+    }
+  }
+  return result
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

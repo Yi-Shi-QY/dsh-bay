@@ -1,4 +1,4 @@
-{
+﻿{
   "schemaVersion": 1,
   "candidateId": "dsh-bay-0.2.2-alpha.17.5-dsh-0.2.2-rc.1",
   "product": "DSH Bay / 湾域",
@@ -35,7 +35,7 @@
     "conversationMigration": "deferred"
   },
   "digests": {
-    "lockfile": "c13619ee21412537a484b46ee6cfd86b8045e01414c64fa10d5cf2cf6bec5727",
+    "lockfile": "ee94ed20de35198b93c3cd9f1e68aeebd1265c13517e6cf57cb5b7a5fc0a66df",
     "patch": "8becd2d0305576e49b0181e6ee9ecba22ce3bb2ab4d59522a9d39893dc2befe1"
   },
   "validation": {
@@ -46,8 +46,8 @@
     "distributionAcceptance": {
       "status": "passed-private-archive-only",
       "path": "releases/alpha17.5-rc1-private/dsh-bay-0.2.2-alpha.17.5.tgz",
-      "sha256": "61d13a16bb197e5979856b0fd65cb4c87a8b1f823686cd01e92946f9509f40af",
-      "archiveFiles": 255,
+      "sha256": "69eda957cfceb8a27711300bbaa7f96edce1d839501dfcd988297ea60dc8f9a3",
+      "archiveFiles": 257,
       "manifestVersionMatched": true,
       "buildInputsMatched": true,
       "rc1DependencyClosureMatched": true,

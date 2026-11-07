@@ -6,6 +6,7 @@ import { WorkbenchEmptyArea } from './WorkbenchEmptyArea.tsx'
 import { WorkbenchEditorPicker } from './WorkbenchEditorPicker.tsx'
 import type { WorkbenchEditorSvgIconV1 } from './workbench-editor-icons.ts'
 import { WorkbenchCreateDialog } from './WorkbenchCreateDialog.tsx'
+import { WorkbenchContextDialog } from './WorkbenchContextDialog.tsx'
 import { WorkbenchCreateMenu } from './WorkbenchCreateMenu.tsx'
 import type { WorkbenchLayoutPresetId } from './workbench-layout-presets.ts'
 import { WorkbenchEditorIcon as EditorIcon } from './WorkbenchEditorIcon.tsx'
@@ -175,6 +176,7 @@ import type { WorkbenchToolUsageServiceV1 } from '../tool-usage.ts'
 import { WorkbenchToolGatewayDialog } from './WorkbenchToolGatewayDialog.tsx'
 import type { WorkbenchShareControllerV1, WorkbenchShareSnapshotV1 } from '../client/workbench-share-controller.ts'
 import { isWorkbenchShareGuestPage, readWorkbenchShareGuestNickname, updateWorkbenchShareGuestNickname } from '../client/workbench-share-guest.ts'
+import type { BayAgentControllerV1 } from './workbench-bay-agent-work.ts'
 
 const EMPTY_WORKBENCH_SHARE_SNAPSHOT: WorkbenchShareSnapshotV1 = Object.freeze({
   supported: false, sessions: Object.freeze([]), links: Object.freeze({}),
@@ -263,6 +265,10 @@ export type WorkbenchFrameProps =
     beforeHomeLeave?: (() => Promise<boolean>) | undefined
     /** Content rendered in place of the layout canvas while Home is active. */
     renderHome?: ReactNode | undefined
+    /** Bay Agent's Workbench-owned controller and runtime state. */
+    bayAgent?: BayAgentControllerV1
+    /** DSH-native Bay Agent draft generation for human context editing. */
+    generateContextDraft?: import('./workbench-ai.ts').WorkbenchAiDraftGeneratorV1['generateContextDraft']
   }
 
 interface WorkbenchNavigationHandler {
@@ -615,6 +621,8 @@ const EMPTY_WORKBENCH_DIRECTORY: WorkbenchDirectory = {
   saveTemplate: () => Promise.resolve({ status: 'unavailable' }),
   rename: () => Promise.resolve({ status: 'unavailable' }),
   updateMetadata: () => Promise.resolve({ status: 'unavailable' }),
+  updateWorkbenchBackground: () => Promise.resolve({ status: 'unavailable' }),
+  updateAreaBackground: () => Promise.resolve({ status: 'unavailable' }),
   openAndSelect: () => Promise.resolve({ status: 'unavailable' }),
   unload: () => Promise.resolve({ status: 'unavailable' }),
   setPinned: () => Promise.resolve({ status: 'unavailable' }),
@@ -1010,6 +1018,9 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
   const [frameTransition, setFrameTransition] = useState<WorkbenchFrameTransition>()
   const displayedWorkbenchId = frameTransition?.workbenchId ?? workbenchDirectorySnapshot.activeWorkbenchId
   const selectedWorkbenchId = props.browserWorkbenchId ?? workbenchDirectorySnapshot.activeWorkbenchId
+  useEffect(() => {
+    if (selectedWorkbenchId !== undefined) props.bayAgent?.setWorkbenchId(selectedWorkbenchId)
+  }, [props.bayAgent, selectedWorkbenchId])
   const activeWorkbenchRow = workbenchDirectorySnapshot.rows.find(row => row.workbenchId === selectedWorkbenchId)
   const [layoutLockOverride, setLayoutLockOverride] = useState<{ workbenchId: string; locked: boolean }>()
   const layoutLocked = layoutLockOverride !== undefined && layoutLockOverride.workbenchId === selectedWorkbenchId
@@ -1067,6 +1078,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
   const [saveState, setSaveState] = useState<'saved' | 'saving' | 'offline' | 'conflict'>('saved')
   const [workbenchClosing, setWorkbenchClosing] = useState(false)
   const [createPreset, setCreatePreset] = useState<WorkbenchLayoutPresetId>()
+  const [contextDialog, setContextDialog] = useState<{ workbenchId: string; areaId?: string }>()
   const [workbenchMenuOpenId, setWorkbenchMenuOpenId] = useState<string>()
   const [toolGatewayOpenId, setToolGatewayOpenId] = useState<string>()
   const [workbenchMenuPosition, setWorkbenchMenuPosition] = useState<{ top: number; left: number }>()
@@ -2997,6 +3009,19 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
                             <button
                               type="button"
                               role="menuitem"
+                              disabled={browserOwned || frameTransition !== undefined || workbenchRenaming || workbenchDirectory.getWorkbenchContext === undefined}
+                              onClick={() => {
+                                const returnFocus = workbenchMenuAnchorRef.current
+                                setWorkbenchMenuOpenId(undefined)
+                                setWorkbenchMenuPosition(undefined)
+                                workbenchMenuAnchorRef.current = undefined
+                                setContextDialog({ workbenchId: row.workbenchId })
+                                void returnFocus
+                              }}
+                            ><span>编辑工作台背景</span></button>
+                            <button
+                              type="button"
+                              role="menuitem"
                               disabled={!canReadTargetDocument || browserOwned || frameTransition !== undefined || templateSaving}
                               title={browserOwned
                                 ? '该工作台正在浏览器中使用，请先收回到 DSH 客户端'
@@ -3157,10 +3182,27 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
             editors={editors} hidden={workbenchDirectorySnapshot.globalHiddenEditorIds ?? []} extensionAccess={extensionAccess}
             frame={props} layout={layout} policy={conversationResourcePolicy} sessionMarkers={allWorkspaceSessionMarkers}
             selectedAreaBinding={areaSessionBinding(groupsOf(layout.root).find(group => group.id === layout.activeGroupId), workspaces, projectNeutral, account)}
-            commit={commit} pin={pinFloatingTab} /> : null}
-          {createPreset && props.browserView !== true ? <WorkbenchCreateDialog directory={workbenchDirectory} presetId={createPreset}
+            commit={commit} pin={pinFloatingTab} {...(props.bayAgent === undefined ? {} : { bayAgent: props.bayAgent })} /> : null}
+          {createPreset && props.browserView !== true ? <WorkbenchCreateDialog directory={workbenchDirectory} presetId={createPreset} {...(props.generateContextDraft === undefined ? {} : { generateDraft: props.generateContextDraft })}
             onClose={() => { setCreatePreset(undefined); requestAnimationFrame(() => createWorkbenchButtonRef.current?.focus()) }}
             onCreated={() => { props.onShowWorkbench?.(); navigationReservationsRef.current.clear(); setStateDiagnostic(undefined) }} /> : null}
+          {contextDialog && props.browserView !== true && workbenchDirectory.getWorkbenchContext !== undefined ? (() => {
+            const areaId = contextDialog.areaId
+            const context = areaId === undefined
+              ? workbenchDirectory.getWorkbenchContext!(contextDialog.workbenchId)
+              : workbenchDirectory.getAreaContext?.(contextDialog.workbenchId, areaId)
+            return <WorkbenchContextDialog
+              directory={workbenchDirectory}
+              workbenchId={contextDialog.workbenchId}
+              {...(areaId === undefined ? {} : { areaId })}
+              title={areaId === undefined ? '编辑工作台背景' : '编辑区域背景'}
+              initialValue={areaId === undefined
+                ? context !== undefined && 'goal' in context.human ? context.human.goal : ''
+                : context !== undefined && 'objective' in context.human ? context.human.objective : ''}
+              {...(props.generateContextDraft === undefined ? {} : { generateDraft: props.generateContextDraft })}
+              onClose={() => setContextDialog(undefined)}
+            />
+          })() : null}
           {surfaceView === 'home' ? props.renderHome : <>{activeBrowserOwned && browserHandoffRequest !== undefined ? <WorkbenchBrowserControlPage
             workbenchId={browserHandoffRequest.workbenchId}
             workbenchName={workbenchDirectorySnapshot.rows.find(row => row.workbenchId === browserHandoffRequest.workbenchId)?.name ?? browserHandoffRequest.workbenchId}
@@ -3184,6 +3226,9 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
           /> : <Profiler id="workbench-layout" onRender={reportWorkbenchLayoutCommit}>
           <LayoutView
             onManageEditors={props.onManageEditors}
+            {...(workbenchDirectory.getAreaContext === undefined ? {} : {
+              editAreaBackground: (areaId: string) => { setContextDialog({ workbenchId: placementWorkbenchId, areaId }) },
+            })}
             workbenchId={placementWorkbenchId}
             sharePresenceEnabled={shareGuest || props.browserView === true
               || workbenchShareSnapshot.links[placementWorkbenchId] !== undefined
@@ -3392,6 +3437,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
 
 interface LayoutViewProps {
   onManageEditors?: (() => void) | undefined
+  editAreaBackground?: (areaId: string) => void
   /** Runtime identity; never part of a persisted Area or editor state. */
   workbenchId: string
   sharePresenceEnabled: boolean
@@ -4958,6 +5004,7 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
     splitPlacement, requestSplitPlacement, updateSplitPlacement, confirmSplitPlacement, cancelSplitPlacement,
     collapsedAreaIds, expandedAreaCount, toggleAreaCollapsed,
     summary,
+    editAreaBackground,
     conversationResourcePolicy,
   } = props
   const floating = useFloatingWorkspace()
@@ -6101,6 +6148,7 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
                 setTabOverviewQuery('')
                 setTabOverviewOpen(true)
               }}
+              {...(editAreaBackground === undefined ? {} : { editBackground: () => editAreaBackground(group.id) })}
               {...(collapseEdge === undefined ? {} : { toggleCollapse: () => toggleAreaCollapsed(group.id), canCollapse, collapseLabel })}
               requestSplit={(axis) => {
                 setMenu(undefined)
@@ -6257,7 +6305,7 @@ function WorkbenchAreaTabLabel({ tab, fallback }: { tab: TabDocument; fallback: 
 }
 
 function AreaMenu({
-  anchorRef, surfaceRef, side, align, active, group, sibling, document, commit, close, requestSplit, splitActive, openRelated, openOfficial, addPage, showPages, toggleCollapse, canCollapse, collapseLabel,
+  anchorRef, surfaceRef, side, align, active, group, sibling, document, commit, close, requestSplit, splitActive, openRelated, openOfficial, addPage, showPages, editBackground, toggleCollapse, canCollapse, collapseLabel,
 }: {
   anchorRef: RefObject<HTMLElement>
   surfaceRef: RefObject<HTMLDivElement>
@@ -6271,6 +6319,7 @@ function AreaMenu({
   close: () => void
   addPage: () => void
   showPages: () => void
+  editBackground?: () => void
   toggleCollapse?: () => void
   canCollapse?: boolean
   collapseLabel?: string
@@ -6296,6 +6345,7 @@ function AreaMenu({
     >
       <button role="menuitem" onClick={addPage}>添加内页</button>
       <button role="menuitem" disabled={group.tabs.length === 0} onClick={showPages}>查看全部内页</button>
+      {editBackground === undefined ? null : <button role="menuitem" onClick={() => { editBackground(); close() }}>编辑区域背景</button>}
       {toggleCollapse === undefined ? null : <button role="menuitem" disabled={!canCollapse} onClick={() => { toggleCollapse(); close() }}>{collapseLabel}</button>}
       <div className={css.menuDivider} />
       <button role="menuitem" disabled={active === undefined} onClick={() => {
@@ -6596,6 +6646,7 @@ export interface WorkbenchSettingsSectionInjected {
   workspaceList?: HostObservable<WorkspaceListState>
   /** Optional live model-selection projection; absent on hosts without the model plugin. */
   modelSelectionSource?: WorkbenchPreviewModelSelectionSource
+  loadModelCatalog?: () => Promise<import('@deepseek-ai/dsh-api-session-controller').ModelCatalog>
   workbenchDirectory?: WorkbenchDirectory
   /** Browser-facing package preflight/import/export seam. */
   workbenchPackage?: WorkbenchPackageServiceV1

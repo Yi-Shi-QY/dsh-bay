@@ -4,7 +4,8 @@ import type {
 import { areasOf, type AreaNode, type ModuleInstanceDocument, type WorkbenchNodeV3 } from '../foundation/document-v3.ts'
 import type { WorkbenchEditorCatalog, WorkbenchEditorCatalogRow } from '../foundation/catalog.ts'
 import type { JsonValue } from '../foundation/model.ts'
-import type { WorkbenchSettingsV4 } from '../foundation/persistence.ts'
+import type { WorkbenchAreaOwnershipV1, WorkbenchSettingsV4 } from '../foundation/persistence.ts'
+import { areaContextOf, workbenchContextOf, type AreaContextV1, type WorkbenchContextV1 } from '../foundation/workbench-context.ts'
 
 /** Versioned, bounded read model exposed to Workbench Creator agents. */
 export interface WorkbenchCreatorInspectSnapshotV1 {
@@ -44,6 +45,7 @@ export interface WorkbenchCreatorCurrentV1 {
   description: string
   createdAt: number
   updatedAt: number
+  context: WorkbenchContextV1
   document: WorkbenchCreatorLayoutNodeV1
   activeAreaId: string
   areas: readonly WorkbenchCreatorAreaV1[]
@@ -69,6 +71,9 @@ export interface WorkbenchCreatorAreaV1 {
   ordinal: number
   active: boolean
   historyCount: number
+  label?: string
+  ownership: WorkbenchAreaOwnershipV1
+  context: AreaContextV1
   current?: WorkbenchCreatorModuleV1
 }
 
@@ -246,10 +251,13 @@ export function deriveWorkbenchCreatorInspectSnapshot(
         description: activeRecord.description,
         createdAt: activeRecord.createdAt,
         updatedAt: activeRecord.updatedAt,
+        context: workbenchContextOf(activeRecord.context),
         document: projectLayoutNode(activeRecord.document.root),
         activeAreaId: activeRecord.document.activeAreaId,
         areas: areasOf(activeRecord.document.root).map((area, ordinal) => projectArea(
-          area, ordinal, activeRecord.document.activeAreaId, editorRows, sessions, workspaces, options.modelSelectionSource,
+          area, ordinal, activeRecord.document.activeAreaId, activeRecord.areaMetadata?.[area.areaId],
+          areaContextOf(activeRecord.areaContexts?.[area.areaId]),
+          editorRows, sessions, workspaces, options.modelSelectionSource,
         )),
       },
     }),
@@ -318,6 +326,8 @@ function projectArea(
   area: AreaNode,
   ordinal: number,
   activeAreaId: string,
+  metadata: { label: string; ownership: WorkbenchAreaOwnershipV1 } | undefined,
+  context: AreaContextV1,
   editors: readonly WorkbenchCreatorEditorV1[],
   sessions: ReturnType<NonNullable<WorkbenchCreatorInspectOptions['sessions']>['list']['getSnapshot']> | undefined,
   workspaces: ReturnType<NonNullable<WorkbenchCreatorInspectOptions['workspaces']>['list']['getSnapshot']> | undefined,
@@ -330,6 +340,9 @@ function projectArea(
     ordinal: ordinal + 1,
     active: area.areaId === activeAreaId,
     historyCount: area.moduleHistory.length,
+    ...(metadata?.label === undefined ? {} : { label: metadata.label }),
+    ownership: metadata?.ownership ?? 'user-owned',
+    context,
     ...(current === undefined ? {} : {
       current: projectModule(current, editors, sessions, workspaces, modelSelectionSource),
     }),

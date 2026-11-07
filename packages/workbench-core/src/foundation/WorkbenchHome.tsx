@@ -23,9 +23,10 @@ export interface WorkbenchHomeProps {
   windowController?: WorkbenchWindowControllerV1
   onOpenWorkbench: (workbenchId: string) => Promise<void>
   onCreated: (workbenchId: string) => void
+  generateContextDraft?: (input: { workbenchId: string; scope: 'workbench'; currentValue: string }) => Promise<string>
 }
 
-export function WorkbenchHome({ directory, editors = [], navigate, windowController, onOpenWorkbench, onCreated }: WorkbenchHomeProps) {
+export function WorkbenchHome({ directory, editors = [], navigate, windowController, onOpenWorkbench, onCreated, generateContextDraft }: WorkbenchHomeProps) {
   const snapshot = useSyncExternalStore(directory.subscribe, directory.getSnapshot, directory.getSnapshot)
   const [createPreset, setCreatePreset] = useState<WorkbenchLayoutPresetId>()
   const [busyId, setBusyId] = useState<string>()
@@ -108,6 +109,6 @@ export function WorkbenchHome({ directory, editors = [], navigate, windowControl
       </section> : null}
     </div>
 
-    {createPreset ? <WorkbenchCreateDialog directory={directory} presetId={createPreset} onClose={() => setCreatePreset(undefined)} onCreated={onCreated} /> : null}
+    {createPreset ? <WorkbenchCreateDialog directory={directory} presetId={createPreset} onClose={() => setCreatePreset(undefined)} onCreated={onCreated} {...(generateContextDraft === undefined ? {} : { generateDraft: generateContextDraft })} /> : null}
   </main>
 }

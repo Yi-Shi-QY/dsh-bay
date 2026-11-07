@@ -60,7 +60,7 @@ export function installDistributionRoutes(ctx:{get<T>(name:string,strict?:boolea
       for(;;){const next=await reader.read();if(next.done)break;size+=next.value.length;if(size>limit){await reader.cancel();throw new Error('请求内容超限。')}chunks.push(next.value)}
       const body=JSON.parse(Buffer.concat(chunks).toString('utf8'))
       if(!body||typeof body!=='object'||Array.isArray(body))throw new Error('请求格式无效。')
-      const allowed:Record<typeof action,string[]>={export:['layout','mode','prepareArtifacts','derivedFrom'],inspect:['archive'],consent:['transactionId','archiveSha256','confirmed'],resume:['transactionId'],complete:['transactionId','document','consents','pendingPageIds'],'restore-pending':['transactionId','document','expectedDocument','restoredPageIds'],'prepare-pending':['transactionId'],cancel:['transactionId'],history:[],identities:[]}
+      const allowed:Record<typeof action,string[]>={export:['layout','mode','prepareArtifacts','derivedFrom'],inspect:['archive'],consent:['transactionId','archiveSha256','confirmed'],resume:['transactionId'],complete:['transactionId','document','consents','pendingPageIds','context'],'restore-pending':['transactionId','document','expectedDocument','restoredPageIds'],'prepare-pending':['transactionId'],cancel:['transactionId'],history:[],identities:[]}
       if(Object.keys(body).some(k=>!allowed[action].includes(k)))throw new Error('请求包含不支持的路径、命令或字段。')
       if(allowed[action].includes('transactionId')&&(typeof body.transactionId!=='string'||!/^distribution-[a-f0-9-]{36}$/u.test(body.transactionId)))throw new Error('导入记录无效。')
       let value:unknown
@@ -69,7 +69,7 @@ export function installDistributionRoutes(ctx:{get<T>(name:string,strict?:boolea
       else if(action==='consent'){if(body.confirmed!==true)throw new Error('尚未确认导入。');value=await service.consent(body.transactionId,body.archiveSha256)}
       else if(action==='resume')value=await service.resume(body.transactionId)
       else if(action==='prepare-pending')value=await service.preparePending(body.transactionId)
-      else if(action==='complete')value=await service.complete(body.transactionId,body.document,body.consents,body.pendingPageIds)
+      else if(action==='complete')value=await service.complete(body.transactionId,body.document,body.consents,body.pendingPageIds,body.context)
       else if(action==='restore-pending')value=await service.restorePending(body.transactionId,body.document,body.expectedDocument,body.restoredPageIds)
       else if(action==='cancel')value=await service.cancel(body.transactionId)
       else if(action==='identities')value=await service.identities()

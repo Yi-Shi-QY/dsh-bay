@@ -1112,6 +1112,7 @@ export async function importWorkbenchPackageIntoSettings(
       ...(editorCatalog === undefined ? {} : { editors: editorCatalog }),
       ...(report.sessions === undefined ? {} : { sessions: report.sessions }),
       ...(options.sessionTemplateBindings === undefined ? {} : { templateBindings: options.sessionTemplateBindings }),
+      ...(report.projection.context === undefined ? {} : { context: report.projection.context }),
       ...(packageOrigin === undefined ? {} : { packageOrigin }),
     })
   } catch (error) {

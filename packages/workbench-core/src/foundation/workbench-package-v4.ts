@@ -1,5 +1,6 @@
 import { canonicalJson, decodeDeterministicZip, encodeDeterministicZip, sha256Hex as legacySha256, type WorkbenchPackageFileV1 } from './workbench-sharing.ts'
 import { validatePortableLayout, type PortableLayoutV2 } from './workbench-layout-package.ts'
+import { renderPortableAreaContextMarkdown, renderPortableWorkbenchContextMarkdown, validatePortableWorkbenchContext } from './workbench-context-portability.ts'
 import { WORKBENCH_CORE_VERSION, WORKBENCH_DSH_GENERATION, isWorkbenchCorePackageName } from '../release-compatibility.ts'
 import { CORE_PORTABLE_EDITORS } from '../distribution-contract.ts'
 import { areasOf, type WorkbenchDocumentV3, type WorkbenchNodeV3 } from './document-v3.ts'
@@ -40,7 +41,7 @@ export interface WorkbenchPackageDependencyV4 {
 export interface WorkbenchPackageManifestV4 {
   schemaVersion: 4; format: 'dsh-workbench-package'; mode: WorkbenchPackageModeV4
   packageId: string; version: string; name: string; createdAt: string
-  compatibility: { core: string; dsh: string; portableLayout: 2 }
+  compatibility: { core: string; dsh: string; portableLayout: 2 | 3 }
   dependencies: WorkbenchPackageDependencyV4[]; permissions: string[]
   files: { path: string; size: number; sha256: string }[]
   publisher?: { displayName: string; keyId: string; publicKey: string }
@@ -61,6 +62,7 @@ const obj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'o
 const only = (v: object, allowed: string[]) => Object.keys(v).every(k => allowed.includes(k))
 const strings = (v: unknown): v is string[] => Array.isArray(v) && v.length <= 256 && v.every(x => typeof x === 'string' && x.length > 0 && x.length <= 512) && new Set(v).size === v.length
 export function safeRuntimePath(path: string): boolean {
+  if (path === 'context.json' || path === 'context/工作台整体背景说明.md' || /^context\/areas\/[A-Za-z0-9._:-]{1,128}-区域说明\.md$/u.test(path)) return true
   return path.length <= 240 && path.split('/').every(p => /^[a-zA-Z0-9@_+.-]+$/u.test(p) && p !== '.' && p !== '..' && !p.endsWith('.') && !/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:[.]|$)/iu.test(p))
     && !path.split('/').some(p => ['node_modules', '.git', '.env'].includes(p) || p.endsWith('.map'))
 }
@@ -75,11 +77,16 @@ export async function buildWorkbenchPackageV4(input: {
   derivedFrom?: WorkbenchPackageManifestV4['derivedFrom']; sign?: (bytes: Uint8Array) => Promise<string>
 }): Promise<Uint8Array> {
   validatePortableLayout(input.layout)
-  const files = [{ path: 'workbench.json', content: enc(input.layout) }, ...(input.artifacts ?? [])]
+  const contextFiles = input.layout.context === undefined ? [] : [
+    { path: 'context.json', content: enc(input.layout.context) },
+    { path: 'context/工作台整体背景说明.md', content: new TextEncoder().encode(renderPortableWorkbenchContextMarkdown(input.layout.context)) },
+    ...Object.keys(input.layout.context.areas).sort().map(areaKey => ({ path: `context/areas/${areaKey}-区域说明.md`, content: new TextEncoder().encode(renderPortableAreaContextMarkdown(input.layout.context!, areaKey)) })),
+  ]
+  const files = [{ path: 'workbench.json', content: enc(input.layout) }, ...contextFiles, ...(input.artifacts ?? [])]
   const dependencies = input.dependencies ?? []
   const manifest: WorkbenchPackageManifestV4 = { schemaVersion: 4, format: 'dsh-workbench-package', mode: input.mode,
     packageId: await sha256Hex(enc({ layout: input.layout, dependencies, mode: input.mode })), version: WORKBENCH_CORE_VERSION, name: input.layout.name, createdAt: new Date().toISOString(),
-    compatibility: { core: WORKBENCH_CORE_VERSION, dsh: WORKBENCH_DSH_GENERATION, portableLayout: 2 }, dependencies,
+    compatibility: { core: WORKBENCH_CORE_VERSION, dsh: WORKBENCH_DSH_GENERATION, portableLayout: input.layout.context === undefined ? 2 : 3 }, dependencies,
     permissions: [...new Set(dependencies.flatMap(d => d.permissions))].sort(),
     files: await Promise.all(files.map(async f => ({ path: f.path, size: f.content.length, sha256: await sha256Hex(f.content) }))),
     ...(input.publisher ? { publisher: input.publisher } : {}), ...(input.derivedFrom ? { derivedFrom: input.derivedFrom } : {}) }
@@ -99,7 +106,7 @@ export async function inspectWorkbenchPackageV4(bytes: Uint8Array): Promise<Work
     || Object.keys(raw).some(k => !['schemaVersion','format','mode','packageId','version','name','createdAt','compatibility','dependencies','permissions','files','publisher','derivedFrom'].includes(k))
     || typeof raw.packageId !== 'string' || !hex.test(raw.packageId) || typeof raw.name !== 'string' || !raw.name || raw.name.length > 160
     || typeof raw.createdAt !== 'string' || !Number.isFinite(Date.parse(raw.createdAt)) || raw.version !== WORKBENCH_CORE_VERSION
-    || !obj(raw.compatibility) || raw.compatibility.core !== WORKBENCH_CORE_VERSION || raw.compatibility.dsh !== WORKBENCH_DSH_GENERATION || raw.compatibility.portableLayout !== 2
+    || !obj(raw.compatibility) || raw.compatibility.core !== WORKBENCH_CORE_VERSION || raw.compatibility.dsh !== WORKBENCH_DSH_GENERATION || ![2, 3].includes(raw.compatibility.portableLayout as number)
     || !Array.isArray(raw.dependencies) || raw.dependencies.length > 32 || !strings(raw.permissions) || !Array.isArray(raw.files) || raw.files.length > 64) throw new Error('工作台 V4 包格式或版本不兼容。')
   const manifest = raw as unknown as WorkbenchPackageManifestV4
   if (!only(manifest.compatibility, ['core','dsh','portableLayout'])
@@ -142,11 +149,26 @@ export async function inspectWorkbenchPackageV4(bytes: Uint8Array): Promise<Work
   if (manifest.dependencies.some(d => d.requires.some(p => !packages.has(p)))) throw new Error('工作台依赖闭包不完整。')
   orderedDistributionDependencies(manifest.dependencies)
   if (canonicalJson([...new Set(manifest.dependencies.flatMap(d => d.permissions))].sort()) !== canonicalJson(manifest.permissions)) throw new Error('权限清单与依赖不一致。')
-  if (manifest.mode === 'layout-only' && (manifest.dependencies.length || files.length !== 2 || manifest.publisher)) throw new Error('布局分享不能包含可执行制品。')
-  if (manifest.mode === 'online-reference' && files.length !== 3) throw new Error('在线引用不能包含隐式制品。')
-  if (manifest.mode === 'offline-embedded' && files.length !== 3 + manifest.dependencies.length) throw new Error('离线包包含依赖锁之外的制品。')
+  const layoutForCount = json(byPath.get('workbench.json') ?? new Uint8Array()) as { context?: { areas?: Record<string, unknown> } }
+  const contextFileCount = manifest.compatibility.portableLayout === 3 ? 2 + Object.keys(layoutForCount.context?.areas ?? {}).length : 0
+  if (manifest.mode === 'layout-only' && (manifest.dependencies.length || files.length !== 2 + contextFileCount || manifest.publisher)) throw new Error('布局分享不能包含可执行制品。')
+  if (manifest.mode === 'online-reference' && files.length !== 3 + contextFileCount) throw new Error('在线引用不能包含隐式制品。')
+  if (manifest.mode === 'offline-embedded' && files.length !== 3 + manifest.dependencies.length + contextFileCount) throw new Error('离线包包含依赖锁之外的制品。')
   const layout = json(byPath.get('workbench.json')!)
   validatePortableLayout(layout)
+  if (manifest.compatibility.portableLayout === 2 && layout.context !== undefined) throw new Error('布局版本与 Context 不一致')
+  if (manifest.compatibility.portableLayout === 3) {
+    if (layout.context === undefined) throw new Error('布局版本缺少 Context')
+    const context = json(byPath.get('context.json') ?? new Uint8Array())
+    validatePortableWorkbenchContext(context)
+    if (canonicalJson(context) !== canonicalJson(layout.context)) throw new Error('context.json 与 workbench.json 不一致')
+    const markdown = byPath.get('context/工作台整体背景说明.md')
+    if (!markdown || new TextDecoder('utf-8', { fatal: true }).decode(markdown) !== renderPortableWorkbenchContextMarkdown(context)) throw new Error('工作台 Context Markdown 缺失或已过期')
+    for (const areaKey of Object.keys(context.areas)) {
+      const areaMarkdown = byPath.get(`context/areas/${areaKey}-区域说明.md`)
+      if (!areaMarkdown || new TextDecoder('utf-8', { fatal: true }).decode(areaMarkdown) !== renderPortableAreaContextMarkdown(context, areaKey)) throw new Error('区域 Context Markdown 缺失或已过期: ' + areaKey)
+    }
+  }
   if (layout.name !== manifest.name || manifest.packageId !== await sha256Hex(enc({layout, dependencies:manifest.dependencies, mode:manifest.mode}))) throw new Error('包身份与工作台内容不一致。')
   let signature: WorkbenchSignatureV4 | undefined
   if (manifest.mode !== 'layout-only') {

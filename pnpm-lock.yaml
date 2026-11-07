@@ -194,6 +194,9 @@ importers:
       '@deepseek-ai/dsh-credentials':
         specifier: 0.2.2-rc.1
         version: 0.2.2-rc.1(@deepseek-ai/cordis@4.1.0)
+      '@deepseek-ai/dsh-llm':
+        specifier: 0.2.2-rc.1
+        version: 0.2.2-rc.1(@deepseek-ai/cordis@4.1.0)
       '@deepseek-ai/dsh-plugin-manager':
         specifier: 0.2.2-rc.1
         version: 0.2.2-rc.1(8d94c98d67ea53f62a8e398141c8c469)

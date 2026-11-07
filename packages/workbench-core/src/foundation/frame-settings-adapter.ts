@@ -3,11 +3,12 @@ import type { SettingsScopeSnapshot, WorkbenchSettingsScope as SettingsScope } f
 import type { SettingsScopePathOperation, SettingsScopePatchResult } from '../client/workbench-settings-contracts.ts'
 import { patchWorkbenchSettings } from '../client/workbench-settings-contracts.ts'
 import {
-  cloneWorkbenchDocumentWithFreshIds, migrateDocumentV2ToV3, projectDocumentV3ToLayoutV2,
+  areasOf, cloneWorkbenchDocumentWithFreshIds, migrateDocumentV2ToV3, projectDocumentV3ToLayoutV2,
 } from './document-v3.ts'
 import type { WorkbenchDocumentV3 } from './document-v3.ts'
 import { defaultLayout, groupsOf, type WorkbenchLayoutDocument } from './model.ts'
-import { decodeWorkbenchHiddenEditorIds, normalizeWorkbenchTags, type WorkbenchPackageOriginV1, type WorkbenchSettings, type WorkbenchSettingsV4 } from './persistence.ts'
+import { decodeWorkbenchHiddenEditorIds, normalizeWorkbenchTags, type WorkbenchAiSelectionV1, type WorkbenchPackageOriginV1, type WorkbenchSettings, type WorkbenchSettingsV4 } from './persistence.ts'
+import { areaContextOf, createWorkbenchContext, type AreaContextV1, type WorkbenchContextV1 } from './workbench-context.ts'
 import { workbenchExtensionConsentKey, type WorkbenchExtensionConsentV1 } from '../workbench-extension-access.ts'
 
 /** Read-only named Workbench and layout-template roster for the outer rail. */
@@ -56,7 +57,22 @@ export interface WorkbenchDirectoryCreateOptions {
   name?: string
   description?: string
   tags?: readonly string[]
+  /** Optional initial Workbench background goal. */
+  background?: string
 }
+
+/** Human Context mutation seam supplied by the Control Plane host. */
+export interface WorkbenchDirectoryContextPatchInput {
+  scope: 'workbench' | 'area'
+  workbenchId: string
+  areaId?: string
+  expectedRevision: number
+  patch: Record<string, unknown>
+}
+
+export type WorkbenchDirectoryContextPatch = (
+  input: WorkbenchDirectoryContextPatchInput,
+) => Promise<WorkbenchDirectoryOperationResult>
 
 export type WorkbenchDirectoryCreateResult = WorkbenchDirectoryOperationResult | {
   status: 'committed'
@@ -69,6 +85,9 @@ export interface WorkbenchDirectory {
   getSnapshot(): WorkbenchDirectorySnapshot
   /** Read a persisted document without selecting or mutating the Workbench. */
   getDocument?(workbenchId: string): WorkbenchDocumentV3 | undefined
+  getWorkbenchContext?(workbenchId: string): WorkbenchContextV1 | undefined
+  getAreaContext?(workbenchId: string, areaId: string): AreaContextV1 | undefined
+  getWorkbenchAi?(workbenchId: string): WorkbenchAiSelectionV1 | undefined
   subscribe(listener: () => void): () => void
   select(workbenchId: string): Promise<SettingsScopePatchResult>
   /** Persist the tab order without changing the active Workbench. */
@@ -79,6 +98,9 @@ export interface WorkbenchDirectory {
   saveTemplate(name: string, document: WorkbenchLayoutDocument): Promise<WorkbenchDirectoryOperationResult>
   rename(workbenchId: string, name: string): Promise<WorkbenchDirectoryOperationResult>
   updateMetadata(workbenchId: string, metadata: { name: string; description: string; tags?: readonly string[] }): Promise<WorkbenchDirectoryOperationResult>
+  updateWorkbenchBackground?(workbenchId: string, background: string): Promise<WorkbenchDirectoryOperationResult>
+  updateAreaBackground?(workbenchId: string, areaId: string, background: string): Promise<WorkbenchDirectoryOperationResult>
+  updateWorkbenchAi?(workbenchId: string, selection: WorkbenchAiSelectionV1 | undefined): Promise<WorkbenchDirectoryOperationResult>
   setEditorVisible?(workbenchId: string, editorId: string, visible: boolean): Promise<WorkbenchDirectoryOperationResult>
   setLayoutLocked?(workbenchId: string, locked: boolean): Promise<WorkbenchDirectoryOperationResult>
   setGlobalEditorVisible?(editorId: string, visible: boolean): Promise<WorkbenchDirectoryOperationResult>
@@ -132,6 +154,13 @@ function acceptedName(name: string): string | undefined {
   return trimmed.length === 0 ? undefined : trimmed
 }
 
+function initialWorkbenchContext(background: string | undefined): WorkbenchContextV1 | undefined {
+  const goal = background?.trim().normalize('NFKC').slice(0, 20_000)
+  if (goal === undefined || goal === '') return undefined
+  const context = createWorkbenchContext()
+  return { ...context, human: { ...context.human, goal } }
+}
+
 function uniqueName(base: string, occupiedNames: readonly string[]): string {
   const occupied = new Set(occupiedNames.map(nameKey))
   if (!occupied.has(nameKey(base))) return base
@@ -161,7 +190,11 @@ function nextWorkbenchName(value: Pick<WorkbenchSettingsV4, 'workbenches'>): str
  */
 export function createProjectNeutralFrameSettings(
   source: PatchableV4Scope,
-  options: { workbenchId?: string; isBrowserOwned?: (id: string) => boolean } = {},
+  options: {
+    workbenchId?: string
+    isBrowserOwned?: (id: string) => boolean
+    contextPatch?: WorkbenchDirectoryContextPatch
+  } = {},
 ): ProjectNeutralFrameSettings {
   // A companion is a pinned view, never a second directory or layout Store.
   const activeId = (value: WorkbenchSettingsV4): string => options.workbenchId ?? value.activeWorkbenchId
@@ -337,6 +370,23 @@ export function createProjectNeutralFrameSettings(
       const record = source.getSnapshot().value?.workbenches[workbenchId]
       return record === undefined ? undefined : structuredClone(record.document)
     },
+    getWorkbenchContext: (workbenchId) => {
+      if (options.workbenchId !== undefined && workbenchId !== options.workbenchId) return undefined
+      const record = source.getSnapshot().value?.workbenches[workbenchId]
+      return record === undefined ? undefined : structuredClone(record.context ?? createWorkbenchContext())
+    },
+    getAreaContext: (workbenchId, areaId) => {
+      if (options.workbenchId !== undefined && workbenchId !== options.workbenchId) return undefined
+      const record = source.getSnapshot().value?.workbenches[workbenchId]
+      if (record === undefined) return undefined
+      const area = areasOf(record.document.root).find(row => row.areaId === areaId)
+      return area === undefined ? undefined : structuredClone(areaContextOf(record.areaContexts?.[areaId]))
+    },
+    getWorkbenchAi: (workbenchId) => {
+      if (options.workbenchId !== undefined && workbenchId !== options.workbenchId) return undefined
+      const record = source.getSnapshot().value?.workbenches[workbenchId]
+      return record?.workbenchAi === undefined ? undefined : structuredClone(record.workbenchAi)
+    },
     subscribe: listener => source.subscribe(listener),
     select: async (workbenchId) => {
       if (options.workbenchId !== undefined) return { status: 'unavailable' }
@@ -405,6 +455,7 @@ export function createProjectNeutralFrameSettings(
         workbenchId, name, description: (requested?.description ?? '').trim(),
         document: presetDocument ?? (template === undefined ? blankWorkbenchDocument() : cloneWorkbenchDocumentWithFreshIds(template.document)),
         createdAt: now, updatedAt: now,
+        ...(initialWorkbenchContext(requested?.background) === undefined ? {} : { context: initialWorkbenchContext(requested?.background)! }),
         ...(tags.length === 0 ? {} : { tags }),
       }
       const next: WorkbenchSettingsV4 = value === undefined
@@ -529,6 +580,62 @@ export function createProjectNeutralFrameSettings(
         const { tags: previousTags, ...withoutTags } = existing
         const tags = normalizeWorkbenchTags(requested.tags ?? previousTags)
         return { ...next, workbenches: { ...next.workbenches, [workbenchId]: { ...withoutTags, name, description: requested.description.trim(), ...(tags.length === 0 ? {} : { tags }), updatedAt: Date.now() } } }
+      })
+    },
+    updateWorkbenchBackground: async (workbenchId, background) => {
+      const current = directory.getWorkbenchContext?.(workbenchId)
+      if (current === undefined) return { status: 'rejected', reason: 'not-found' }
+      if (options.contextPatch !== undefined) {
+        return options.contextPatch({
+          scope: 'workbench', workbenchId, expectedRevision: current.revision,
+          patch: { goal: background.trim().normalize('NFKC').slice(0, 20_000) },
+        })
+      }
+      return rootUpdate(value => {
+        const record = value.workbenches[workbenchId]
+        if (record === undefined) return value
+        const context = structuredClone(record.context ?? createWorkbenchContext())
+        context.human = { ...context.human, goal: background.trim().normalize('NFKC').slice(0, 20_000) }
+        context.revision += 1
+        return { ...value, workbenches: { ...value.workbenches, [workbenchId]: { ...record, context, updatedAt: Date.now() } } }
+      })
+    },
+    updateAreaBackground: async (workbenchId, areaId, background) => {
+      const current = directory.getAreaContext?.(workbenchId, areaId)
+      if (current === undefined) return { status: 'rejected', reason: 'not-found' }
+      if (options.contextPatch !== undefined) {
+        return options.contextPatch({
+          scope: 'area', workbenchId, areaId, expectedRevision: current.revision,
+          patch: { objective: background.trim().normalize('NFKC').slice(0, 20_000) },
+        })
+      }
+      return rootUpdate(value => {
+        const record = value.workbenches[workbenchId]
+        if (record === undefined || !areasOf(record.document.root).some(row => row.areaId === areaId)) return value
+        const context = structuredClone(areaContextOf(record.areaContexts?.[areaId]))
+        context.human = { ...context.human, objective: background.trim().normalize('NFKC').slice(0, 20_000) }
+        context.revision += 1
+        return { ...value, workbenches: { ...value.workbenches, [workbenchId]: {
+          ...record, areaContexts: { ...(record.areaContexts ?? {}), [areaId]: context }, updatedAt: Date.now(),
+        } } }
+      })
+    },
+    updateWorkbenchAi: async (workbenchId, selection) => {
+      const current = source.getSnapshot().value?.workbenches[workbenchId]
+      if (current === undefined) return { status: 'rejected', reason: 'not-found' }
+      const normalized = selection === undefined ? undefined : {
+        provider: selection.provider.trim().slice(0, 256), model: selection.model.trim().slice(0, 256),
+        ...(selection.reasoningEffort?.trim() ? { reasoningEffort: selection.reasoningEffort.trim().slice(0, 128) } : {}),
+      }
+      if (normalized !== undefined && (normalized.provider === '' || normalized.model === '')) return { status: 'unavailable' }
+      return rootUpdate(value => {
+        const record = value.workbenches[workbenchId]
+        if (record === undefined) return value
+        if (normalized === undefined) {
+          const { workbenchAi: _previous, ...without } = record
+          return { ...value, workbenches: { ...value.workbenches, [workbenchId]: { ...without, updatedAt: Date.now() } } }
+        }
+        return { ...value, workbenches: { ...value.workbenches, [workbenchId]: { ...record, workbenchAi: normalized, updatedAt: Date.now() } } }
       })
     },
     setPinned: (workbenchId, pinned) => rootUpdate(value => {

@@ -21,8 +21,11 @@ import type {
   WorkbenchAgentPresetDistributionDescriptorV1,
   WorkbenchDependencySnapshotV1,
 } from './workbench-distribution.ts'
-import type { WorkbenchPackageOriginV1, WorkbenchSettingsV4 } from './persistence.ts'
+import type { WorkbenchAiSelectionV1, WorkbenchPackageOriginV1, WorkbenchSettingsV4 } from './persistence.ts'
 import type { WorkbenchPackageSignatureV1 } from './workbench-package-trust.ts'
+import { projectPortableWorkbenchContext, renderPortableAreaContextMarkdown, renderPortableWorkbenchContextMarkdown, restorePortableWorkbenchContext, validatePortableWorkbenchContext, type PortableWorkbenchContextV1, type WorkbenchContextExportPolicyV1 } from './workbench-context-portability.ts'
+import type { AreaContextV1, WorkbenchContextV1 } from './workbench-context.ts'
+import type { WorkbenchAreaMetadataV1 } from './persistence.ts'
 
 /** Public projection version. It is intentionally independent from Settings V4. */
 export const PORTABLE_WORKBENCH_SCHEMA_VERSION = 1 as const
@@ -45,12 +48,22 @@ export interface PortableWorkbenchV1 {
   bindingPolicy: PortableWorkbenchBindingPolicyV1
   historyPolicy: PortableWorkbenchHistoryPolicyV1
   statePolicy: PortableWorkbenchStatePolicyV1
+  context?: PortableWorkbenchContextV1
   agentPreset?: { id: string; label?: string }
   modelPreference?: {
     provider?: string
     model?: string
     label?: string
     reasoningEffort?: string
+  }
+}
+
+function workbenchAiFromPortable(value: PortableWorkbenchV1['modelPreference']): WorkbenchAiSelectionV1 | undefined {
+  if (value?.provider === undefined || value.model === undefined) return undefined
+  return {
+    provider: value.provider,
+    model: value.model,
+    ...(value.reasoningEffort === undefined ? {} : { reasoningEffort: value.reasoningEffort }),
   }
 }
 
@@ -129,6 +142,9 @@ export interface WorkbenchPackageManifestV1 {
   /** Derived npm/pnpm view; dependencies.lock.json remains authoritative. */
   npmDependenciesPath?: 'dependencies.npm.json'
   sessionsPath?: 'sessions.json'
+  contextPath?: 'context.json'
+  contextPolicy?: WorkbenchContextExportPolicyV1
+  contextDigest?: string
   previewPath?: 'preview.svg'
   previewDocumentPath?: 'preview.json'
   signaturePath?: 'signature.json'
@@ -241,6 +257,10 @@ export interface WorkbenchPackageBuildInputV1 {
   publisher?: WorkbenchPackageManifestV1['publisher']
   agentPreset?: PortableWorkbenchV1['agentPreset']
   modelPreference?: PortableWorkbenchV1['modelPreference']
+  workbenchContext?: WorkbenchContextV1
+  areaContexts?: Readonly<Record<string, AreaContextV1>>
+  areaMetadata?: Readonly<Record<string, WorkbenchAreaMetadataV1>>
+  contextPolicy?: WorkbenchContextExportPolicyV1
   dependencySnapshot?: WorkbenchDependencySnapshotV1
   sessions?: WorkbenchSessionsFileV1
   sessionTemplateResolver?: WorkbenchSessionTemplateResolverV1
@@ -390,6 +410,7 @@ export interface WorkbenchImportIdFactoryV1 {
 export interface ImportedWorkbenchV1 {
   document: WorkbenchDocumentV3
   warnings: readonly string[]
+  areaKeyToAreaId: ReadonlyMap<string, string>
 }
 
 type PlainRecord = Record<string, unknown>
@@ -590,6 +611,11 @@ export function projectWorkbenchForSharing(input: WorkbenchPackageBuildInputV1):
     }
   }
   const activeAreaKey = areaKeys.get(input.document.activeAreaId) ?? 'area-1'
+  const contextAreas = Object.fromEntries([...areaKeys.entries()].map(([sourceAreaId, packageAreaKey]) => [packageAreaKey, {
+    ...(input.areaContexts?.[sourceAreaId] === undefined ? {} : { context: input.areaContexts[sourceAreaId] }),
+    ...(input.areaMetadata?.[sourceAreaId]?.ownership === undefined ? {} : { ownership: input.areaMetadata[sourceAreaId].ownership }),
+  }]))
+  const context = projectPortableWorkbenchContext(input.workbenchContext, contextAreas, input.contextPolicy ?? 'human')
   return {
     schemaVersion: PORTABLE_WORKBENCH_SCHEMA_VERSION,
     format: 'dsh-portable-workbench',
@@ -600,6 +626,7 @@ export function projectWorkbenchForSharing(input: WorkbenchPackageBuildInputV1):
     bindingPolicy: 'detached',
     historyPolicy,
     statePolicy,
+    ...(context === undefined ? {} : { context }),
     ...(input.agentPreset === undefined ? {} : { agentPreset: structuredClone(input.agentPreset) }),
     ...(input.modelPreference === undefined ? {} : { modelPreference: structuredClone(input.modelPreference) }),
   }
@@ -824,7 +851,7 @@ export function importPortableWorkbench(
   const root = importNode(projection.root)
   const activeAreaId = areaIds.get(projection.activeAreaKey) ?? firstAreaId
   if (activeAreaId === undefined) throw new Error('portable Workbench has no Area')
-  return { document: { version: 3, root, activeAreaId }, warnings }
+  return { document: { version: 3, root, activeAreaId }, warnings, areaKeyToAreaId: areaIds }
 }
 
 function importNameKey(name: string): string {
@@ -859,6 +886,7 @@ export function prepareImportedWorkbenchSettings(
     sessions?: WorkbenchSessionsFileV1
     templateBindings?: WorkbenchSessionTemplateBindingsV1
     packageOrigin?: WorkbenchPackageOriginV1
+    context?: PortableWorkbenchContextV1
   } = {},
 ): WorkbenchImportSettingsResultV1 {
   const workbenchId = options.workbenchId ?? `workbench-${globalThis.crypto.randomUUID()}`
@@ -875,11 +903,17 @@ export function prepareImportedWorkbenchSettings(
   }
   const now = options.now ?? Date.now()
   const name = uniqueImportedName(options.name ?? projection.name, Object.values(current.workbenches).map(record => record.name))
+  const importedAi = workbenchAiFromPortable(projection.modelPreference)
   const record = {
     workbenchId,
     name,
     description: (options.description ?? projection.description).trim(),
     document: imported.document,
+    ...(importedAi === undefined ? {} : { workbenchAi: importedAi }),
+    ...(options.context === undefined ? {} : (() => {
+      const restored = restorePortableWorkbenchContext(options.context, imported.areaKeyToAreaId)
+      return restored === undefined ? {} : { context: restored.context, areaContexts: restored.areaContexts, areaMetadata: restored.areaMetadata }
+    })()),
     createdAt: now,
     updatedAt: now,
     ...(options.packageOrigin === undefined ? {} : { packageOrigin: structuredClone(options.packageOrigin) }),
@@ -1178,6 +1212,14 @@ export async function buildWorkbenchPackage(input: WorkbenchPackageBuildInputV1)
     packageFile('dependencies.npm.json', utf8(canonicalJson(npmDependencies))),
     packageFile('sessions.json', utf8(canonicalJson(sessions))),
   ]
+  if (projection.context !== undefined) {
+    files.push(packageFile('context.json', utf8(canonicalJson(projection.context))))
+    files.push(packageFile('context/工作台整体背景说明.md', utf8(renderPortableWorkbenchContextMarkdown(projection.context))))
+    for (const areaKey of Object.keys(projection.context.areas).sort()) {
+      files.push(packageFile(`context/areas/${areaKey}-区域说明.md`, utf8(renderPortableAreaContextMarkdown(projection.context, areaKey))))
+    }
+  }
+  const contextDigest = projection.context === undefined ? undefined : await sha256Hex(utf8(canonicalJson(projection.context)))
   if (input.previewSvg !== undefined) files.push(packageFile('preview.svg', utf8(input.previewSvg)))
   if (input.preview !== undefined) files.push(packageFile('preview.json', utf8(canonicalJson(input.preview))))
   if (input.signature !== undefined) files.push(packageFile('signature.json', utf8(canonicalJson(input.signature))))
@@ -1247,6 +1289,8 @@ export async function buildWorkbenchPackage(input: WorkbenchPackageBuildInputV1)
       completeness: dependencySnapshot?.completeness ?? 'layout-only',
       distributionMode: input.distributionMode ?? (dependencySnapshot?.completeness === 'complete-offline' ? 'offline-embedded' : 'online-reference'),
       workbenchPath: 'workbench.json', dependencyLockPath: 'dependencies.lock.json', npmDependenciesPath: 'dependencies.npm.json', sessionsPath: 'sessions.json',
+      ...(projection.context === undefined ? {} : { contextPath: 'context.json' as const, contextPolicy: projection.context.policy }),
+      ...(contextDigest === undefined ? {} : { contextDigest }),
       ...(input.previewSvg === undefined ? {} : { previewPath: 'preview.svg' as const }),
       ...(input.preview === undefined ? {} : { previewDocumentPath: 'preview.json' as const }),
       ...(input.signature === undefined ? {} : { signaturePath: 'signature.json' as const }),
@@ -1282,6 +1326,9 @@ function validProjection(value: unknown): value is PortableWorkbenchV1 {
     || value.bindingPolicy !== 'detached' || (value.historyPolicy !== 'active-editors-only' && value.historyPolicy !== 'all-editors')
     || (value.statePolicy !== 'none' && value.statePolicy !== 'sanitized' && value.statePolicy !== 'full')
     || typeof value.activeAreaKey !== 'string') return false
+  if (value.modelPreference !== undefined && (!isRecord(value.modelPreference)
+    || Object.keys(value.modelPreference).some(key => !['provider', 'model', 'label', 'reasoningEffort'].includes(key))
+    || Object.values(value.modelPreference).some(item => item !== undefined && (typeof item !== 'string' || item.length > 256)))) return false
   const areaKeys = new Set<string>()
   const visit = (node: unknown): boolean => {
     if (!isRecord(node) || typeof node.key !== 'string') return false
@@ -1296,6 +1343,9 @@ function validProjection(value: unknown): value is PortableWorkbenchV1 {
       && typeof editor.editorId === 'string' && (editor.scope === 'root' || editor.scope === 'session')
       && typeof editor.label === 'string' && (editor.availability === 'available' || editor.availability === 'missing' || editor.availability === 'unresolved')
       && (editor.portableState === null || editor.portableState === undefined || isJsonValue(editor.portableState)))
+  }
+  if (value.context !== undefined) {
+    try { validatePortableWorkbenchContext(value.context) } catch { return false }
   }
   return visit(value.root) && areaKeys.has(value.activeAreaKey)
 }
@@ -1378,6 +1428,11 @@ export async function validateWorkbenchPackage(
     if (manifest.npmDependenciesPath !== undefined && manifest.npmDependenciesPath !== 'dependencies.npm.json') errors.push('manifest.npmDependenciesPath is invalid')
     if (manifest.npmDependenciesPath === 'dependencies.npm.json' && !byPath.has('dependencies.npm.json')) errors.push('dependencies.npm.json is missing')
     if (manifest.sessionsPath !== 'sessions.json') errors.push('manifest.sessionsPath is required for schema v2')
+    if (manifest.contextPath !== undefined && manifest.contextPath !== 'context.json') errors.push('manifest.contextPath is invalid')
+    if (manifest.contextPolicy !== undefined && manifest.contextPolicy !== 'human' && manifest.contextPolicy !== 'handoff') errors.push('manifest.contextPolicy is invalid')
+    if (manifest.contextDigest !== undefined && (typeof manifest.contextDigest !== 'string' || !/^[A-Fa-f0-9]{64}$/u.test(manifest.contextDigest))) errors.push('manifest.contextDigest is invalid')
+    if (manifest.contextPath !== undefined && !byPath.has('context.json')) errors.push('context.json is missing')
+    if (manifest.contextPath === undefined && byPath.has('context.json')) errors.push('context.json requires manifest.contextPath')
     if (manifest.signaturePath !== undefined && manifest.signaturePath !== 'signature.json') errors.push('manifest.signaturePath is invalid')
     if (manifest.signaturePath !== undefined && !byPath.has('signature.json')) errors.push('signature.json is missing')
     if (manifest.completeness !== 'layout-only' && manifest.completeness !== 'complete-online' && manifest.completeness !== 'complete-offline') {
@@ -1396,6 +1451,23 @@ export async function validateWorkbenchPackage(
       || typeof manifest.baseRuntime.runtimeId !== 'string' || typeof manifest.baseRuntime.version !== 'string'
       || !Array.isArray(manifest.baseRuntime.providedCapabilities))) {
       errors.push('manifest.baseRuntime is invalid for schema v2')
+    }
+    const contextFile = byPath.get('context.json')
+    if (decodedProjection?.context !== undefined && manifest.contextPath !== 'context.json') errors.push('workbench.json Context requires manifest.contextPath')
+    if (contextFile !== undefined) {
+      try {
+        const context = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(contextFile.content)) as unknown
+        validatePortableWorkbenchContext(context)
+        if (decodedProjection?.context === undefined || canonicalJson(decodedProjection.context) !== canonicalJson(context)) errors.push('context.json does not match workbench.json')
+        if (manifest.contextPolicy !== context.policy) errors.push('manifest.contextPolicy does not match context.json')
+        if (manifest.contextDigest !== await sha256Hex(new TextEncoder().encode(canonicalJson(context)))) errors.push('manifest.contextDigest does not match context.json')
+        const markdown = byPath.get('context/工作台整体背景说明.md')
+        if (markdown === undefined || new TextDecoder('utf-8', { fatal: true }).decode(markdown.content) !== renderPortableWorkbenchContextMarkdown(context)) errors.push('Workbench Context Markdown projection is missing or stale')
+        for (const areaKey of Object.keys(context.areas)) {
+          const areaMarkdown = byPath.get(`context/areas/${areaKey}-区域说明.md`)
+          if (areaMarkdown === undefined || new TextDecoder('utf-8', { fatal: true }).decode(areaMarkdown.content) !== renderPortableAreaContextMarkdown(context, areaKey)) errors.push(`Area Context Markdown projection is missing or stale: ${areaKey}`)
+        }
+      } catch { errors.push('context.json is invalid') }
     }
     const lock = byPath.get('dependencies.lock.json')
     if (lock !== undefined) {

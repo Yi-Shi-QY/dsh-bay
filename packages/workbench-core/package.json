@@ -1,8 +1,30 @@
 {
   "name": "dsh-bay",
-  "description": "Workbench Core lifecycle, module registry and composition installer",
+  "description": "DSH Bay multi-area workbench for developing, validating and sharing DSH plugins",
   "version": "0.2.2-alpha.17.5",
   "private": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Yi-Shi-QY/dsh-bay.git"
+  },
+  "homepage": "https://github.com/Yi-Shi-QY/dsh-bay",
+  "bugs": {
+    "url": "https://github.com/Yi-Shi-QY/dsh-bay/issues"
+  },
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "dsh-bay",
+    "workbench"
+  ],
+  "engines": {
+    "node": ">=24.9.0"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
+  },
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",
@@ -58,6 +80,7 @@
     "@deepseek-ai/dsh-util-workspace-path": "0.2.2-rc.1",
     "@deepseek-ai/dsh-plugin-manager": "0.2.2-rc.1",
     "@deepseek-ai/dsh-agent": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-llm": "0.2.2-rc.1",
     "@deepseek-ai/dsh-agent-preset": "0.2.2-rc.1",
     "@deepseek-ai/dsh-agent-preset-registry": "0.2.2-rc.1",
     "@deepseek-ai/dsh-cordis-host-runner": "0.2.2-rc.1",
@@ -155,6 +178,8 @@
     "rc1-sidebar-workspace-source-index.json",
     "THIRD_PARTY_NOTICES.txt",
     "dsh.bundle.patch.yml",
+    "README.md",
+    "LICENSE",
     "presets/workbench-creator/skills/workbench-extension-development/**",
     "package.json",
     "lib/build-inputs.json"

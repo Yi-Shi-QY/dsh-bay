@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "owner": "DSH Bay",
+  "candidateId": "dsh-bay-0.2.2-alpha.17.5-dsh-0.2.2-rc.1",
+  "productLine": "DSH Bay 0.2.2-alpha.17.5",
+  "upstream": {
+    "repository": "https://github.com/deepseek-ai/deepseek-harness.git",
+    "tag": "dsh-v0.2.2-rc.1",
+    "generation": "0.2.2-rc.1",
+    "commit": "66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db",
+    "sourceDigest": "1ddb4669dbcb52b0a3c93fa1dda418e26994ae83216979849efed76820cd86e3"
+  },
+  "status": "private-staging / experimental-unvalidated",
+  "delivery": {
+    "mode": "core-only",
+    "defaultInstall": [
+      "dsh-bay"
+    ],
+    "excluded": [
+      "@dsh-workbench/conversation-suite",
+      "@dsh-workbench/svgdeepseek-pet"
+    ],
+    "more": "official-only-deferred-in-workbench",
+    "pluginManager": "native-dsh-settings-entry"
+  },
+  "controlledRebase": {
+    "manifests": [
+      "packages/workbench-core/src/foundation/workbench-sidebar.copy-manifest.json"
+    ],
+    "sourceIndex": "packages/workbench-core/rc1-sidebar-workspace-source-index.json",
+    "patchDigest": "8becd2d0305576e49b0181e6ee9ecba22ce3bb2ab4d59522a9d39893dc2befe1",
+    "materialization": "34 rc1 source files hash-verified in the snapshot, mirrors and runtime destinations; reviewed adaptations and runtime extras are explicitly registered"
+  },
+  "runtimeBoundary": {
+    "filteredRegistration": "entry-customization",
+    "scope": "Workbench Area-local projection only",
+    "officialSurface": "unchanged",
+    "otherActions": "preserved"
+  },
+  "innerPageEvidence": "provenance/dsh-0.2.2-rc.1.json",
+  "desktopPreflight": "not-run-by-plan",
+  "rollback": {
+    "derivedFrom": "dsh-bay-main-f78908d",
+    "historicalEvidence": "retained-in-source-repository"
+  }
+}

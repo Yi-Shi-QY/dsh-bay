@@ -9,7 +9,7 @@ import { defaultLayout } from '../src/foundation/model.ts'
 vi.mock('../src/foundation/WorkbenchFrame.tsx', () => ({ MemoizedEditor: () => null, WorkbenchFloatingMenu: () => null }))
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
-function setup() {
+function setup(bayAgent?: ComponentProps<typeof WorkbenchFloatingWorkspace>['bayAgent']) {
   vi.stubGlobal('PointerEvent', MouseEvent)
   const runtime = createFloatingWorkspaceRuntime()
   runtime.setSurface(true, 'one')
@@ -28,7 +28,7 @@ function setup() {
   const layout = defaultLayout(); if (layout.root.kind !== 'group') throw new Error('fixture')
   layout.root.id = 'target'; layout.root.tabs = []; delete layout.root.activeTabId
   const pin = vi.fn(async () => true)
-  const content = (selectedAreaBinding?: { workspaceId: string; sessionId: string }) => <WorkbenchFloatingWorkspace runtime={runtime} workbenchId="one" canvasRef={{ current: canvas }} visible selectedAreaBinding={selectedAreaBinding}
+  const content = (selectedAreaBinding?: { workspaceId: string; sessionId: string }) => <WorkbenchFloatingWorkspace runtime={runtime} bayAgent={bayAgent} workbenchId="one" canvasRef={{ current: canvas }} visible selectedAreaBinding={selectedAreaBinding}
     editors={[]} hidden={[]} extensionAccess={{} as never} frame={frame} layout={layout} commit={() => true} pin={pin}
     sessionMarkers={{ project: { first: { label: 'A', accentToken: 'accent-1', customized: false }, second: { label: 'B', accentToken: 'accent-2', customized: false } } }} />
   const view = render(content(), { container: canvas.appendChild(document.createElement('div')) })
@@ -123,4 +123,32 @@ it('rechecks the release point and cancels Escape without moving the tab', async
   expect(pin).not.toHaveBeenCalled()
   hit = header; drag(); fireEvent.pointerMove(window, { clientX: 1, clientY: 10 }); fireEvent.keyDown(window, { key: 'Escape' }); fireEvent.pointerUp(window, { clientX: 1, clientY: 10 })
   expect(pin).not.toHaveBeenCalled(); expect(runtime.find('second', 'one')?.location).toBe('floating')
+})
+
+
+it('keeps Bay Agent in the existing floating workspace with no binding, close or pin controls', async () => {
+  const snapshot = { workbenchId: 'one', bayAgentSessionId: 'main-one', areas: [], workItems: [], assignments: [], attention: [] }
+  const controller = { subscribe: () => () => {}, getSnapshot: () => snapshot, ensureMainSession: vi.fn(async () => 'main-one') } as unknown as NonNullable<ComponentProps<typeof WorkbenchFloatingWorkspace>['bayAgent']>
+  const { runtime, pin } = setup(controller)
+  await waitFor(() => expect(runtime.find('bay-agent-main', 'one')?.tab.sessionId).toBe('main-one'))
+  fireEvent.click(screen.getByRole('tab', { name: /Bay Agent/ }))
+  expect(screen.getAllByRole('region', { name: '浮动工作区' })).toHaveLength(1)
+  expect(screen.queryByRole('button', { name: '关闭 Bay Agent' })).toBeNull()
+  fireEvent.keyDown(screen.getByRole('tab', { name: /Bay Agent/ }), { key: 'Delete' })
+  expect(runtime.find('bay-agent-main', 'one')).toBeDefined()
+  fireEvent.click(screen.getByRole('button', { name: '浮动工作区菜单' }))
+  expect(screen.getByRole('button', { name: '选择来源对话' }).hasAttribute('disabled')).toBe(true)
+  expect(screen.getByRole('button', { name: '放入区域' }).hasAttribute('disabled')).toBe(true)
+  expect(pin).not.toHaveBeenCalled()
+})
+
+it('shows recoverable Main creation errors without replacing the floating workspace', async () => {
+  const snapshot = { workbenchId: 'one', areas: [], workItems: [], assignments: [], attention: [] }
+  const controller = { subscribe: () => () => {}, getSnapshot: () => snapshot, ensureMainSession: vi.fn().mockRejectedValueOnce(new Error('offline')).mockResolvedValue('restored-main') } as unknown as NonNullable<ComponentProps<typeof WorkbenchFloatingWorkspace>['bayAgent']>
+  const { runtime } = setup(controller)
+  fireEvent.click(await screen.findByRole('tab', { name: /Bay Agent/ }))
+  expect(await screen.findByRole('alert')).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: '重试连接' }))
+  await waitFor(() => expect(runtime.find('bay-agent-main', 'one')?.tab.sessionId).toBe('restored-main'))
+  expect(screen.queryByRole('alert')).toBeNull()
 })

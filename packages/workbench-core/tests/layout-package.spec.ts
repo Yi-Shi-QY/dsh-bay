@@ -3,7 +3,9 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { projectLayoutPackage, buildLayoutPackage, inspectLayoutPackage, restoreLayoutPackage } from '../src/foundation/workbench-layout-package.ts'
-import { decodeDeterministicZip, encodeDeterministicZip, sha256Hex } from '../src/foundation/workbench-sharing.ts'
+import { buildWorkbenchPackage, decodeDeterministicZip, decodeWorkbenchPackageArchive, encodeDeterministicZip, sha256Hex } from '../src/foundation/workbench-sharing.ts'
+import { buildWorkbenchInventory } from '../src/foundation/workbench-inventory.ts'
+import { WORKBENCH_DSH_GENERATION } from '../src/release-compatibility.ts'
 import { createWorkbenchLayoutPackageService } from '../src/foundation/layout-package-service.ts'
 import { createProjectNeutralFrameSettings } from '../src/foundation/frame-settings-adapter.ts'
 import { createHostLayoutImportJournal } from '../src/host-layout-import-journal.ts'
@@ -11,6 +13,7 @@ import { areasOf } from '../src/foundation/document-v3.ts'
 import { mutableSettings, settingsFixture } from './settings-fixtures.ts'
 import type { WorkbenchEditorCatalogRow } from '../src/foundation/catalog.ts'
 import type { LayoutImportReceiptV2 } from '../src/layout-import-journal.ts'
+import { createAreaContext, createWorkbenchContext } from '../src/foundation/workbench-context.ts'
 
 const descriptor: WorkbenchEditorCatalogRow = { id: 'example.notes', scope: 'root', label: '笔记',
   declaration: { editorId: 'example.notes', scope: 'root', label: '笔记', requiredBinding: 'none', state: { schemaVersion: 1, maxBytes: 4096, share: 'portable', restore: 'if-valid' }, runtime: { background: 'keep', collapsed: 'keep', reacquire: 'on-visible' } },
@@ -27,10 +30,79 @@ async function alter(bytes: Uint8Array, transform: (manifest: any, layout: any) 
   return encodeDeterministicZip([{ path: 'manifest.json', content: encode(manifest) }, { path: 'workbench.json', content }])
 }
 describe('layout sharing manifest v3 / portable layout v2', () => {
+  it('exports backgrounds without Bay Main or runtime identities and restores a fresh local Workbench', async () => {
+    const record = structuredClone(settingsFixture().workbenches.a!)
+    record.bayAgentSession = { sessionId: 'private-bay-main', workspaceId: 'private-main-project', createdAt: 1, updatedAt: 2 }
+    record.context = createWorkbenchContext(); record.context.human.goal = 'Portable goal'
+    const projected = projectLayoutPackage(record, [descriptor])
+    const files = decodeDeterministicZip(await buildLayoutPackage(projected))
+    const payload = files.map(file => new TextDecoder().decode(file.content)).join('\n')
+    expect(payload).not.toContain('private-bay-main')
+    expect(payload).not.toContain('private-main-project')
+    expect(payload).not.toContain('bayAgentSession')
+    expect(files.every(file => !/journal|runtime|assignment/i.test(file.path))).toBe(true)
+    const restored = restoreLayoutPackage(projected, [descriptor])
+    expect(restored.context?.context.human.goal).toBe('Portable goal')
+    expect(restored).not.toHaveProperty('bayAgentSession')
+  })
   it('does not include the local Workbench layout lock preference in a shared layout package', () => {
     const record = { ...settingsFixture().workbenches.a!, layoutLocked: true }
     const projected = projectLayoutPackage(record, [descriptor])
     expect(projected).not.toHaveProperty('layoutLocked')
+  })
+  it('exports human Context and restores it with fresh local Area ids and user ownership', () => {
+    const record = structuredClone(settingsFixture().workbenches.a!)
+    const workbenchContext = createWorkbenchContext()
+    workbenchContext.human.goal = '迁移后的工作台目标'
+    const areaContext = createAreaContext()
+    areaContext.human.objective = '迁移后的区域目标'
+    record.context = workbenchContext
+    record.areaContexts = { 'area-a': areaContext }
+    record.areaMetadata = { 'area-a': { label: '源区域', ownership: 'superagent-managed', createdAt: 1, updatedAt: 1 } }
+    const projected = projectLayoutPackage(record, [descriptor])
+    expect(projected.context?.workbench.human.goal).toBe('迁移后的工作台目标')
+    expect(projected.context?.areas['area-1']?.sourceOwnership).toBe('superagent-managed')
+    const restored = restoreLayoutPackage(projected, [descriptor])
+    expect(restored.context?.context.human.goal).toBe('迁移后的工作台目标')
+    const localAreaId = areasOf(restored.document.root)[0]!.areaId
+    expect(restored.context?.areaContexts[localAreaId]?.human.objective).toBe('迁移后的区域目标')
+    expect(restored.context?.areaMetadata[localAreaId]?.ownership).toBe('user-owned')
+  })
+  it('includes Context JSON and Markdown projections in complete package exports', async () => {
+    const record = structuredClone(settingsFixture().workbenches.a!)
+    const context = createWorkbenchContext(); context.human.goal = '完整包目标'; record.context = context
+    const areaContext = createAreaContext(); areaContext.human.objective = '完整包区域目标'; record.areaContexts = { 'area-a': areaContext }
+    const packageValue = await buildWorkbenchPackage({
+      packageId: 'local.a', name: record.name, description: record.description, version: '0.0.0-test', createdAt: new Date(record.createdAt).toISOString(),
+      document: record.document, inventory: buildWorkbenchInventory(record.document, [descriptor]), editors: [descriptor],
+      compatibility: { dsh: { minimum: WORKBENCH_DSH_GENERATION }, targets: ['web'] },
+      workbenchContext: record.context, areaContexts: record.areaContexts, contextPolicy: 'human',
+    })
+    expect(packageValue.manifest.contextPath).toBe('context.json')
+    expect(packageValue.files.some(file => file.path === 'context/工作台整体背景说明.md')).toBe(true)
+    expect(packageValue.files.some(file => file.path === 'context/areas/area-1-区域说明.md')).toBe(true)
+    const decoded = await decodeWorkbenchPackageArchive(await (async () => {
+      const manifest = { path: 'manifest.json', content: new TextEncoder().encode(JSON.stringify(packageValue.manifest)) }
+      return encodeDeterministicZip([manifest, ...packageValue.files])
+    })())
+    expect(decoded.manifest.contextDigest).toMatch(/^[A-Fa-f0-9]{64}$/u)
+    expect(decoded.files.some(file => file.path === 'context.json')).toBe(true)
+  })
+  it('exports layout-only Context as schema 3 files and rejects Context tampering', async () => {
+    const record = structuredClone(settingsFixture().workbenches.a!)
+    const context = createWorkbenchContext(); context.human.goal = '布局包工作台目标'; record.context = context
+    const areaContext = createAreaContext(); areaContext.human.objective = '布局包区域目标'; record.areaContexts = { 'area-a': areaContext }
+    const layout = projectLayoutPackage(record, [descriptor])
+    expect(layout.schemaVersion).toBe(3)
+    const bytes = await buildLayoutPackage(layout)
+    const entries = [...decodeDeterministicZip(bytes)]
+    expect(entries.map(entry => entry.path)).toEqual(expect.arrayContaining(['manifest.json', 'workbench.json', 'context.json', 'context/工作台整体背景说明.md', 'context/areas/area-1-区域说明.md']))
+    const manifest = JSON.parse(new TextDecoder().decode(entries.find(entry => entry.path === 'manifest.json')!.content))
+    expect(manifest.compatibility.portableLayout).toBe(3)
+    expect(await inspectLayoutPackage(bytes)).toMatchObject({ layout: { schemaVersion: 3 } })
+    const contextEntry = entries.find(entry => entry.path === 'context.json')!
+    const tampered = encodeDeterministicZip(entries.map(entry => entry.path === contextEntry.path ? { ...entry, content: encode({ ...JSON.parse(new TextDecoder().decode(entry.content)), workbench: { ...JSON.parse(new TextDecoder().decode(entry.content)).workbench, human: { ...JSON.parse(new TextDecoder().decode(entry.content)).workbench.human, goal: 'tampered' } } }) } : entry))
+    await expect(inspectLayoutPackage(tampered)).rejects.toThrow()
   })
 
   it('preserves all tabs, current tab, order and tags without local session state', async () => {

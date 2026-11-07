@@ -8,8 +8,8 @@
   "upstreamCommit": "66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db",
   "artifact": {
     "path": "releases/alpha17.5-rc1-private/dsh-bay-0.2.2-alpha.17.5.tgz",
-    "size": 1064567,
-    "sha256": "61d13a16bb197e5979856b0fd65cb4c87a8b1f823686cd01e92946f9509f40af",
-    "integrity": "sha512-Q148tDoup9PK3DhxzdTpUYBkIpYkwmMjr0UPhKFvCQlW6iaS8c8nhj0xVKm7qt6UP5Qjk+dI9GgRDJ63NkHbng=="
+    "size": 1111996,
+    "sha256": "9a146979cbc32bdf156412c61b137b6a92edc58c1aac49b34f5ac44516c7dc3e",
+    "integrity": "sha512-R8UaOKSRNKYabCJoQJezDFkATLZeaHFH3AsdalDQQjZv1Vdi4sKiD8jLGhd01J9iNRxoE9r8szzaRO3ACMiIKg=="
   }
 }

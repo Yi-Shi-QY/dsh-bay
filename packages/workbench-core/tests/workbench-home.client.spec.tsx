@@ -23,6 +23,10 @@ function directory(overrides: Record<string, unknown> = {}) {
     getDocument: () => migrateDocumentV2ToV3(defaultLayout()),
     openAndSelect: vi.fn(async () => ({ status: 'committed' as const, revision: 2 })),
     create: vi.fn(async () => ({ status: 'committed' as const, revision: 2, workbenchId: 'created' })),
+    updateMetadata: vi.fn(async () => ({ status: 'committed' as const, revision: 2 })),
+    updateWorkbenchBackground: vi.fn(async () => ({ status: 'committed' as const, revision: 2 })),
+    unload: vi.fn(async () => ({ status: 'committed' as const, revision: 2 })),
+    remove: vi.fn(async () => ({ status: 'committed' as const, revision: 2 })),
     archive: vi.fn(async () => ({ status: 'committed' as const, revision: 2 })),
     restore: vi.fn(async () => ({ status: 'committed' as const, revision: 2 })),
     ...overrides,
@@ -171,6 +175,57 @@ describe('Workbench Home', () => {
     fireEvent.click(view.getByRole('button', { name: '取消' }))
     expect(view.queryByRole('dialog')).toBeNull()
     expect(d.create).not.toHaveBeenCalled()
+  })
+
+  it('reports that native AI is unavailable instead of pretending to generate a draft', async () => {
+    const d = directory()
+    const view = render(<WorkbenchHome directory={d as never} onOpenWorkbench={vi.fn()} onCreated={vi.fn()} />)
+    fireEvent.click(view.getByRole('button', { name: '创建工作台', exact: true }))
+    fireEvent.click(view.getByRole('menuitem', { name: '左右双栏，2 个区域' }))
+    fireEvent.change(view.getByLabelText('名称'), { target: { value: 'AI 测试工作台' } })
+    fireEvent.click(view.getByRole('button', { name: 'AI 辅助生成背景草稿' }))
+    expect((await view.findByRole('alert')).textContent).toContain('当前环境未连接 DSH 原生 AI 服务。')
+    expect(d.create).not.toHaveBeenCalled()
+  })
+
+  it('creates a temporary layout for a real draft, then saves reviewed metadata and background', async () => {
+    const d = directory()
+    d.updateMetadata = vi.fn(async () => ({ status: 'committed' as const, revision: 3 }))
+    d.updateWorkbenchBackground = vi.fn(async () => ({ status: 'committed' as const, revision: 4 }))
+    d.remove = vi.fn(async () => ({ status: 'committed' as const, revision: 5 }))
+    d.unload = vi.fn(async () => ({ status: 'committed' as const, revision: 6 }))
+    const generateDraft = vi.fn(async () => '# 基于区域事实的目标\n\n- 先完成研究')
+    const onCreated = vi.fn()
+    const view = render(<WorkbenchHome directory={d as never} onOpenWorkbench={vi.fn()} onCreated={onCreated} generateContextDraft={generateDraft} />)
+    fireEvent.click(view.getByRole('button', { name: '创建工作台', exact: true }))
+    fireEvent.click(view.getByRole('menuitem', { name: '左右双栏，2 个区域' }))
+    fireEvent.change(view.getByLabelText('名称'), { target: { value: '初始名称' } })
+    fireEvent.change(view.getByLabelText('简介（可选）'), { target: { value: '初始简介' } })
+    fireEvent.click(view.getByRole('button', { name: 'AI 辅助生成背景草稿' }))
+    await waitFor(() => expect(generateDraft).toHaveBeenCalledWith({ workbenchId: 'created', scope: 'workbench', currentValue: '' }))
+    expect((view.getByLabelText('工作台背景（可选）') as HTMLTextAreaElement).value).toBe('# 基于区域事实的目标\n\n- 先完成研究')
+    fireEvent.change(view.getByLabelText('名称'), { target: { value: '最终名称' } })
+    fireEvent.change(view.getByLabelText('简介（可选）'), { target: { value: '最终简介' } })
+    fireEvent.click(view.getByRole('button', { name: '创建并打开' }))
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith('created'))
+    expect(d.create).toHaveBeenCalledWith({ name: '初始名称', description: '初始简介', layoutPresetId: 'columns' })
+    expect(d.updateMetadata).toHaveBeenCalledWith('created', { name: '最终名称', description: '最终简介' })
+    expect(d.updateWorkbenchBackground).toHaveBeenCalledWith('created', '# 基于区域事实的目标\n\n- 先完成研究')
+  })
+
+  it('does not persist a failed generated response as a background draft', async () => {
+    const d = directory()
+    d.updateMetadata = vi.fn(async () => ({ status: 'committed' as const, revision: 3 }))
+    d.updateWorkbenchBackground = vi.fn(async () => ({ status: 'committed' as const, revision: 4 }))
+    const generateDraft = vi.fn(async () => { throw new Error('DSH Bay Agent response timeout') })
+    const view = render(<WorkbenchHome directory={d as never} onOpenWorkbench={vi.fn()} onCreated={vi.fn()} generateContextDraft={generateDraft} />)
+    fireEvent.click(view.getByRole('button', { name: '创建工作台', exact: true }))
+    fireEvent.click(view.getByRole('menuitem', { name: '左右双栏，2 个区域' }))
+    fireEvent.change(view.getByLabelText('名称'), { target: { value: '失败测试' } })
+    fireEvent.click(view.getByRole('button', { name: 'AI 辅助生成背景草稿' }))
+    expect((await view.findByRole('alert')).textContent).toContain('DSH Bay Agent response timeout')
+    expect((view.getByLabelText('工作台背景（可选）') as HTMLTextAreaElement).value).toBe('')
+    expect(d.updateWorkbenchBackground).not.toHaveBeenCalled()
   })
 
   it('opens cards and promotes sharing actions to Home', async () => {
