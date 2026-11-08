@@ -2,7 +2,7 @@
 import React from 'react'
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { WorkbenchFrame } from '../src/foundation/WorkbenchFrame.tsx'
+import { WorkbenchFrame, type WorkbenchFrameProps } from '../src/foundation/WorkbenchFrame.tsx'
 import { createSessionTab, defaultLayout } from '../src/foundation/model.ts'
 import type { WorkbenchEditorOwnerProps } from '../src/client/editor-slots.ts'
 import type { SettingsScopePatchResult, SettingsScopeSnapshot } from '../src/client/workbench-settings-contracts.ts'
@@ -12,6 +12,7 @@ import type { WorkbenchLayoutDocument } from '../src/foundation/model.ts'
 import { createWorkbenchRuntimeMetrics } from '../src/foundation/workbench-runtime-metrics.ts'
 import type { WorkbenchWindowControllerV1 } from '../src/client/workbench-window-controller.ts'
 import type { WorkbenchShareControllerV1 } from '../src/client/workbench-share-controller.ts'
+import type { ConversationTabStatusSource, ConversationTabStatus } from '../src/client/conversation-tab-status.ts'
 
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals() })
 
@@ -33,13 +34,30 @@ function setup(
   nestedCollapsedSplit?: boolean,
   boundSession = false,
   showSessionAccentFrames = true,
+  conversationStatus?: ConversationTabStatusSource,
+  interactionPolicy?: WorkbenchFrameProps['conversationResourcePolicy'],
+  pendingConversation = false,
+  legacyUnboundConversation = false,
+  availableSession = false,
 ) {
+  const editorId = conversationStatus || pendingConversation || legacyUnboundConversation ? 'workbench.conversation' : 'test.editor'
+  const sessionEditor = boundSession || pendingConversation || legacyUnboundConversation
   const layout = defaultLayout()
   const first = layout.root
   if (first.kind !== 'group') throw new Error('fixture must have one Area')
-  first.tabs = boundSession
+  first.tabs = pendingConversation
+    ? tabTitles.map((title, index) => ({
+      id: 'test-page-' + String(index + 1), editorId, editorScope: 'session' as const,
+      pendingBinding: 'binding-' + String(index + 1), lastKnownTitle: title, state: {},
+    }))
+    : legacyUnboundConversation
+      ? tabTitles.map((title, index) => ({
+        id: 'test-page-' + String(index + 1), editorId, editorScope: 'session' as const,
+        lastKnownTitle: title, state: {},
+      }))
+    : boundSession
     ? tabTitles.map((title, index) => createSessionTab(
-      `test-page-${String(index + 1)}`, 'test.editor', { workspaceId: 'workspace-a', sessionId: 'session-a' }, title,
+      `test-page-${String(index + 1)}`, editorId, { workspaceId: 'workspace-a', sessionId: 'session-a' }, title,
     ))
     : tabTitles.map((title, index) => ({
       id: `test-page-${String(index + 1)}`, editorId: 'test.editor', editorScope: 'root' as const, lastKnownTitle: title, state: {},
@@ -95,16 +113,16 @@ function setup(
     subscribe: (listener: () => void) => { listeners.add(listener); return () => listeners.delete(listener) },
     set: vi.fn(), unset: vi.fn(), patch: vi.fn(patch),
   }
-  const sessions = boundSession
+  const sessions = boundSession || availableSession
     ? { ids: ['session-a'], byId: { 'session-a': { id: 'session-a', title: '\u7ed1\u5b9a\u5bf9\u8bdd', displayTitle: '\u7ed1\u5b9a\u5bf9\u8bdd', running: true, blank: false, updatedAt: 1, retainedBy: { mainView: 1 } } }, phase: 'ready' }
     : { byId: {}, ids: [], phase: 'ready' }
-  const workspaces = boundSession
+  const workspaces = boundSession || availableSession
     ? { items: [{ workspaceId: 'workspace-a', title: '\u7ed1\u5b9a\u9879\u76ee', path: '/workspace-a', sessionIds: ['session-a'] }], archivedSessionIds: [], phase: 'ready' }
     : { items: [], archivedSessionIds: [], phase: 'ready' }
   const entries = [{
-    id: 'test.editor', scope: boundSession ? 'session' as const : 'root' as const, label: '测试内页',
+    id: editorId, scope: sessionEditor ? 'session' as const : 'root' as const, label: '测试内页',
     declaration: {
-      editorId: 'test.editor', scope: boundSession ? 'session' as const : 'root' as const, label: '测试内页', requiredBinding: boundSession ? 'session' as const : 'none' as const,
+      editorId, scope: sessionEditor ? 'session' as const : 'root' as const, label: '测试内页', requiredBinding: sessionEditor ? 'session' as const : 'none' as const,
       state: { schemaVersion: 1, maxBytes: 1024, restore: 'if-valid', share: 'portable' },
       runtime: { background: 'dispose', collapsed: collapsed ?? 'keep', reacquire: 'on-visible' },
     },
@@ -158,6 +176,8 @@ function setup(
     useWorkspaces: (select: (state: unknown) => unknown) => select(workspaces),
     bindLayout: () => () => {}, bindNavigation: () => () => {}, selectSession: vi.fn(),
     settings, runtimeMetrics: metrics,
+    conversationStatus,
+    ...(interactionPolicy === undefined ? {} : { conversationResourcePolicy: interactionPolicy }),
     showSessionAccentFrames,
     ...(browserContext ?? {}),
     ...(windowController === undefined ? {} : { windowController }),
@@ -210,6 +230,83 @@ function setup(
 async function advance(ms: number) { await act(async () => { await vi.advanceTimersByTimeAsync(ms) }) }
 
 describe('Frame layout persistence', () => {
+  it('applies tab label preferences and keeps Area menu close available', () => {
+    const h = setup(async () => ({ status: 'committed', revision: 2 }), undefined, ['偏好验证'],
+      undefined, undefined, undefined, undefined, false, false, false, true, undefined,
+      { tabFontSize: 'larger', showTabCloseButtons: false })
+    const tab = h.view.container.querySelector('[data-workbench-area-tab="test-page-1"]')!
+    const label = tab.querySelector<HTMLElement>('[style*="font-size"]')!
+    expect(label.textContent).toBe('偏好验证')
+    expect(label.style.fontSize).toBe('14px')
+    expect(tab.querySelector('button[aria-label^="关闭"]')).toBeNull()
+
+    fireEvent.click(h.view.getByRole('button', { name: '区域操作' }))
+    fireEvent.click(h.view.getByRole('menuitem', { name: '关闭当前视图' }))
+    expect(h.view.container.querySelector('[data-workbench-area-tab="test-page-1"]')).toBeNull()
+  })
+
+  it('shows a designed pending-conversation state and opens the existing binding picker', () => {
+    const h = setup(async () => ({ status: 'committed', revision: 2 }), undefined, ['对话'],
+      undefined, undefined, undefined, false, false, false, false, true, undefined, undefined, true)
+    const pending = h.view.container.querySelector('[data-workbench-pending-binding]')!
+    expect(pending.querySelector('h2')?.textContent).toBe('连接一个已有对话')
+    expect(pending.textContent).toContain('对应的工具和运行状态')
+    expect(pending.querySelector('[aria-label="绑定步骤"]')?.children).toHaveLength(2)
+    expect(pending.querySelector('[data-workbench-bind-conversation]')).toBeTruthy()
+    expect(h.view.getByRole('button', { name: '选择已有对话' })).toBeTruthy()
+
+    fireEvent.click(h.view.getByRole('button', { name: '选择已有对话' }))
+    expect(h.view.getByRole('listbox', { name: '可绑定的对话' })).toBeTruthy()
+    expect(h.view.getByText(/没有可绑定的非空对话/)).toBeTruthy()
+    expect(h.view.queryByRole('button', { name: /新建对话/ })).toBeNull()
+  })
+
+  it('binds an unbound conversation page to the selected existing session', () => {
+    const h = setup(async () => ({ status: 'committed', revision: 2 }), undefined, ['旧对话'],
+      undefined, undefined, undefined, undefined, false, false, false, false, undefined, undefined, false, true, true)
+    expect(h.view.container.querySelector('[data-workbench-pending-binding]')).toBeTruthy()
+
+    fireEvent.click(h.view.getByRole('button', { name: '选择已有对话' }))
+    fireEvent.click(h.view.getByRole('option', { name: /绑定对话/ }))
+
+    expect(h.view.container.querySelector('[data-workbench-pending-binding]')).toBeNull()
+    expect(h.view.getByRole('button', { name: /绑定对话/ })).toBeTruthy()
+  })
+
+  it('updates conversation status across duplicate tabs, overview and collapsed preview without saving layout', async () => {
+    vi.useFakeTimers()
+    let states: ReadonlyMap<string, ConversationTabStatus> = new Map([['session-a', { status: 'running', label: '进行中' }]])
+    const listeners = new Set<() => void>()
+    const off = vi.fn()
+    const source: ConversationTabStatusSource = { getSnapshot: () => states, subscribe: listener => { listeners.add(listener); return () => { listeners.delete(listener) } }, watch: vi.fn(() => off) }
+    const h = setup(async () => ({ status: 'committed', revision: 2 }), 'dispose', ['对话一', '对话二'], undefined, undefined, undefined, undefined, false, false, true, true, source)
+    h.settings.patch.mockClear() // Initial marker allocation is unrelated to transient tab status.
+    const change = (state: ConversationTabStatus) => act(() => { states = new Map([['session-a', state]]); for (const listener of listeners) listener() })
+    expect(source.watch).toHaveBeenCalledWith(['session-a'])
+    change({ status: 'attention', label: '等待审批' })
+    for (const el of h.view.container.querySelectorAll('[role=tab][aria-description]')) {
+      expect(el.getAttribute('aria-description')).toContain('等待审批')
+      expect(el.querySelector('[data-tab-status=attention]')).not.toBeNull()
+    }
+    expect(h.settings.patch).not.toHaveBeenCalled()
+    fireEvent.click(h.view.getAllByRole('button', { name: /查看全部内页/ })[0]!)
+    expect(h.view.getByRole('option', { name: /对话二.*等待审批/ })).toBeTruthy()
+    fireEvent.click(h.view.getByRole('option', { name: /对话二/ }))
+    change({ status: 'completed', label: '本轮已完成' })
+    const area = h.view.container.querySelector<HTMLElement>('[data-workbench-group="group-main"]')!
+    const collapse = area.querySelector<HTMLElement>('[data-area-collapse-toggle]')!
+    fireEvent.click(collapse)
+    expect(area.hasAttribute('data-area-collapsed')).toBe(true)
+    expect(area.querySelectorAll('[data-tab-status=completed]')).toHaveLength(2)
+    fireEvent.pointerEnter(collapse); await advance(300)
+    const preview = document.querySelector('[data-area-collapse-info]')!
+    expect(preview.querySelectorAll('span[data-tab-status=completed]')).toHaveLength(2)
+    expect(preview.textContent).toContain('本轮已完成')
+    change({ status: 'stopped', label: '本轮已停止' })
+    expect(preview.querySelectorAll('span[data-tab-status=stopped]')).toHaveLength(2)
+    h.view.unmount(); expect(off).toHaveBeenCalledTimes(2)
+  })
+
   it('allows the minimal presentation to hide marker frame paint without removing the binding marker', () => {
     const h = setup(async () => ({ status: 'committed', revision: 2 }), undefined, ['绑定对话内页'], undefined, undefined, undefined, undefined, false, false, true, false)
     const canvas = h.view.container.querySelector('[data-workbench-canvas]')
@@ -1179,12 +1276,27 @@ describe('Frame layout persistence', () => {
     const overview = h.view.getByRole('button', { name: /查看全部内页/ })
     fireEvent.click(overview)
     expect(h.view.getByRole('listbox', { name: '全部内页' })).toBeTruthy()
-    const search = h.view.getByPlaceholderText('搜索内页')
+    const search = h.view.getByPlaceholderText('搜索名称、模式、项目或路径')
     fireEvent.change(search, { target: { value: 'Page 8' } })
     expect(h.view.getByRole('option', { name: /Page 8/ })).toBeTruthy()
     expect(h.view.queryByRole('option', { name: /Page 1/ })).toBeNull()
     fireEvent.click(h.view.getByRole('option', { name: /Page 8/ }))
     expect(h.view.getByRole('tab', { name: '当前内页：Page 8，点击打开内页操作' }).getAttribute('aria-selected')).toBe('true')
+  })
+
+  it('finds tabs by bound conversation name and project without changing the layout during search', () => {
+    const h = setup(async () => ({ status: 'committed', revision: 2 }), undefined, ['资源一', '资源二'],
+      undefined, undefined, undefined, undefined, false, false, true)
+    h.settings.patch.mockClear()
+    fireEvent.click(h.view.getByRole('button', { name: /查看全部内页/ }))
+    const search = h.view.getByPlaceholderText('搜索名称、模式、项目或路径')
+    fireEvent.change(search, { target: { value: '绑定对话' } })
+    expect(h.view.getAllByRole('option')).toHaveLength(2)
+    fireEvent.change(search, { target: { value: '绑定项目' } })
+    expect(h.view.getAllByRole('option')).toHaveLength(2)
+    fireEvent.change(search, { target: { value: '没有的对话' } })
+    expect(h.view.queryAllByRole('option')).toHaveLength(0)
+    expect(h.settings.patch).not.toHaveBeenCalled()
   })
 
   it('keeps collapsed areas discoverable through an interactive tab preview', async () => {

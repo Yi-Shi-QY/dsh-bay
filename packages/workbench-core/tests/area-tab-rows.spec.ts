@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildWorkbenchAreaTabRows,
+  conversationTabUnavailable,
   indexWorkbenchAreaOrdinals,
   indexWorkbenchEditors,
   workbenchEditorFromIndex,
@@ -25,6 +26,36 @@ function tab(input: Partial<TabDocument> & Pick<TabDocument, 'id' | 'editorId' |
 }
 
 describe('Workbench Area tab row model', () => {
+  it('shows shared conversation activity even when its view is disposed, without coloring sibling resources', () => {
+    const editorIndex = indexWorkbenchEditors([editor('workbench.conversation', 'session', 'message'), editor('files', 'session', 'folder')])
+    const input = { editorIndex, activeTabId: 'chat', areaBinding: { sessionId: 'session-1' }, pausedTabId: 'chat',
+      conversations: new Map([['session-1', { status: 'attention' as const, label: '等待审批' }]]),
+      tabs: [tab({ id: 'chat', editorId: 'workbench.conversation', editorScope: 'session' }),
+        tab({ id: 'copy', editorId: 'workbench.conversation', editorScope: 'session', sessionId: 'session-1' }),
+        tab({ id: 'files', editorId: 'files', editorScope: 'session', sessionId: 'session-1' })] }
+    expect(buildWorkbenchAreaTabRows(input).summaries.map(row => [row.status, row.statusLabel])).toEqual([
+      ['attention', '等待审批'], ['attention', '等待审批'], ['ready', '就绪'],
+    ])
+  })
+
+  it('retains missing, unbound, unavailable and unknown states ahead of an old successful result', () => {
+    const chat = tab({ id: 'chat', editorId: 'workbench.conversation', editorScope: 'session', sessionId: 's' })
+    const input = { tabs: [chat], editorIndex: indexWorkbenchEditors([editor('workbench.conversation', 'session', 'message')]), activeTabId: 'chat', areaBinding: undefined, pausedTabId: undefined,
+      conversations: new Map([['s', { status: 'completed' as const, label: '本轮已完成' }]]) }
+    expect(buildWorkbenchAreaTabRows({ ...input, editorIndex: indexWorkbenchEditors([]) }).summaries[0]?.status).toBe('missing')
+    expect(buildWorkbenchAreaTabRows({ ...input, tabs: [{ ...chat, pendingBinding: 'draft' }] }).summaries[0]?.status).toBe('unbound')
+    expect(buildWorkbenchAreaTabRows({ ...input, sessionAvailability: () => '此对话已归档' }).summaries[0]).toMatchObject({ status: 'failed', statusLabel: '此对话已归档' })
+    expect(buildWorkbenchAreaTabRows({ ...input, conversations: new Map() }).summaries[0]?.status).toBe('unknown')
+  })
+
+  it('resolves legacy workspace-less bindings and detects archived, missing and moved conversations', () => {
+    const facts = { sessions: { s: {} }, workspaces: [{ workspaceId: 'new', sessionIds: ['s'] }], archivedSessionIds: [] }
+    expect(conversationTabUnavailable({ sessionId: 's' }, facts)).toBeUndefined()
+    expect(conversationTabUnavailable({ sessionId: 's', workspaceId: 'old' }, facts)).toBe('对话已移出绑定项目')
+    expect(conversationTabUnavailable({ sessionId: 's' }, { ...facts, archivedSessionIds: ['s'] })).toBe('此对话已归档')
+    expect(conversationTabUnavailable({ sessionId: 's' }, { ...facts, sessions: {} })).toBe('此对话暂时不可用')
+  })
+
   it('matches editors by both ID and scope while preserving Area order', () => {
     const rootEditor = editor('shared-id', 'root', 'folder')
     const sessionEditor = editor('shared-id', 'session', 'terminal')

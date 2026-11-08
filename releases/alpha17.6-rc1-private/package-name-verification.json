@@ -1,0 +1,48 @@
+{
+  "packageName": "dsh-bay",
+  "version": "0.2.2-alpha.17.6",
+  "archive": "releases/alpha17.6-rc1-private/dsh-bay-0.2.2-alpha.17.6.tgz",
+  "sha256": "2ca262e151b702b2fd3c51f3aede773e9744b4913c38f2fe48b36366f8524c77",
+  "bytes": 1143676,
+  "archiveFiles": 278,
+  "clientModuleId": "dsh-bay",
+  "bundleEntry": "dsh-bay",
+  "manifestMatched": true,
+  "buildInputsMatched": true,
+  "rc1DependencyClosureMatched": true,
+  "historicalRc5Files": 0,
+  "validation": {
+    "scope": "targeted-ui-regression",
+    "testFiles": 11,
+    "tests": 140,
+    "suites": [
+      "settings-optimization.client.spec.tsx",
+      "workbench-core-settings-section.client.spec.tsx",
+      "settings-entry.client.spec.tsx",
+      "conversation-tab-status.spec.ts",
+      "tab-information.spec.ts",
+      "area-tab-rows.spec.ts",
+      "frame-persistence.client.spec.tsx",
+      "floating-workspace-controls.client.spec.tsx",
+      "workbench-interaction-policy.spec.ts",
+      "workbench-package-service.spec.ts",
+      "workbench-17-6-rc1-identity.spec.ts"
+    ],
+    "fullSuite": "not-rerun-for-current-ui-snapshot",
+    "typecheck": "passed",
+    "rc1Identity": "passed",
+    "strictPack": "passed",
+    "archive": "passed",
+    "settingsBrowserCheck": {
+      "status": "passed",
+      "environment": "isolated-source-fixture-with-dsh-theme",
+      "viewports": [
+        "1440x980",
+        "390x844"
+      ],
+      "consoleErrors": 0
+    },
+    "desktopSmoke": "not-run-for-current-ui-snapshot"
+  },
+  "installationMigration": "Disable the old @dsh-workbench/core package before enabling dsh-bay; no Profile was modified."
+}

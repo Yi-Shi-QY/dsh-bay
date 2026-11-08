@@ -10,8 +10,7 @@ import type { WorkbenchRecordV2, WorkbenchSettingsV4, WorkbenchAiSelectionV1 } f
 import type { ModelCatalog } from '@deepseek-ai/dsh-api-session-controller'
 import { normalizeWorkbenchTags } from './persistence.ts'
 import { DESKTOP_SETTINGS_CONTEXT, settingsTargetWritable, type SettingsViewMemory, type WorkbenchSettingsOpenOptionsV1 } from './settings-context.ts'
-import { WORKBENCH_CORE_VERSION, WORKBENCH_DSH_GENERATION } from '../release-compatibility.ts'
-import { workbenchExtensionUnavailableCopyV1, type WorkbenchExtensionAccessSnapshotV1 } from '../workbench-extension-access.ts'
+import { type WorkbenchExtensionAccessSnapshotV1 } from '../workbench-extension-access.ts'
 import { DEFAULT_WORKBENCH_CONVERSATION_INTERACTION_POLICY, normalizeWorkbenchConversationInteractionPolicy } from '../workbench-interaction-policy.ts'
 import type { WorkbenchConversationResourcePlacementV1 } from '../workbench-interaction-policy.ts'
 import css from './WorkbenchSettings.module.css'
@@ -217,6 +216,111 @@ function WorkbenchDetails(props: SettingsPageProps & { record: WorkbenchRecordV2
 }
 
 const EMPTY_EXTENSIONS: WorkbenchExtensionAccessSnapshotV1 = { status: 'unavailable', extensions: [] }
+type ExtensionRow = WorkbenchExtensionAccessSnapshotV1['extensions'][number]
+
+function extensionAvailabilityLabel(extension: ExtensionRow) {
+  if (extension.availability === 'ready') return extension.allowed ? '已启用' : '待启用'
+  if (extension.availability === 'not-allowed') return '未启用'
+  if (extension.availability === 'confirmation-required') return '待重新确认'
+  if (extension.availability === 'dsh-disabled') return 'DSH 中未运行'
+  if (extension.availability === 'dsh-missing') return '未安装'
+  if (extension.availability === 'editor-missing') return '内页缺失'
+  if (extension.availability === 'inventory-unavailable') return '状态未知'
+  if (extension.availability === 'identity-unverified') return '身份待核验'
+  if (extension.availability === 'incompatible') return '不兼容'
+  return '声明无效'
+}
+function extensionStatusTone(extension: ExtensionRow) {
+  return extension.availability === 'ready' && !extension.allowed ? 'not-allowed' : extension.availability
+}
+function SettingsSwitch({ label, checked, disabled, onChange }: {
+  label: string
+  checked: boolean
+  disabled?: boolean
+  onChange(checked: boolean): void
+}) {
+  return <button type="button" role="switch" className={css.capsuleSwitch} aria-label={label}
+    aria-checked={checked} disabled={disabled} onClick={() => onChange(!checked)}><span aria-hidden="true" /></button>
+}
+
+function InnerPageSettingsCard({ editor, props }: { editor: WorkbenchEditorCatalogRow; props: SettingsPageProps }) {
+  const browser = props.settingsContext?.mode === 'browser-workbench'
+  const actions = useSettingsAction()
+  const builtin = editor.id.startsWith('workbench.')
+  return <article className={css.catalogCard} data-page-kind={builtin ? 'builtin' : 'extension'}>
+    <div className={css.catalogCardHeader}><PageIcon editor={editor} /><div className={css.catalogIdentity}>
+      <strong>{editor.label}</strong><p><BindingRequirement editor={editor} /></p>
+    </div><span className={css.catalogStatus}>已就绪</span></div>
+    <p className={css.catalogMeta}>{builtin ? '内置 · DSH 原生能力' : '已注册内页'}</p>
+    {!browser && !editor.resourceOnly ? <div className={css.cardSwitchRow}><span>显示添加入口</span>
+      <SettingsSwitch label={'显示 ' + editor.label + ' 添加入口'} checked={!props.value?.globalHiddenEditorIds?.includes(editor.id)}
+        disabled={actions.states.entry?.busy || !props.workbenchDirectory?.setGlobalEditorVisible}
+        onChange={visible => void actions.run('entry', () => props.workbenchDirectory!.setGlobalEditorVisible!(editor.id, visible))} />
+    </div> : null}
+    {actions.feedback('entry')}
+    <details className={css.cardDetails}><summary>用途与声明详情</summary><p>{editor.declaration?.label ?? editor.label}</p>
+      <p>内页标识：{editor.id}</p><p>状态分享：{editor.portability?.exportState ? '通过已声明处理器迁移' : '仅分享内页引用'}</p>
+    </details>
+  </article>
+}
+
+function ExtensionSettingsCard({ extension, props, inventoryReady }: { extension: ExtensionRow; props: SettingsPageProps; inventoryReady: boolean }) {
+  const browser = props.settingsContext?.mode === 'browser-workbench'
+  const actions = useSettingsAction()
+  const [confirmRevoke, setConfirmRevoke] = useState(false)
+  const editors = props.editors.filter(editor => extension.editorIds.includes(editor.id))
+  const leadEditor = editors[0] ?? { id: extension.editorIds[0] ?? extension.moduleId, scope: 'session' as const, label: extension.moduleId }
+  const consent = props.value?.extensionConsents?.[extension.key]
+  // A persisted permission can still be revoked while the plugin is offline.
+  const enabled = extension.availability !== 'confirmation-required' && (consent?.allowed ?? extension.allowed)
+  const canAllow = inventoryReady && ['not-allowed', 'confirmation-required', 'ready'].includes(extension.availability)
+    && extension.packageName !== undefined && extension.apiVersion === 1 && !!extension.contractFingerprint
+  const affected = Object.values(props.value?.workbenches ?? {}).filter(record =>
+    areasOf(record.document.root).some(area => area.moduleHistory.some(page => extension.editorIds.includes(page.editorId))))
+  const count = affected.reduce((sum, record) => sum + areasOf(record.document.root).reduce((total, area) =>
+    total + area.moduleHistory.filter(page => extension.editorIds.includes(page.editorId)).length, 0), 0)
+  const commit = async (allowed: boolean) => {
+    const saved = await actions.run('permission', () => props.workbenchDirectory!.setExtensionAllowed!({
+      packageName: extension.packageName!, moduleId: extension.moduleId, apiVersion: extension.apiVersion ?? 1,
+      editorIds: extension.editorIds, ...(extension.contractFingerprint ? { contractFingerprint: extension.contractFingerprint } : {}),
+    }, allowed))
+    if (saved) setConfirmRevoke(false)
+  }
+  return <article className={css.catalogCard} data-page-kind="extension" data-extension-key={extension.key}>
+    <div className={css.catalogCardHeader}><PageIcon editor={leadEditor} /><div className={css.catalogIdentity}>
+      <strong>{editors.length === 1 ? leadEditor.label : extension.moduleId}</strong>
+      <p>扩展 · {extension.editorIds.length} 个内页</p>
+    </div><span className={css.catalogStatus} data-status={extensionStatusTone(extension)}>{extensionAvailabilityLabel(extension)}</span></div>
+    <p className={css.catalogMeta}>{extension.packageName ?? '包身份尚未核实'}{extension.packageVersion ? ' · ' + extension.packageVersion : ''}</p>
+    {!browser ? <div className={css.cardSwitchRow}><span>{extension.availability === 'confirmation-required' ? '重新确认并启用' : '在工作台启用'}</span>
+      <SettingsSwitch label={'在工作台启用 ' + (extension.packageName ?? extension.moduleId)} checked={enabled}
+        disabled={actions.states.permission?.busy || !props.workbenchDirectory?.setExtensionAllowed || !extension.packageName || (!enabled && !canAllow)}
+        onChange={allowed => { if (!allowed && count > 0) setConfirmRevoke(true); else void commit(allowed) }} />
+    </div> : null}
+    {extension.availability !== 'ready' ? <p className={css.cardHint}>{extension.detail}</p> : null}
+    {confirmRevoke ? <div className={css.notice} role="group" aria-label="确认停用扩展">
+      <p>停用将影响 {affected.length} 个工作台中的 {count} 个内页，布局引用会保留。</p>
+      <div className={css.noticeActions}><button className={css.dangerButton} disabled={actions.states.permission?.busy} onClick={() => void commit(false)}>确认停用</button>
+        <button className={css.secondaryButton} disabled={actions.states.permission?.busy} onClick={() => setConfirmRevoke(false)}>取消</button></div>
+    </div> : null}
+    {actions.feedback('permission')}
+    <details className={css.cardDetails}><summary>内页与权限详情</summary>
+      <p>此开关允许扩展向工作台提供内页。安装、更新与 DSH 中的运行状态由 DSH 插件管理控制。</p>
+      <p>{affected.length} 个工作台中引用 {count} 次</p>
+      {extension.editorIds.map(id => {
+        const editor = editors.find(row => row.id === id)
+        return <div className={css.extensionPageRow} key={id}><span>{editor?.label ?? id}</span>
+          {!browser && extension.allowed && editor && !editor.resourceOnly ? <SettingsSwitch label={'显示 ' + editor.label + ' 添加入口'}
+            checked={!props.value?.globalHiddenEditorIds?.includes(id)} disabled={actions.states[id]?.busy || !props.workbenchDirectory?.setGlobalEditorVisible}
+            onChange={visible => void actions.run(id, () => props.workbenchDirectory!.setGlobalEditorVisible!(id, visible))} /> : null}
+          {actions.feedback(id)}
+        </div>
+      })}
+      <details><summary>兼容与诊断</summary><pre>{JSON.stringify(extension.providerDiagnostic ?? { availability: extension.availability, moduleId: extension.moduleId, editorIds: extension.editorIds }, null, 2)}</pre></details>
+    </details>
+  </article>
+}
+
 export function InnerPagesSettingsPage(props: SettingsPageProps) {
   const browser = props.settingsContext?.mode === 'browser-workbench'
   const registry = props.extensionRegistry
@@ -225,47 +329,43 @@ export function InnerPagesSettingsPage(props: SettingsPageProps) {
   const access = useSyncExternalStore(subscribe, get, get)
   const [query, setQuery] = useState(props.memory.searches.pages ?? '')
   const [filter, setFilter] = useState(props.memory.filters.pages ?? 'all')
-  const [confirmRevoke, setConfirmRevoke] = useState<string>()
   const actions = useSettingsAction()
-  const used = useMemo(() => new Set(Object.values(props.value?.workbenches ?? {}).flatMap(row => areasOf(row.document.root).flatMap(area => area.moduleHistory.map(page => `${page.editorScope}:${page.editorId}`)))), [props.value?.workbenches])
-  const rows = [...props.editors]
-  for (const extension of access.extensions) for (const editorId of extension.editorIds) {
-    if (!rows.some(row => row.id === editorId)) rows.push({ id: editorId, scope: 'session', label: editorId })
-  }
-  const filtered = rows.filter(editor => !browser || used.has(`${editor.scope}:${editor.id}`)).filter(editor => {
-    const extension = access.extensions.find(row => row.editorIds.includes(editor.id))
-    const builtin = extension === undefined && editor.id.startsWith('workbench.') && props.editors.includes(editor)
-    return `${editor.label} ${extension?.packageName ?? ''} ${editor.id}`.toLowerCase().includes(query.toLowerCase())
-      && (filter === 'all' || (filter === 'builtin' && builtin) || (filter === 'extension' && !builtin) || (filter === 'attention' && extension?.availability !== 'ready' && !builtin))
-  })
-  return <section className={css.page}><header className={css.pageHeader}><div><h3>{browser ? '使用中的内页' : '内页与扩展'}</h3><p>Core {WORKBENCH_CORE_VERSION} · 默认原生内页随 Core 提供 · DSH {WORKBENCH_DSH_GENERATION}</p><small>测试构建：{typeof __WORKBENCH_BUILD_ID__ === 'string' ? __WORKBENCH_BUILD_ID__ : 'development'}</small></div>
-    {!browser ? <button className={css.secondaryButton} onClick={() => void actions.run('plugins', async () => { if (!props.nativePluginNavigation) throw new Error('此宿主未提供插件管理入口，请从 DSH 设置打开。'); await props.nativePluginNavigation.open() })}><IconSettingsOutlineMedium size={16} /> DSH 插件管理</button> : null}</header>{actions.feedback('plugins')}
-    <label className={css.search}><IconSearchOutlineRegular aria-hidden="true" /><input type="search" aria-label="搜索内页与扩展" placeholder="搜索内页名称、用途或提供包" value={query} onChange={event => { setQuery(event.target.value); props.memory.searches.pages = event.target.value }} /></label>
-    {!browser ? <div className={css.filters}>{[['all', '全部'], ['builtin', '内置'], ['extension', '扩展'], ['attention', '需要处理']].map(([id, label]) => <button key={id} aria-pressed={filter === id} onClick={() => { setFilter(id!); props.memory.filters.pages = id! }}>{label}</button>)}</div> : null}
-    <p className={css.pageSummary}>{filtered.length} 个内页{access.status === 'unavailable' ? ' · 扩展安装状态尚未检查' : ''}</p>
-    <div className={`${css.list} ${css.editorList}`}>{filtered.map(editor => {
-      const extension = access.extensions.find(row => row.editorIds.includes(editor.id))
-      const available = props.editors.includes(editor)
-      return <article className={css.row} key={`${editor.scope}:${editor.id}`}><PageIcon editor={editor} /><div className={css.rowBody}><strong>{editor.label}</strong><p><BindingRequirement editor={editor} /></p><small>{extension ? `${extension.packageName ?? '包身份尚未核实'} · ${extension.packageVersion ?? '版本尚未检查'}` : '内置 · DSH 原生能力'}</small><p>{extension ? extension.availability === 'ready' ? '已就绪' : workbenchExtensionUnavailableCopyV1(extension).title : available ? '已就绪' : '尚未检查'}</p>
-      <details><summary>用途与声明详情</summary><p>{editor.declaration?.label ?? editor.label}</p><p>身份：{editor.id}</p><p>图标：{editor.iconSvg ? '内页自带 SVG' : resolveWorkbenchEditorPresentation(editor).icon === 'extension' ? '兼容标识；建议扩展作者补充专属图标' : '语义 SVG'}</p><p>状态分享：{editor.portability?.exportState ? '通过已声明处理器迁移' : '仅分享内页引用'}</p>{extension ? <p>{extension.detail}</p> : null}</details></div>
-      {!browser && !editor.resourceOnly && available ? <label className={css.toggle}><input type="checkbox" aria-label={`显示 ${editor.label} 添加入口`} disabled={actions.states[`entry:${editor.id}`]?.busy || !props.workbenchDirectory?.setGlobalEditorVisible} checked={!props.value?.globalHiddenEditorIds?.includes(editor.id)} onChange={event => { const visible = event.target.checked; void actions.run(`entry:${editor.id}`, () => props.workbenchDirectory!.setGlobalEditorVisible!(editor.id, visible)) }} />显示添加入口{actions.feedback(`entry:${editor.id}`)}</label> : null}
-      </article>
-    })}</div>{!filtered.length ? <div className={css.empty}>没有符合条件的内页。</div> : null}
-    {!browser ? access.extensions.map(extension => {
-      const affected = Object.values(props.value?.workbenches ?? {}).filter(record => areasOf(record.document.root).some(area => area.moduleHistory.some(page => extension.editorIds.includes(page.editorId))))
-      const count = affected.reduce((sum, record) => sum + areasOf(record.document.root).reduce((sum, area) => sum + area.moduleHistory.filter(page => extension.editorIds.includes(page.editorId)).length, 0), 0)
-      const canAllow = ['not-allowed', 'confirmation-required', 'ready'].includes(extension.availability) && extension.packageName && extension.apiVersion && extension.contractFingerprint
-      const commit = (allowed: boolean) => void actions.run(extension.key, () => props.workbenchDirectory!.setExtensionAllowed!({ packageName: extension.packageName!, moduleId: extension.moduleId, apiVersion: extension.apiVersion ?? 1, editorIds: extension.editorIds, ...(extension.contractFingerprint ? { contractFingerprint: extension.contractFingerprint } : {}) }, allowed))
-      return <details key={extension.key} className={`${css.group} ${css.extensionGroup}`}><summary>{extension.packageName ?? extension.moduleId} · {extension.packageVersion ?? '版本尚未检查'}</summary><p>{extension.detail}</p><p>提供 {extension.editorIds.length} 个内页 · {affected.length} 个工作台内的 {count} 个内页引用</p><p>兼容与声明权限以 DSH 已安装包及当前声明为准。安装、停用、更新和卸载请使用 DSH 插件管理。</p>
-        {confirmRevoke === extension.key ? <div className={css.notice}><p>撤销将影响 {affected.length} 个工作台中的 {count} 个内页。布局引用保留，DSH 任务继续。</p><button className={css.primaryButton} onClick={() => { commit(false); setConfirmRevoke(undefined) }}>确认撤销许可</button><button className={css.secondaryButton} onClick={() => setConfirmRevoke(undefined)}>取消</button></div> : <button className={extension.allowed ? css.secondaryButton : css.primaryButton} disabled={actions.states[extension.key]?.busy || (!extension.allowed && !canAllow) || !props.workbenchDirectory?.setExtensionAllowed} onClick={() => extension.allowed ? setConfirmRevoke(extension.key) : commit(true)}>{extension.allowed ? '撤销 Workbench 使用许可' : extension.availability === 'confirmation-required' ? '重新确认声明并允许' : '允许在 Workbench 使用'}</button>}{actions.feedback(extension.key)}
-        <details><summary>兼容与诊断</summary><pre>{JSON.stringify(extension.providerDiagnostic ?? { availability: extension.availability, moduleId: extension.moduleId, editorIds: extension.editorIds }, null, 2)}</pre></details>
-      </details>
-    }) : null}
-    {!browser ? <p className={css.notice}>隐藏添加入口只影响手动添加；已有内页与自动联动保持可用。开发扩展请参考 Core 随包提供的扩展规范及原生 DSH 创造模式参考资料。</p> : null}
+  const used = useMemo(() => new Set(Object.values(props.value?.workbenches ?? {}).flatMap(row => areasOf(row.document.root)
+    .flatMap(area => area.moduleHistory.map(page => page.editorScope + ':' + page.editorId)))), [props.value?.workbenches])
+  const usedIds = new Set([...used].map(key => key.slice(key.indexOf(':') + 1)))
+  const extensionIds = new Set(access.extensions.flatMap(extension => extension.editorIds))
+  const normalizedQuery = query.trim().toLocaleLowerCase()
+  const matches = (values: (string | undefined)[]) => values.filter(Boolean).join(' ').toLocaleLowerCase().includes(normalizedQuery)
+  const pages = props.editors.filter(editor => !extensionIds.has(editor.id) && (!browser || used.has(editor.scope + ':' + editor.id)))
+    .filter(editor => matches([editor.label, editor.declaration?.label, editor.id])
+      && (browser || filter === 'all' || (filter === 'builtin' && editor.id.startsWith('workbench.')) || (filter === 'extension' && !editor.id.startsWith('workbench.'))))
+  const extensions = access.extensions.filter(extension => !browser || extension.editorIds.some(id => usedIds.has(id)))
+    .filter(extension => matches([extension.packageName, extension.packageVersion, extension.moduleId, extension.detail, extensionAvailabilityLabel(extension),
+      ...extension.editorIds, ...props.editors.filter(editor => extension.editorIds.includes(editor.id)).map(editor => editor.label)])
+      && (browser || filter === 'all' || filter === 'extension' || (filter === 'attention' && (extension.availability !== 'ready' || !extension.allowed))))
+  return <section className={css.page + ' ' + css.innerPagesPage} data-workbench-settings-page="inner-pages">
+    <header className={css.pageHeader}><div><h3>{browser ? '使用中的内页' : '内页与扩展'}</h3><p>{browser ? '查看当前工作台使用的内页。' : '管理添加入口，在卡片上直接启用扩展。'}</p></div>
+      {!browser ? <button className={css.secondaryButton} onClick={() => void actions.run('plugins', async () => {
+        if (!props.nativePluginNavigation) throw new Error('此宿主未提供插件管理入口，请从 DSH 设置打开。')
+        await props.nativePluginNavigation.open()
+      })}><IconSettingsOutlineMedium size={16} /> DSH 插件管理</button> : null}</header>
+    {actions.feedback('plugins')}
+    <div className={css.settingsToolbar}>
+      <label className={css.search}><IconSearchOutlineRegular aria-hidden="true" /><input type="search" aria-label="搜索内页与扩展" placeholder="搜索名称、扩展或状态"
+        value={query} onChange={event => { setQuery(event.target.value); props.memory.searches.pages = event.target.value }} /></label>
+      {!browser ? <div className={css.filters} aria-label="内页筛选">{[['all', '全部'], ['builtin', '内置'], ['extension', '扩展'], ['attention', '需要处理']].map(([id, label]) =>
+        <button key={id} aria-pressed={filter === id} onClick={() => { setFilter(id!); props.memory.filters.pages = id! }}>{label}</button>)}</div> : null}
+    </div>
+    {access.status === 'unavailable' ? <p className={css.cardHint}>扩展状态暂不可查看，请检查 DSH 连接后重试。</p> : null}
+    <div className={css.catalogGrid}>
+      {pages.map(editor => <InnerPageSettingsCard key={editor.scope + ':' + editor.id} editor={editor} props={props} />)}
+      {extensions.map(extension => <ExtensionSettingsCard key={extension.key} extension={extension} props={props} inventoryReady={access.status === 'ready'} />)}
+    </div>
+    {!pages.length && !extensions.length ? <div className={css.empty}>没有符合条件的内页或扩展。</div> : null}
+    {!browser ? <p className={css.settingsFootnote}>隐藏添加入口不影响已有内页。扩展的启用许可适用于它提供的全部内页。</p> : null}
   </section>
 }
 
-declare const __WORKBENCH_BUILD_ID__: string
 const RESOURCE_ROWS = [
   ['file', '文件结果', 'Document Preview'], ['changes-review', '变更审查', 'Changes Review'], ['plan', '计划', 'Plan'], ['subagent-chat', '子 Agent 对话', 'Subagent'],
   ['browser', '网页链接', 'Browser'], ['schedule-task', '计划任务', 'Schedule'], ['trajectory-inspect', '轨迹检查', 'Agent 轨迹'],
@@ -274,6 +374,8 @@ const PLACEMENTS: readonly [WorkbenchConversationResourcePlacementV1, string][] 
 export function InteractionSettingsPage(props: SettingsPageProps) {
   const policy = normalizeWorkbenchConversationInteractionPolicy(props.value?.interactionPolicy)
   const showSessionAccentFrames = policy.showSessionAccentFrames !== false
+  const tabFontSize = policy.tabFontSize ?? 'standard'
+  const showTabCloseButtons = policy.showTabCloseButtons !== false
   const actions = useSettingsAction()
   const [reset, setReset] = useState(false)
   const declared = props.editors.flatMap(editor => (editor.declaration?.conversationResources ?? []).map(resource => ({ ...resource, editorLabel: editor.label })))
@@ -285,9 +387,18 @@ export function InteractionSettingsPage(props: SettingsPageProps) {
   }
   const commit = (key: string, value: unknown) => actions.run(key, async () => { if (!props.patchInteractionPolicy) throw new Error('此宿主暂不支持按字段保存，请更新 Core。'); return props.patchInteractionPolicy(key, value) })
   const defaultFor = (id: string) => DEFAULT_WORKBENCH_CONVERSATION_INTERACTION_POLICY.conversationResources[id] ?? { enabled: declared.find(row => row.resourceType === id)?.defaultPlacement !== 'disabled', placement: declared.find(row => row.resourceType === id)?.defaultPlacement ?? 'activate-or-add' }
-  return <section className={css.page}><header className={css.pageHeader}><div><h3>交互偏好</h3><p>此页偏好适用于当前 DSH 实例中的所有工作台。</p></div><button className={css.secondaryButton} disabled={actions.states.reset?.busy || !props.patchInteractionPolicy} onClick={() => setReset(true)}>本页恢复默认</button></header>
-    {reset ? <div className={css.notice}><p>确认恢复本页全部资源规则？工作台布局与扩展许可保留。</p><div className={css.noticeActions}><button className={css.primaryButton} onClick={() => void actions.run('reset', async () => { if (!await commit('showSessionAccentFrames', true)) throw new Error('区域容器标签色框设置未保存。'); for (const row of rows) if (!await commit(row.id, defaultFor(row.id))) throw new Error('部分规则未能恢复，请重试。'); if (!await commit('unknownResource', 'module-default')) throw new Error('未知资源规则未保存。'); setReset(false) })}>确认恢复默认</button><button className={css.secondaryButton} onClick={() => setReset(false)}>取消</button></div></div> : null}{actions.feedback('reset')}
-    <div className={css.controlCard}><label className={css.preferenceToggle}><input type="checkbox" aria-label="显示区域容器标签色框" checked={showSessionAccentFrames} disabled={actions.states.showSessionAccentFrames?.busy || !props.patchInteractionPolicy} onChange={event => void commit('showSessionAccentFrames', event.target.checked)} /><span><strong>区域容器标签色框</strong><p>用绑定对话的标签颜色标识区域和浮动工作区。关闭后保留绑定标签与交互，只隐藏装饰线框。</p></span></label>{actions.feedback('showSessionAccentFrames')}</div>
+  return <section className={css.page + ' ' + css.interactionPage}><header className={css.pageHeader}><div><h3>交互偏好</h3><p>此页偏好适用于当前 DSH 实例中的所有工作台。</p></div><button className={css.secondaryButton} disabled={actions.states.reset?.busy || !props.patchInteractionPolicy} onClick={() => setReset(true)}>本页恢复默认</button></header>
+    {reset ? <div className={css.notice}><p>确认恢复本页全部交互偏好？工作台布局与扩展许可保留。</p><div className={css.noticeActions}><button className={css.primaryButton} onClick={() => void actions.run('reset', async () => { if (!await commit('showSessionAccentFrames', true)) throw new Error('区域容器标签色框设置未保存。'); if (!await commit('tabFontSize', 'standard')) throw new Error('标签文字大小设置未保存。'); if (!await commit('showTabCloseButtons', true)) throw new Error('标签关闭按钮设置未保存。'); for (const row of rows) if (!await commit(row.id, defaultFor(row.id))) throw new Error('部分规则未能恢复，请重试。'); if (!await commit('unknownResource', 'module-default')) throw new Error('未知资源规则未保存。'); setReset(false) })}>确认恢复默认</button><button className={css.secondaryButton} onClick={() => setReset(false)}>取消</button></div></div> : null}{actions.feedback('reset')}
+    <div className={css.preferenceGrid}>
+      <div className={css.preferenceCard}><div className={css.cardSwitchRow}><strong>区域容器标签色框</strong>
+        <SettingsSwitch label="显示区域容器标签色框" checked={showSessionAccentFrames} disabled={actions.states.showSessionAccentFrames?.busy || !props.patchInteractionPolicy} onChange={checked => void commit('showSessionAccentFrames', checked)} /></div>
+        <p>用对话标签色标识区域和浮动工作区。</p>{actions.feedback('showSessionAccentFrames')}</div>
+      <div className={css.preferenceCard}><div className={css.cardSwitchRow}><strong>显示标签关闭按钮</strong>
+        <SettingsSwitch label="显示内页标签关闭按钮" checked={showTabCloseButtons} disabled={actions.states.showTabCloseButtons?.busy || !props.patchInteractionPolicy} onChange={checked => void commit('showTabCloseButtons', checked)} /></div>
+        <p>隐藏后仍可通过内页菜单或快捷键关闭。</p>{actions.feedback('showTabCloseButtons')}</div>
+    </div>
+    <div className={css.preferenceCard + ' ' + css.inlinePreference}><div><strong>内页标签文字大小</strong><p>仅调整内页与浮动工作区标签的标题。</p></div>
+      <select aria-label="内页标签文字大小" value={tabFontSize} disabled={actions.states.tabFontSize?.busy || !props.patchInteractionPolicy} onChange={event => void commit('tabFontSize', event.target.value)}><option value="standard">标准</option><option value="large">大</option><option value="larger">更大</option></select>{actions.feedback('tabFontSize')}</div>
     <div className={`${css.list} ${css.resourceList}`}>{rows.map(row => {
       const current = policy.conversationResources[row.id] ?? defaultFor(row.id)
       const value = !current.enabled || current.placement === 'disabled' ? 'disabled' : current.placement

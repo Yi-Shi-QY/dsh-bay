@@ -5,21 +5,23 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { WorkbenchFloatingWorkspace } from '../src/foundation/WorkbenchFloatingWorkspace.tsx'
 import { createFloatingWorkspaceRuntime } from '../src/client/floating-workspace-runtime.ts'
 import { defaultLayout } from '../src/foundation/model.ts'
+import type { ConversationTabStatusSource, ConversationTabStatus } from '../src/client/conversation-tab-status.ts'
 
 vi.mock('../src/foundation/WorkbenchFrame.tsx', () => ({ MemoizedEditor: () => null, WorkbenchFloatingMenu: () => null }))
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
-function setup(bayAgent?: ComponentProps<typeof WorkbenchFloatingWorkspace>['bayAgent']) {
+function setup(bayAgent?: ComponentProps<typeof WorkbenchFloatingWorkspace>['bayAgent'], conversationStatus?: ConversationTabStatusSource, policy?: ComponentProps<typeof WorkbenchFloatingWorkspace>['policy']) {
   vi.stubGlobal('PointerEvent', MouseEvent)
   const runtime = createFloatingWorkspaceRuntime()
   runtime.setSurface(true, 'one')
-  const sessions = { first: { displayTitle: '项目方案' }, second: { displayTitle: '另一段对话' } }
+  const sessions = { first: { displayTitle: '项目方案', projectionValues: { agentPreset: 'ptc' } }, second: { displayTitle: '另一段对话', projectionValues: { agentPreset: 'standard' } }, 'main-one': { displayTitle: 'Bay Agent' } }
   const workspaceState = { items: [{ workspaceId: 'project', title: '来源项目', sessionIds: ['first', 'second'] }], archivedSessionIds: [] }
   const canvas = document.createElement('div'); document.body.append(canvas)
   const area = document.createElement('section'); area.dataset.workbenchGroup = 'target'; canvas.append(area)
   const header = document.createElement('header'); header.dataset.workbenchAreaHeader = ''; area.append(header)
   const body = document.createElement('div'); area.append(body)
   const frame = {
+    conversationStatus,
     useSessions: (select: (state: unknown) => unknown) => select({ byId: sessions }),
     useWorkspaces: (select: (state: unknown) => unknown) => select(workspaceState),
   } as ComponentProps<typeof WorkbenchFloatingWorkspace>['frame']
@@ -29,11 +31,43 @@ function setup(bayAgent?: ComponentProps<typeof WorkbenchFloatingWorkspace>['bay
   layout.root.id = 'target'; layout.root.tabs = []; delete layout.root.activeTabId
   const pin = vi.fn(async () => true)
   const content = (selectedAreaBinding?: { workspaceId: string; sessionId: string }) => <WorkbenchFloatingWorkspace runtime={runtime} bayAgent={bayAgent} workbenchId="one" canvasRef={{ current: canvas }} visible selectedAreaBinding={selectedAreaBinding}
-    editors={[]} hidden={[]} extensionAccess={{} as never} frame={frame} layout={layout} commit={() => true} pin={pin}
+    editors={[{ id: 'workbench.conversation', scope: 'session', label: '对话', icon: 'message' }]} hidden={[]} extensionAccess={{} as never} frame={frame} layout={layout} policy={policy} commit={() => true} pin={pin}
     sessionMarkers={{ project: { first: { label: 'A', accentToken: 'accent-1', customized: false }, second: { label: 'B', accentToken: 'accent-2', customized: false } } }} />
   const view = render(content(), { container: canvas.appendChild(document.createElement('div')) })
   return { runtime, pin, header, body, canvas, view, selectArea: (sessionId?: string) => view.rerender(content(sessionId ? { workspaceId: 'project', sessionId } : undefined)) }
 }
+
+it('uses shared conversation states for Bay Agent and floating duplicates, keeping identity and unread separate', async () => {
+  let states: ReadonlyMap<string, ConversationTabStatus> = new Map([['main-one', { status: 'attention', label: '等待审批' }]])
+  const listeners = new Set<() => void>()
+  const source: ConversationTabStatusSource = { getSnapshot: () => states, subscribe: listener => { listeners.add(listener); return () => { listeners.delete(listener) } }, watch: vi.fn(() => () => {}) }
+  const snapshot = { workbenchId: 'one', bayAgentSessionId: 'main-one', areas: [], workItems: [], assignments: [], attention: [] }
+  const controller = { subscribe: () => () => {}, getSnapshot: () => snapshot, ensureMainSession: async () => 'main-one' } as unknown as NonNullable<ComponentProps<typeof WorkbenchFloatingWorkspace>['bayAgent']>
+  const { runtime } = setup(controller, source)
+  await waitFor(() => expect(screen.getByRole('tab', { name: /Bay Agent/ }).getAttribute('aria-description')).toContain('等待审批'))
+  expect(screen.getByLabelText('Bay Agent 主控页签')).toBeTruthy()
+  act(() => { runtime.open('one', { id: 'duplicate', editorId: 'workbench.conversation', editorScope: 'session', sessionId: 'main-one', state: {}, lastKnownTitle: '重复对话' }, true, false) })
+  expect(screen.getByRole('tab', { name: /重复对话/ }).querySelector('[data-tab-status=attention]')).not.toBeNull()
+  expect(screen.getByLabelText('未读内容')).toBeTruthy()
+  act(() => { states = new Map([['main-one', { status: 'completed', label: '本轮已完成' }]]); for (const listener of listeners) listener() })
+  fireEvent.click(screen.getByRole('tab', { name: /重复对话/ }))
+  expect(screen.getByRole('tab', { name: /重复对话/ }).getAttribute('aria-description')).toContain('本轮已完成')
+  expect(screen.getByRole('tab', { name: /Bay Agent/ }).querySelector('[data-tab-status=completed]')).not.toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: '浮动工作区菜单' }))
+  fireEvent.click(screen.getByRole('button', { name: '全部临时内页' }))
+  expect(screen.getByRole('button', { name: /重复对话.*本轮已完成/ })).toBeTruthy()
+})
+
+it('filters floating tabs by actual conversation name and Agent mode before selecting one', () => {
+  const { runtime } = setup()
+  fireEvent.click(screen.getByRole('button', { name: '浮动工作区菜单' }))
+  fireEvent.click(screen.getByRole('button', { name: '全部临时内页' }))
+  fireEvent.change(screen.getByRole('textbox', { name: '搜索临时内页' }), { target: { value: 'PTC' } })
+  expect(screen.queryByRole('button', { name: /^内页二/ })).toBeNull()
+  fireEvent.change(screen.getByRole('textbox', { name: '搜索临时内页' }), { target: { value: '项目方案' } })
+  fireEvent.click(screen.getByRole('button', { name: /内页一.*项目方案/ }))
+  expect(runtime.workspace('one').activeId).toBe('first')
+})
 
 it('shows the active tab project, existing colored marker and conversation title', () => {
   setup()
@@ -41,6 +75,18 @@ it('shows the active tab project, existing colored marker and conversation title
   expect(screen.getByLabelText('绑定对话：B · 另一段对话').getAttribute('data-accent')).toBe('accent-2')
   fireEvent.click(screen.getByRole('tab', { name: /内页一/ }))
   expect(screen.getByLabelText('绑定对话：A · 项目方案')).toBeTruthy()
+})
+
+it('applies tab label size and hides floating close buttons without removing Delete close', async () => {
+  const { runtime } = setup(undefined, undefined, {
+    version: 2, conversationResources: {}, unknownResource: 'module-default',
+    showSessionAccentFrames: true, tabFontSize: 'larger', showTabCloseButtons: false,
+  })
+  const tab = screen.getByRole('tab', { name: /内页一/ })
+  expect(tab.querySelector('span[style]')?.getAttribute('style')).toContain('font-size: 15px')
+  expect(screen.queryByRole('button', { name: '关闭 内页一' })).toBeNull()
+  fireEvent.keyDown(tab, { key: 'Delete' })
+  await waitFor(() => expect(runtime.find('first', 'one')).toBeUndefined())
 })
 
 it('describes every floating window control on hover', () => {

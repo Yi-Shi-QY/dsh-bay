@@ -45,7 +45,7 @@ window.__ModuleLoader__.load({
       moduleId: 'workbench.editor-example',
       apiVersion: 1,
       editorIds: ['workbench.example'],
-      coreCompatibility: '0.2.2-alpha.17.5',
+      coreCompatibility: '0.2.2-alpha.17.6',
       dshGeneration: '0.2.2-rc.1',
     }
 

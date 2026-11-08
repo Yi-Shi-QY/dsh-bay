@@ -10,6 +10,11 @@ import { WorkbenchContextDialog } from './WorkbenchContextDialog.tsx'
 import { WorkbenchCreateMenu } from './WorkbenchCreateMenu.tsx'
 import type { WorkbenchLayoutPresetId } from './workbench-layout-presets.ts'
 import { WorkbenchEditorIcon as EditorIcon } from './WorkbenchEditorIcon.tsx'
+import { WorkbenchTabStatus } from './WorkbenchTabStatus.tsx'
+import { WorkbenchTabTooltip } from './WorkbenchTabTooltip.tsx'
+import type { WorkbenchTabInformationSession } from './tab-information.ts'
+import type { ConversationTabStatusSource } from '../client/conversation-tab-status.ts'
+import { useConversationTabStatus } from '../client/use-conversation-tab-status.ts'
 import {
   memo, Profiler, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore,
   type ChangeEvent, type CSSProperties, type KeyboardEvent, type MutableRefObject, type ProfilerOnRenderCallback, type ReactNode, type RefObject,
@@ -20,7 +25,7 @@ import {
   IconChevronDownOutlineMedium, IconChevronUpOutlineMedium, IconCheckOutlineMedium,
   IconCompareSplitOutlineMedium, IconCopyOutlineMedium, IconEditOutlineMedium,
   IconEllipsisOutlineMedium, IconFlatListOutlineMedium, IconFolderOpenOutlineMedium,
-  IconPlusOutlineMedium, IconSearchOutlineMedium, IconSettingsOutlineMedium,
+  IconLinkOutlineMedium, IconPlusOutlineMedium, IconSearchOutlineMedium, IconSettingsOutlineMedium,
   IconShareOutlineMedium,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { WorkbenchCoreSidebarProps } from './WorkbenchCoreSidebar.tsx'
@@ -41,6 +46,8 @@ import {
 } from './catalog.ts'
 import {
   buildWorkbenchAreaTabRows,
+  conversationTabBinding,
+  conversationTabUnavailable,
   indexWorkbenchAreaOrdinals,
   indexWorkbenchEditors,
   workbenchEditorFromIndex,
@@ -160,6 +167,7 @@ import {
 } from '../client/workbench-resource-opener.ts'
 import {
   conversationResourceActionFor,
+  normalizeWorkbenchConversationInteractionPolicy, workbenchTabFontSizePx,
   type WorkbenchConversationInteractionPolicyV1,
 } from '../workbench-interaction-policy.ts'
 import {
@@ -267,6 +275,7 @@ export type WorkbenchFrameProps =
     renderHome?: ReactNode | undefined
     /** Bay Agent's Workbench-owned controller and runtime state. */
     bayAgent?: BayAgentControllerV1
+    conversationStatus?: ConversationTabStatusSource
     /** DSH-native Bay Agent draft generation for human context editing. */
     generateContextDraft?: import('./workbench-ai.ts').WorkbenchAiDraftGeneratorV1['generateContextDraft']
   }
@@ -510,21 +519,20 @@ function WorkbenchFloatingInfo({
       </span>
       {tabs === undefined ? null : <>
         <div className={css.areaCollapseInfoTabs} role="list" aria-label="收起区域内页">
-          {tabs.map(tab => <button
-            key={tab.id}
+          {tabs.map(tab => <WorkbenchTabTooltip key={tab.id} summary={tab}><button
             type="button"
             className={css.areaCollapseInfoTab}
             data-selected={tab.selected || undefined}
             data-tab-status={tab.status}
             aria-current={tab.selected ? 'page' : undefined}
-            title={`${tab.title} · ${tab.statusLabel}`}
+            aria-label={tab.information?.accessibleLabel ?? tab.title}
             onClick={() => onActivate?.(tab.id)}
           >
-            <span className={css.areaTabStatusDot} data-tab-status={tab.status} aria-hidden="true" />
+            <WorkbenchTabStatus summary={tab} />
             <span className={css.areaCollapseInfoTabIcon} data-editor-icon={tab.icon}><EditorIcon name={tab.icon} iconSvg={tab.iconSvg} /></span>
-            <span className={css.areaCollapseInfoTabTitle}>{tab.title}</span>
+            <span className={css.areaCollapseInfoTabTitle}>{tab.title}{tab.information?.detail ? <small>{tab.information.detail}</small> : null}</span>
             <small>{tab.statusLabel}</small>
-          </button>)}
+          </button></WorkbenchTabTooltip>)}
         </div>
         <button type="button" className={css.areaCollapseInfoExpand} onClick={() => onExpand?.()}>展开区域</button>
       </>}
@@ -3237,6 +3245,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
             runtimeMetrics={runtimeMetrics}
             groupOrdinals={groupOrdinals}
             editorIndex={editorIndex}
+            conversationStatus={props.conversationStatus}
             extensionAccess={extensionAccess}
             editors={editors} currentSession={current} account={account} workspaces={workspaces}
             hiddenEditorIds={workbenchDirectorySnapshot.globalHiddenEditorIds}
@@ -3444,6 +3453,7 @@ interface LayoutViewProps {
   runtimeMetrics?: WorkbenchRuntimeMetricsSinkV1 | undefined
   groupOrdinals: ReadonlyMap<string, number>
   editorIndex: WorkbenchEditorIndex
+  conversationStatus?: ConversationTabStatusSource | undefined
   node: LayoutNode
   document: WorkbenchLayoutDocument
   commit: Commit
@@ -3456,7 +3466,7 @@ interface LayoutViewProps {
   account: WorkspaceAccountKey
   projectNeutral: boolean
   workspaces: readonly { workspaceId: string; title?: string; path?: string; sessionIds: readonly string[] }[]
-  sessionRows: Record<string, { title?: string; displayTitle: string; running: boolean; blank: boolean; updatedAt: number } | undefined>
+  sessionRows: Record<string, (WorkbenchTabInformationSession & { displayTitle: string; running: boolean; blank: boolean; updatedAt: number }) | undefined>
   sessionMarkers: Record<string, SessionMarkerRecord>
   sessionMarkersByWorkspace: Record<string, Record<string, SessionMarkerRecord>>
   sessionIds: readonly string[]
@@ -4494,6 +4504,7 @@ function PendingSessionBindingPicker({
   const triggerRef = useRef<HTMLButtonElement>(null)
   const pickerId = useId()
   const [query, setQuery] = useState('')
+  const [collapsedWorkspaceGroups, setCollapsedWorkspaceGroups] = useState<Set<string>>(() => new Set())
   const archived = new Set(archivedSessionIds)
   const workspaceOf = new Map<string, { id: string; title: string }>()
   for (const workspace of workspaces) {
@@ -4510,7 +4521,10 @@ function PendingSessionBindingPicker({
     if (row === undefined || row.blank || archived.has(sessionId)) return false
     const normalized = query.trim().normalize('NFKC').toLocaleLowerCase('und')
     if (normalized === '') return true
-    return [row.title ?? '', row.displayTitle, sessionId, workspaceOf.get(sessionId)?.title ?? '']
+    const marker = workspaceOf.get(sessionId) === undefined
+      ? sessionMarkers[sessionId]
+      : sessionMarkersByWorkspace[workspaceOf.get(sessionId)!.id]?.[sessionId]
+    return [row.title ?? '', row.displayTitle, sessionId, marker?.label ?? '', workspaceOf.get(sessionId)?.title ?? '']
       .some(value => value.normalize('NFKC').toLocaleLowerCase('und').includes(normalized))
   }).map(sessionId => {
     const workspace = workspaceOf.get(sessionId)
@@ -4523,7 +4537,25 @@ function PendingSessionBindingPicker({
       : sessionMarkersByWorkspace[workspace.id]?.[sessionId])
       ?? allocateSessionMarker(workspace === undefined ? sessionMarkers : (sessionMarkersByWorkspace[workspace.id] ?? {}))
     return { binding, marker, workspaceTitle: workspace?.title ?? '未分组工作区' }
-  })
+  }).sort((left, right) =>
+    (sessionRows[right.binding.sessionId]?.updatedAt ?? 0) - (sessionRows[left.binding.sessionId]?.updatedAt ?? 0),
+  )
+  const groupedCandidates = [...candidates.reduce((groups, candidate) => {
+    const key = candidate.binding.workspaceId ?? 'ungrouped'
+    const group = groups.get(key)
+    if (group === undefined) groups.set(key, { key, title: candidate.workspaceTitle, candidates: [candidate] })
+    else group.candidates.push(candidate)
+    return groups
+  }, new Map<string, { key: string; title: string; candidates: typeof candidates }>()).values()]
+  const renderCandidate = (candidate: (typeof candidates)[number]) => {
+    const row = sessionRows[candidate.binding.sessionId]
+    const title = sessionDisplayTitle(row, candidate.binding.sessionId, '新对话')
+    const updatedAt = row?.updatedAt === undefined ? '最近更新未知' : `最近更新 ${new Date(row.updatedAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`
+    return <button key={sessionTargetKey(candidate.binding)} type="button" role="option" aria-label={`${title} · ${candidate.workspaceTitle} · ${candidate.binding.sessionId}`} onClick={() => { onSelect(candidate.binding); setOpen(false); triggerRef.current?.focus() }}>
+      <span className={css.markerLabel} data-accent={candidate.marker.accentToken}>{candidate.marker.label}</span>
+      <span className={css.pickerIdentity}><strong>{title}</strong><small>空闲 · {updatedAt} · {candidate.binding.sessionId.slice(-8)}</small></span>
+    </button>
+  }
   useEffect(() => {
     if (!open) return
     const onPointerDown = (event: PointerEvent) => {
@@ -4547,16 +4579,23 @@ function PendingSessionBindingPicker({
     </button>
     {open ? <WorkbenchFloatingMenu kind="binding" ownerId={pickerId} anchorRef={triggerRef} surfaceRef={pickerRef} side="bottom" className={css.bindingPicker} label="选择要绑定的对话">
       <div className={css.bindingPickerHeading}><span><strong>选择要绑定的对话</strong><small>不会创建新的对话</small></span><kbd>Esc</kbd></div>
-      <div className={css.bindingSearch} role="search"><IconSearchOutlineMedium className={css.searchIcon} size={15} /><label className={css.visuallyHidden} htmlFor={`${pickerId}-search`}>搜索对话</label><input id={`${pickerId}-search`} autoFocus type="search" role="searchbox" placeholder="搜索已有对话" value={query} onChange={event => setQuery(event.currentTarget.value)} /></div>
+      <div className={css.bindingSearch} role="search"><IconSearchOutlineMedium className={css.searchIcon} size={15} /><label className={css.visuallyHidden} htmlFor={`${pickerId}-search`}>搜索对话</label><input id={`${pickerId}-search`} autoFocus type="search" role="searchbox" placeholder="搜索对话、标记或 Session ID" value={query} onChange={event => setQuery(event.currentTarget.value)} /></div>
       <div id={pickerId} role="listbox" aria-label="可绑定的对话">
-        {candidates.length === 0 ? <span className={css.bindingPickerEmpty}>没有可绑定的非空对话。请先在 DSH 原版中创建对话，或继续保持待绑定。</span> : candidates.map(candidate => {
-          const row = sessionRows[candidate.binding.sessionId]
-          const title = sessionDisplayTitle(row, candidate.binding.sessionId, '新对话')
-          return <button key={sessionTargetKey(candidate.binding)} type="button" role="option" aria-label={`${title} · ${candidate.workspaceTitle}`} onClick={() => { onSelect(candidate.binding); setOpen(false); triggerRef.current?.focus() }}>
-            <span className={css.markerLabel} data-accent={candidate.marker.accentToken}>{candidate.marker.label}</span>
-            <span className={css.pickerIdentity}><strong>{title}</strong><small>{candidate.workspaceTitle} · {candidate.binding.sessionId.slice(-8)}</small></span>
-          </button>
-        })}
+        {candidates.length === 0 ? <span className={css.bindingPickerEmpty}>没有可绑定的非空对话。请先在 DSH 原版中创建对话，或继续保持待绑定。</span> : <section className={css.bindingPickerSection} data-binding-section="recent">
+          <span className={css.bindingPickerSectionLabel}>最近对话</span>
+          <WorkspacePickerGroups
+            groups={groupedCandidates.map(group => ({ key: group.key, title: group.title, items: group.candidates }))}
+            idPrefix={`${pickerId}-workspace`}
+            collapsedKeys={collapsedWorkspaceGroups}
+            onToggle={key => setCollapsedWorkspaceGroups(previous => {
+              const next = new Set(previous)
+              if (next.has(key)) next.delete(key)
+              else next.add(key)
+              return next
+            })}
+            renderItem={renderCandidate}
+          />
+        </section>}
       </div>
     </WorkbenchFloatingMenu> : null}
   </div>
@@ -4578,6 +4617,43 @@ function sessionDisplayTitle(
   if (durableTitle !== undefined && durableTitle.length !== 0) return durableTitle
   if (row?.blank === true) return blankTitle
   return row?.displayTitle ?? fallback
+}
+
+interface WorkspacePickerGroup<T> {
+  key: string
+  title: string
+  items: readonly T[]
+}
+
+function WorkspacePickerGroups<T>({
+  groups, idPrefix, collapsedKeys, onToggle, renderItem,
+}: {
+  groups: readonly WorkspacePickerGroup<T>[]
+  idPrefix: string
+  collapsedKeys: ReadonlySet<string>
+  onToggle: (key: string) => void
+  renderItem: (item: T) => ReactNode
+}) {
+  return <>{groups.map((group, groupIndex) => {
+    const collapsed = collapsedKeys.has(group.key)
+    const groupDomId = `${idPrefix}-${String(groupIndex)}`
+    return <div key={group.key} className={css.bindingPickerGroup} data-workspace-group={group.key}>
+      <button
+        type="button"
+        className={css.bindingPickerGroupTitle}
+        aria-expanded={!collapsed}
+        aria-controls={groupDomId}
+        onClick={() => onToggle(group.key)}
+      >
+        <span className={css.bindingPickerGroupIcon} aria-hidden="true"><IconFolderOpenOutlineMedium size={14} /></span>
+        <span>{group.title}</span>
+        <span className={css.bindingPickerGroupChevron} aria-hidden="true">
+          {collapsed ? <IconChevronRightOutlineMedium size={13} /> : <IconChevronDownOutlineMedium size={13} />}
+        </span>
+      </button>
+      <div id={groupDomId} hidden={collapsed}>{group.items.map(renderItem)}</div>
+    </div>
+  })}</>
 }
 
 function SessionBindingChip({
@@ -4958,34 +5034,18 @@ function SessionBindingChip({
               <span className={css.bindingPickerSectionLabel}>{pickerCopy.recent}</span>
               {groupedCandidates.length === 0 ? (
                 <span className={css.bindingPickerEmpty}>{candidates.length === 0 ? copy.noMatches : pickerCopy.noRecent}</span>
-              ) : groupedCandidates.map((group, groupIndex) => {
-                const groupKey = group.workspaceId ?? 'ungrouped'
-                const collapsed = collapsedWorkspaceGroups.has(groupKey)
-                const groupDomId = `${selectorId}-workspace-${String(groupIndex)}`
-                return <div key={groupKey} className={css.bindingPickerGroup} data-workspace-id={group.workspaceId}>
-                  <button
-                    type="button"
-                    className={css.bindingPickerGroupTitle}
-                    aria-expanded={!collapsed}
-                    aria-controls={groupDomId}
-                    onClick={() => setCollapsedWorkspaceGroups(previous => {
-                      const next = new Set(previous)
-                      if (next.has(groupKey)) next.delete(groupKey)
-                      else next.add(groupKey)
-                      return next
-                    })}
-                  >
-                    <span className={css.bindingPickerGroupIcon} aria-hidden="true"><IconFolderOpenOutlineMedium size={14} /></span>
-                    <span>{group.title}</span>
-                    <span className={css.bindingPickerGroupChevron} aria-hidden="true">
-                      {collapsed ? <IconChevronRightOutlineMedium size={13} /> : <IconChevronDownOutlineMedium size={13} />}
-                    </span>
-                  </button>
-                  <div id={groupDomId} hidden={collapsed}>
-                    {group.options.map(({ option, index }) => renderCandidate(option, index))}
-                  </div>
-                </div>
-              })}
+              ) : <WorkspacePickerGroups
+                groups={groupedCandidates.map(group => ({ key: group.workspaceId ?? 'ungrouped', title: group.title, items: group.options }))}
+                idPrefix={`${selectorId}-workspace`}
+                collapsedKeys={collapsedWorkspaceGroups}
+                onToggle={groupKey => setCollapsedWorkspaceGroups(previous => {
+                  const next = new Set(previous)
+                  if (next.has(groupKey)) next.delete(groupKey)
+                  else next.add(groupKey)
+                  return next
+                })}
+                renderItem={({ option, index }) => renderCandidate(option, index)}
+              />}
             </section>
           </div>
         </WorkbenchFloatingMenu>
@@ -5008,8 +5068,16 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
     conversationResourcePolicy,
   } = props
   const floating = useFloatingWorkspace()
+  const interactionPolicy = normalizeWorkbenchConversationInteractionPolicy(conversationResourcePolicy)
+  const tabFontSize = workbenchTabFontSizePx(interactionPolicy.tabFontSize)
   const active = activeTab(group)
-  const hasPendingSessionTabs = group.tabs.some(tab => tab.editorScope === 'session' && tab.pendingBinding !== undefined)
+  const isUnboundConversationTab = (tab: TabDocument): boolean => tab.editorId === 'workbench.conversation'
+    && tab.editorScope === 'session'
+    && tab.binding === undefined
+    && tab.sessionId === undefined
+    && tab.pendingBinding === undefined
+  const hasPendingSessionTabs = group.tabs.some(tab => tab.editorScope === 'session'
+    && (tab.pendingBinding !== undefined || isUnboundConversationTab(tab)))
   const activeSessionId = active?.sessionId
   const areaClaim = `workbench-area:${group.id}:${active?.id ?? 'empty'}:${active?.bindingGeneration ?? 0}`
   const activeRosterWorkspace = activeSessionId === undefined
@@ -5110,18 +5178,25 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
     ...(activeEditor?.declaration?.runtime.collapsed === undefined ? {} : { collapsed: activeEditor.declaration.runtime.collapsed }),
   }), [activeEditor?.declaration?.runtime.background, activeEditor?.declaration?.runtime.collapsed, areaFocused, editorVisibility])
   const areaOrdinal = Math.max(1, props.groupOrdinals.get(group.id) ?? 1)
+  const conversationStates = useConversationTabStatus(props.conversationStatus, group.tabs.flatMap(tab => {
+    const binding = conversationTabBinding(tab, activeBinding)
+    return binding && sessionRows[binding.sessionId] && !archivedSessionIds.includes(binding.sessionId) ? [binding.sessionId] : []
+  }))
   const tabRows = useMemo(() => buildWorkbenchAreaTabRows({
     tabs: group.tabs,
     editorIndex: props.editorIndex,
     activeTabId: active?.id,
     areaBinding: activeBinding,
     pausedTabId: disposeWhenCollapsed ? active?.id : undefined,
-  }), [active?.id, activeBinding, disposeWhenCollapsed, group.tabs, props.editorIndex])
+    conversations: conversationStates,
+    sessionAvailability: binding => conversationTabUnavailable(binding, { workspaces, sessions: sessionRows, archivedSessionIds }),
+    information: { sessions: sessionRows, workspaces, markersByWorkspace: sessionMarkersByWorkspace, location: `区域 ${String(areaOrdinal).padStart(2, '0')}` },
+  }), [active?.id, activeBinding, disposeWhenCollapsed, group.tabs, props.editorIndex, conversationStates, workspaces, sessionRows, archivedSessionIds, sessionMarkersByWorkspace, areaOrdinal])
   const tabSummaries = tabRows.summaries
   const filteredTabSummaries = useMemo(() => {
     const query = tabOverviewQuery.trim().toLocaleLowerCase('zh-CN')
     if (query === '') return tabSummaries
-    return tabSummaries.filter(tab => `${tab.title} ${tab.statusLabel}`.toLocaleLowerCase('zh-CN').includes(query))
+    return tabSummaries.filter(tab => (tab.information?.searchText ?? `${tab.title} ${tab.statusLabel}`.toLocaleLowerCase('zh-CN')).includes(query))
   }, [tabOverviewQuery, tabSummaries])
   const collapsePreviewTitle = `区域 ${String(areaOrdinal).padStart(2, '0')} · ${activeEditor?.label ?? active?.lastKnownTitle ?? '未选择'}`
   const collapsePreviewDetail = [
@@ -5892,12 +5967,13 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
           {tabRows.rows.map(({ tab, summary, presentation: tabPresentation }) => {
             const selected = summary.selected
             return <div className={css.areaTab} data-workbench-area-tab={tab.id} data-active={selected || undefined} key={tab.id}>
+              <WorkbenchTabTooltip summary={summary} side={floatingMenuSide} disabled={menu !== undefined || tabOverviewOpen}>
               <button ref={selected ? editorTriggerRef : undefined} type="button" role="tab" aria-selected={selected}
                 aria-controls={`workbench-area-body-${group.id}`} tabIndex={selected ? 0 : -1}
                 className={css.areaTabSelect} data-workbench-active-tab={selected || undefined}
                 aria-haspopup={selected ? 'menu' : undefined} aria-expanded={selected ? menu === 'editor' : undefined}
                 aria-label={selected ? `当前内页：${tab.lastKnownTitle}，点击打开内页操作` : `切换到${tab.lastKnownTitle}`}
-                title={`${tab.lastKnownTitle} · ${summary.statusLabel}`}
+                aria-description={[summary.information?.detail, summary.statusLabel].filter(Boolean).join(' · ')}
                 onClick={(event) => {
                   event.stopPropagation()
                   if (areaCollapsed) {
@@ -5918,11 +5994,12 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
                   const next = group.tabs[nextIndex]; if (next !== undefined) { commit({ type: 'activate', groupId: group.id, tabId: next.id }); requestAnimationFrame(() => findAreaTabElement(areaRef.current, next.id)?.querySelector<HTMLButtonElement>('[role="tab"]')?.focus()) }
                 }}>
                 <span className={css.editorGlyph} data-editor-icon={tabPresentation.icon}><EditorIcon name={tabPresentation.icon} iconSvg={tabPresentation.iconSvg} /></span>
-                <span className={css.areaTabStatusDot} data-tab-status={summary.status} aria-hidden="true" />
-                <WorkbenchAreaTabLabel tab={tab} fallback={tab.lastKnownTitle} />
+                <WorkbenchTabStatus summary={summary} />
+                <WorkbenchAreaTabLabel tab={tab} fallback={tab.lastKnownTitle} fontSize={tabFontSize} />
               </button>
+              </WorkbenchTabTooltip>
               <button type="button" className={css.areaTabDetach} aria-label={`拆出 ${tab.lastKnownTitle}`} title="拆出到新区域" onClick={(event) => { event.stopPropagation(); commit({ type: 'move-tab', tabId: tab.id, targetGroupId: group.id, edge: 'right', ids: { groupId: nextId('group'), splitId: nextId('split') } }) }}><IconCompareSplitOutlineMedium size={14} /></button>
-              <button type="button" className={css.areaTabClose} aria-label={`关闭 ${tab.lastKnownTitle}`} title={`关闭 ${tab.lastKnownTitle}`} onClick={(event) => { event.stopPropagation(); commit({ type: 'close-tab', tabId: tab.id }) }}><IconCloseOutlineMedium size={14} /></button>
+              {interactionPolicy.showTabCloseButtons !== false ? <button type="button" className={css.areaTabClose} aria-label={`关闭 ${tab.lastKnownTitle}`} title={`关闭 ${tab.lastKnownTitle}`} onClick={(event) => { event.stopPropagation(); commit({ type: 'close-tab', tabId: tab.id }) }}><IconCloseOutlineMedium size={14} /></button> : null}
             </div>
           })}
           </div>
@@ -5957,11 +6034,10 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
           <WorkbenchFloatingMenu kind="editor" ownerId={`${group.id}:tab-overview`} anchorRef={tabOverviewAnchorRef} surfaceRef={tabOverviewSurfaceRef} side={floatingMenuSide} align="end" className={css.tabOverviewMenu} label="全部内页">
             <label className={css.tabOverviewSearch}>
               <span className={css.visuallyHidden}>搜索内页</span>
-              <input autoFocus value={tabOverviewQuery} onChange={(event) => setTabOverviewQuery(event.target.value)} placeholder="搜索内页" />
+              <input autoFocus value={tabOverviewQuery} onChange={(event) => setTabOverviewQuery(event.target.value)} placeholder="搜索名称、模式、项目或路径" />
             </label>
             <div className={css.tabOverviewList} role="listbox" aria-label="全部内页">
-              {filteredTabSummaries.length === 0 ? <span className={css.tabOverviewEmpty}>没有匹配的内页</span> : filteredTabSummaries.map(summary => <button
-                key={summary.id}
+              {filteredTabSummaries.length === 0 ? <span className={css.tabOverviewEmpty}>没有匹配的内页</span> : filteredTabSummaries.map(summary => <WorkbenchTabTooltip key={summary.id} summary={summary}><button
                 type="button"
                 role="option"
                 aria-selected={summary.selected}
@@ -5972,11 +6048,11 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
                   setTabOverviewOpen(false)
                 }}
               >
-                <span className={css.areaTabStatusDot} data-tab-status={summary.status} aria-hidden="true" />
+                <WorkbenchTabStatus summary={summary} />
                 <span className={css.editorOptionIcon} data-editor-icon={summary.icon}><EditorIcon name={summary.icon} iconSvg={summary.iconSvg} /></span>
-                <span className={css.tabOverviewItemTitle}>{summary.title}</span>
+                <span className={css.tabOverviewItemTitle}>{summary.title}{summary.information?.detail ? <small>{summary.information.detail}</small> : null}</span>
                 <small>{summary.statusLabel}</small>
-              </button>)}
+              </button></WorkbenchTabTooltip>)}
             </div>
           </WorkbenchFloatingMenu>
         ) : null}
@@ -5998,7 +6074,7 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
             setOpen={(open) => { setBindingOpen(open); if (open) setMenu(undefined) }}
             onSelect={(binding) => {
               for (const tab of group.tabs) {
-                if (tab.editorScope === 'session' && tab.pendingBinding !== undefined) {
+                if (tab.editorScope === 'session' && (tab.pendingBinding !== undefined || isUnboundConversationTab(tab))) {
                   commit({ type: 'retarget-session', tabId: tab.id, binding })
                 }
               }
@@ -6292,7 +6368,7 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
   )
 }
 
-function WorkbenchAreaTabLabel({ tab, fallback }: { tab: TabDocument; fallback: string }) {
+function WorkbenchAreaTabLabel({ tab, fallback, fontSize }: { tab: TabDocument; fallback: string; fontSize: number }) {
   const runtime = useFloatingWorkspace()
   const identity = runtime?.visibleWorkbenchId ? floatingInstanceKey(runtime.visibleWorkbenchId, tab.id) : tab.id
   const renderNativeTitle = useSyncExternalStore(
@@ -6301,7 +6377,7 @@ function WorkbenchAreaTabLabel({ tab, fallback }: { tab: TabDocument; fallback: 
     () => getWorkbenchNativeTabTitle(identity),
   )
   const nativeTitle = renderNativeTitle?.()
-  return <span className={css.areaTabLabel}>{nativeTitle ?? fallback}</span>
+  return <span className={css.areaTabLabel} style={{ fontSize: `${fontSize}px` }}>{nativeTitle ?? fallback}</span>
 }
 
 function AreaMenu({
@@ -6583,18 +6659,46 @@ function Editor({
     <button type="button" onClick={() => props.close()}>关闭内页</button>
   </div>
   if (tab.pendingDistribution !== undefined) return <div className={css.body} role="status" data-workbench-pending-distribution><strong>{tab.lastKnownTitle}等待扩展和配置恢复</strong><p>原配置安全保存在本机导入记录中。请安装并授权完全匹配的扩展，然后从“工作台导入与分发 → 导入记录”恢复配置。</p></div>
-  if (tab.pendingBinding !== undefined) {
+  const isUnboundConversation = tab.editorId === 'workbench.conversation'
+    && tab.editorScope === 'session'
+    && tab.binding === undefined
+    && tab.sessionId === undefined
+    && tab.pendingBinding === undefined
+  if (tab.pendingBinding !== undefined || isUnboundConversation) {
     const policy: WorkbenchEditorBindingPolicyV1 = editor?.declaration?.binding ?? {
       requirement: editor?.declaration?.requiredBinding ?? 'session',
       unbound: 'pending',
       sharing: 'area',
     }
     const requirement = policy.requirement === 'workspace' ? '工作区' : '对话'
-    return <div className={css.body} data-workbench-pending-binding>
-      <section role="status" style={{ display: 'grid', placeItems: 'center', gap: 10, minHeight: '100%', padding: 24, textAlign: 'center' }}>
-        <strong>{tab.lastKnownTitle}正在等待绑定{requirement}</strong>
-        <span>{policy.sharing === 'area' ? `绑定后会沿用当前 Area 的${requirement}；不会自动创建新的对话。` : `请先选择一个${requirement}，再使用此内页。`}</span>
-        {policy.unbound === 'pending' ? <button type="button" onClick={commands.openBindingPicker}>选择已有对话</button> : null}
+    const sharedTarget = policy.sharing === 'area' ? '当前 Area 的' + requirement : '一个已有' + requirement
+    return <div className={css.body + ' ' + css.pendingBindingBody} data-workbench-pending-binding>
+      <section className={css.pendingBindingPanel} role="region" aria-label="待绑定对话内页">
+        <div className={css.pendingBindingMain}>
+          <div className={css.pendingBindingEyebrow}><span className={css.pendingBindingDot} /> <span>对话内页</span><span className={css.pendingBindingBadge}>待绑定</span></div>
+          <h2 className={css.pendingBindingTitle}>连接一个已有对话</h2>
+          <p className={css.pendingBindingDescription}>这个内页还没有来源对话。选择后会在这里继续原有消息，并使用对应的工具和运行状态。</p>
+          <div className={css.pendingBindingSteps} role="list" aria-label="绑定步骤">
+            <div role="listitem"><span>1</span><span><strong>选择对话</strong><small>从当前工作台的已有对话中选择</small></span></div>
+            <div role="listitem"><span>2</span><span><strong>继续当前工作</strong><small>内页会沿用 {sharedTarget} 的上下文</small></span></div>
+          </div>
+          <button type="button" className={css.pendingBindingPrimary} data-workbench-bind-conversation onClick={commands.openBindingPicker}><IconLinkOutlineMedium size={16} />选择已有对话</button>
+          <p className={css.pendingBindingNote}><IconLinkOutlineMedium size={13} />不会自动创建新对话，也不会改变当前工作台布局。</p>
+        </div>
+        <aside className={css.pendingBindingPreview} aria-label="绑定后对话预览">
+          <div className={css.pendingBindingPreviewHeader}>
+            <span className={css.pendingBindingPreviewIcon} aria-hidden="true"><IconLinkOutlineMedium size={15} /></span>
+            <span><strong>绑定后会显示</strong><small>所选对话的工作内容</small></span>
+            <span className={css.pendingBindingPreviewStatus}>待连接</span>
+          </div>
+          <div className={css.pendingBindingPreviewBody} aria-hidden="true">
+            <div className={css.pendingBindingMessage}><i /><span /><span /></div>
+            <div className={css.pendingBindingMessage + ' ' + css.pendingBindingMessageUser}><span /><span /></div>
+            <div className={css.pendingBindingActivity}><span /><span>消息与上下文</span><b /></div>
+            <div className={css.pendingBindingActivity}><span /><span>工具调用与运行状态</span><b /></div>
+          </div>
+          <div className={css.pendingBindingPreviewComposer}><span>消息输入区</span><span aria-hidden="true">↑</span></div>
+        </aside>
       </section>
     </div>
   }

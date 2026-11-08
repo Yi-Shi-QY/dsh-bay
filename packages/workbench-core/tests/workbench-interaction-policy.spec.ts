@@ -73,6 +73,17 @@ describe('Workbench Conversation interaction policy', () => {
     expect(normalizeWorkbenchConversationInteractionPolicy({ showSessionAccentFrames: 'off' }).showSessionAccentFrames).toBe(true)
   })
 
+  it('normalizes tab label size and close-button preferences', () => {
+    expect(normalizeWorkbenchConversationInteractionPolicy(undefined).tabFontSize).toBe('standard')
+    expect(normalizeWorkbenchConversationInteractionPolicy(undefined).showTabCloseButtons).toBe(true)
+    expect(normalizeWorkbenchConversationInteractionPolicy({ tabFontSize: 'larger', showTabCloseButtons: false })).toMatchObject({
+      tabFontSize: 'larger', showTabCloseButtons: false,
+    })
+    expect(normalizeWorkbenchConversationInteractionPolicy({ tabFontSize: 'huge', showTabCloseButtons: 'off' })).toMatchObject({
+      tabFontSize: 'standard', showTabCloseButtons: true,
+    })
+  })
+
   it('adds defaults while decoding a pre-policy V4 profile', () => {
     const decoded = decodeWorkbenchSettingsV4({
       version: 4,

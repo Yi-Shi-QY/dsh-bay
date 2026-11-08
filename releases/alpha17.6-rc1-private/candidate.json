@@ -1,0 +1,15 @@
+{
+  "status": "private-staging",
+  "candidateId": "dsh-bay-0.2.2-alpha.17.6-dsh-0.2.2-rc.1",
+  "product": "DSH Bay / 湾域",
+  "packageName": "dsh-bay",
+  "version": "0.2.2-alpha.17.6",
+  "dshGeneration": "0.2.2-rc.1",
+  "upstreamCommit": "66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db",
+  "artifact": {
+    "path": "releases/alpha17.6-rc1-private/dsh-bay-0.2.2-alpha.17.6.tgz",
+    "size": 1143676,
+    "sha256": "2ca262e151b702b2fd3c51f3aede773e9744b4913c38f2fe48b36366f8524c77",
+    "integrity": "sha512-YMfW6wJFtZE697IwaQFxCzcDXi3UX2uerERCd4XiVxH2hPjIYQI1IU0Y6ozY3PICIlXDGA9aT/ChJjKHyjfmEQ=="
+  }
+}

@@ -1,7 +1,22 @@
 import { resolveWorkbenchEditorPresentation, type WorkbenchEditorCatalogRow, type WorkbenchEditorPresentation } from './catalog.ts'
 import type { GroupNode, SessionBindingV1, TabDocument } from './model.ts'
+import { UNKNOWN_CONVERSATION_STATUS, type ConversationTabPhase, type ConversationTabStatus } from '../client/conversation-tab-status.ts'
+import { resolveSessionTarget, type SessionTargetResolverSnapshot } from './session-target-resolver.ts'
+import { buildWorkbenchTabInformation, type WorkbenchTabInformation, type WorkbenchTabInformationFacts } from './tab-information.ts'
 
-export type WorkbenchAreaTabStatus = 'ready' | 'unbound' | 'missing' | 'paused'
+export type WorkbenchAreaTabStatus = 'ready' | 'unbound' | 'missing' | 'paused' | ConversationTabPhase
+
+/** Only the actual conversation editor follows this Session; resource tabs keep their own semantics. */
+export function conversationTabBinding(tab: TabDocument, areaBinding?: SessionBindingV1): SessionBindingV1 | undefined {
+  if (tab.editorId !== 'workbench.conversation' || tab.editorScope !== 'session' || tab.pendingBinding !== undefined) return undefined
+  return tab.binding ?? (tab.sessionId ? { sessionId: tab.sessionId } : areaBinding)
+}
+
+export function conversationTabUnavailable(binding: SessionBindingV1, facts: Omit<SessionTargetResolverSnapshot, 'markersByWorkspace'>): string | undefined {
+  const workspaceId = binding.workspaceId ?? facts.workspaces.find(row => row.sessionIds.includes(binding.sessionId))?.workspaceId
+  const { status } = resolveSessionTarget({ sessionId: binding.sessionId, ...(workspaceId ? { workspaceId } : {}) }, { ...facts, markersByWorkspace: {} })
+  return status === 'available' ? undefined : status === 'archived' ? '此对话已归档' : status === 'moved' ? '对话已移出绑定项目' : '此对话暂时不可用'
+}
 
 export interface WorkbenchAreaTabSummary {
   id: string
@@ -11,6 +26,8 @@ export interface WorkbenchAreaTabSummary {
   status: WorkbenchAreaTabStatus
   statusLabel: string
   selected: boolean
+  conversation?: boolean
+  information?: WorkbenchTabInformation
 }
 
 export interface WorkbenchAreaTabRow {
@@ -68,6 +85,9 @@ export function buildWorkbenchAreaTabRows(input: {
   activeTabId: string | undefined
   areaBinding: SessionBindingV1 | undefined
   pausedTabId: string | undefined
+  conversations?: ReadonlyMap<string, ConversationTabStatus>
+  sessionAvailability?: (binding: SessionBindingV1) => string | undefined
+  information?: WorkbenchTabInformationFacts
 }): WorkbenchAreaTabRows {
   const rows: WorkbenchAreaTabRow[] = []
   const summaries: WorkbenchAreaTabSummary[] = []
@@ -75,7 +95,14 @@ export function buildWorkbenchAreaTabRows(input: {
   for (const tab of input.tabs) {
     const editor = workbenchEditorFromIndex(input.editorIndex, tab.editorId, tab.editorScope)
     const selected = tab.id === input.activeTabId
-    const status = statusFor(tab, editor, input.areaBinding, tab.id === input.pausedTabId)
+    const baseStatus = statusFor(tab, editor, input.areaBinding, tab.id === input.pausedTabId)
+    const binding = conversationTabBinding(tab, input.areaBinding)
+    const unavailable = binding ? input.sessionAvailability?.(binding) : undefined
+    const conversation = binding && baseStatus !== 'missing' && baseStatus !== 'unbound'
+      ? unavailable ? { status: 'failed' as const, label: unavailable }
+        : input.conversations?.get(binding.sessionId) ?? UNKNOWN_CONVERSATION_STATUS
+      : undefined
+    const status = conversation?.status ?? baseStatus
     const presentation = resolveWorkbenchEditorPresentation(editor)
     const summary: WorkbenchAreaTabSummary = {
       id: tab.id,
@@ -83,8 +110,13 @@ export function buildWorkbenchAreaTabRows(input: {
       icon: presentation.icon,
       ...(presentation.iconSvg ? { iconSvg: presentation.iconSvg } : {}),
       status,
-      statusLabel: statusLabel(status),
+      statusLabel: conversation?.label ?? statusLabel(status),
       selected,
+      ...(tab.editorId === 'workbench.conversation' ? { conversation: true } : {}),
+      information: buildWorkbenchTabInformation({ tab, editor, areaBinding: input.areaBinding,
+        statusLabel: conversation?.label ?? statusLabel(status), ordinal: rows.length + 1,
+        ...(input.information ? { facts: input.information } : {}),
+      }),
     }
 
     rows.push({ tab, editor, presentation, summary })

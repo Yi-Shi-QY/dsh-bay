@@ -2,7 +2,7 @@
 
 更新时间：2026-10-22  
 规范版本：1.0  
-适用基线：Workbench Core `0.2.2-alpha.17.5`、DSH `0.2.2-rc.1`（commit `66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db`）
+适用基线：Workbench Core `0.2.2-alpha.17.6`、DSH `0.2.2-rc.1`（commit `66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db`）
 状态：**Core 接口与自动化合同说明；正式桌面扩展生命周期验收仍未完成**
 
 本文是开发新的 Workbench 容器内页扩展时的主规范。模板位于 `packages/workbench-core/presets/workbench-creator/skills/workbench-extension-development/templates/workbench-editor/`。若模板与本文不一致，以对应目标 Core/DSH 版本的公开导出、类型、测试和锁定文件为准；不要复制本文以外版本的 Slot 参数或 API。
@@ -98,7 +98,7 @@ my-workbench-extension/
       "kind": "extension",
       "delivery": "direct-source",
       "version": "1.0.0",
-      "coreCompatibility": "0.2.2-alpha.17.5",
+      "coreCompatibility": "0.2.2-alpha.17.6",
       "dshGeneration": "0.2.2-rc.1",
       "activation": "restart-only",
       "scope": "root",
@@ -137,7 +137,7 @@ const extension = {
   moduleId: 'example.my-extension',
   apiVersion: 1,
   editorIds: ['example.my-extension.main'],
-  coreCompatibility: '0.2.2-alpha.17.5',
+  coreCompatibility: '0.2.2-alpha.17.6',
   dshGeneration: '0.2.2-rc.1',
 }
 

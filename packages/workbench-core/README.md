@@ -7,7 +7,7 @@ integration.
 ## Compatibility
 
 This candidate targets **DSH `0.2.2-rc.1`** and is published as
-`0.2.2-alpha.17.5`. Install it only in a compatible DSH profile. The package
+`0.2.2-alpha.17.6`. Install it only in a compatible DSH profile. The package
 name and client module id are both `dsh-bay`; the internal workbench module id
 remains `workbench.core` for migration compatibility.
 
@@ -22,7 +22,7 @@ pnpm add dsh-bay
 ```
 
 For a private trial, install the matching `.tgz` artifact from the repository's
-`releases/alpha17.5-rc1-private/` directory. The repository release record is
+`releases/alpha17.6-rc1-private/` directory. The repository release record is
 the source of truth for its SHA-256, provenance and validation status.
 
 ## Package boundary

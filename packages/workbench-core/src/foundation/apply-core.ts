@@ -68,6 +68,7 @@ import { workbenchEditorCatalogRowFromSlotEntry } from '../client/workbench-edit
 import { createWorkbenchToolGatewayManager, type WorkbenchToolGatewayManagerV1 } from '../tool-gateway.ts'
 import type { WorkbenchToolUsageServiceV1 } from '../tool-usage.ts'
 import { createWorkbenchShareController } from '../client/workbench-share-controller.ts'
+import { createConversationTabStatusSource } from '../client/conversation-tab-status.ts'
 import { isWorkbenchShareGuestPage } from '../client/workbench-share-guest.ts'
 import { createRemoteBayAgentController } from '../client/bay-agent-controller.ts'
 import type { BayAgentControllerV1 } from './workbench-bay-agent-work.ts'
@@ -241,16 +242,17 @@ export function applyWorkbenchCoreFoundation(
   // contexts also mirror it on `ctx.connection`, while the plugin entry only
   // guarantees the service lookup. Resolve both shapes so the browser carrier
   // is not silently downgraded to `supported: false` on desktop.
-  const resolveConnectionRpc = () => {
+  const resolveClientConnection = () => {
     const directConnection = (ctx as unknown as {
-      connection?: { rpc?: import('@deepseek-ai/dsh-client-connection/client').ClientConnectionRpc }
+      connection?: Partial<import('@deepseek-ai/dsh-client-connection/client').ConnectionHandle>
     }).connection
-    if (directConnection?.rpc !== undefined) return directConnection.rpc
+    if (directConnection !== undefined) return directConnection
     try {
       return ((ctx as unknown as { get?: (name: string, strict?: boolean) => unknown })
-        .get?.('connection', false) as { rpc?: import('@deepseek-ai/dsh-client-connection/client').ClientConnectionRpc } | undefined)?.rpc
+        .get?.('connection', false) as Partial<import('@deepseek-ai/dsh-client-connection/client').ConnectionHandle> | undefined)
     } catch { return undefined }
   }
+  const resolveConnectionRpc = () => resolveClientConnection()?.rpc
   const connectionRpc = resolveConnectionRpc()
   const shareGuest = isWorkbenchShareGuestPage()
   const shareController = shareGuest ? undefined
@@ -497,7 +499,7 @@ export function applyWorkbenchCoreFoundation(
     },
     patchInteractionPolicy: async (key: string, value: unknown) => {
       if (windowView !== undefined) return false
-      const result = await settings.patch({ operation: 'set', path: key === 'unknownResource' || key === 'showSessionAccentFrames' ? ['interactionPolicy', key] : ['interactionPolicy', 'conversationResources', key], value })
+      const result = await settings.patch({ operation: 'set', path: key === 'unknownResource' || key === 'showSessionAccentFrames' || key === 'tabFontSize' || key === 'showTabCloseButtons' ? ['interactionPolicy', key] : ['interactionPolicy', 'conversationResources', key], value })
       return result.status === 'committed'
     },
     ...(moduleManager === undefined ? {} : { moduleManager }),
@@ -511,6 +513,11 @@ export function applyWorkbenchCoreFoundation(
   }
 
   const footer = createWorkbenchFooterHost(ctx)
+  const conversationStatus = createConversationTabStatusSource({
+    sessions: ctx.sessions, interactions: ctx.uiSession.sessionStatus,
+    generation: resolveClientConnection()?.generation ?? { getSnapshot: () => undefined, subscribe: () => () => {} },
+  })
+  ctx.effect(() => () => conversationStatus.dispose(), 'workbench: conversation tab status')
   ctx.effect(() => footer.dispose, 'workbench: private footer host')
   // Use the public root shadowing contract only in our dedicated document.
   // The official Desktop document keeps its original root and owners.
@@ -532,6 +539,7 @@ export function applyWorkbenchCoreFoundation(
     inject: (): WorkbenchCoreInnerPageInjection => ({
       modeController,
       bayAgent,
+      conversationStatus,
       generateContextDraft: aiDraftGenerator.generateContextDraft,
       floatingRuntime,
       toolGateway,

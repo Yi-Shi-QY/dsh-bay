@@ -6,6 +6,7 @@ import type {
 } from './workbench-slot-contracts.ts'
 import { parseSlotPreviewDocumentV1 } from './workbench-slot-contracts.ts'
 import { editorPresentationFor, type WorkbenchEditorCatalogRow } from './catalog.ts'
+import { workbenchAgentPresetLabel as presetLabelFor } from './agent-preset-label.ts'
 import type { WorkbenchDocumentV3, WorkbenchNodeV3, ModuleInstanceDocument } from './document-v3.ts'
 import type { WorkbenchInventory, WorkbenchInventoryArea, WorkbenchInventoryPage } from './workbench-inventory.ts'
 
@@ -77,17 +78,6 @@ export interface WorkbenchPreviewSession {
   displayTitle?: string
   agentPreset?: string
   modelSelection?: WorkbenchPreviewModelSelection
-}
-
-function presetLabelFor(id: string): string {
-  switch (id) {
-    case 'standard': return '标准模式'
-    case 'ptc': return 'PTC 模式'
-    case 'minimal': return '极简模式'
-    case 'creator': return '创造模式'
-    case 'workbench-creator': return 'Workbench 创作模式'
-    default: return id
-  }
 }
 
 function editorKindFor(editorId: string, scope: 'root' | 'session'): WorkbenchPreviewEditorKind {

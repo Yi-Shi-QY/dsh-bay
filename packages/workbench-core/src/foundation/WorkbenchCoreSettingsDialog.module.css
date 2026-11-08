@@ -16,7 +16,7 @@
   margin: auto;
   padding: 0;
   border: 0;
-  border-radius: var(--dsw-radius-panel, 28px);
+  border-radius: var(--dsw-radius-panel, 20px);
   overflow: hidden;
   color: var(--dsw-alias-label-primary);
   background: var(--dsw-alias-bg-layer-2, var(--dsw-alias-bg-layer-1));
@@ -39,7 +39,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 16px 20px 14px;
+  padding: 14px 18px 12px;
   border-bottom: 0.5px solid var(--dsw-alias-border-l2);
 }
 
@@ -47,7 +47,7 @@
   margin: 0;
   font-size: 16px;
   line-height: 24px;
-  font-weight: 500;
+  font-weight: 550;
 }
 
 .close {

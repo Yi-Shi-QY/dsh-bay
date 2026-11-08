@@ -4,7 +4,7 @@
 >
 > DSH Bay（中文名：湾域）是面向 [DeepSeek Harness（DSH）](https://github.com/deepseek-ai/deepseek-harness) 的多区域插件工作台。它把 DSH 原生 Session、Workspace Files、Terminal、Browser 及其他官方内页组织到相互隔离、可恢复的工作区域中，让插件作者可以在一个清晰的边界内开发和验证自己的扩展。
 
-当前仓库是 DSH Bay `0.2.2-alpha.17.5` 的私有候选仓库，目标宿主为 DSH `0.2.2-rc.1`。仓库已经从研究、迁移和历史验收材料中独立出来，方便进行来源审计、兼容性验证和后续公测准备。
+当前仓库是 DSH Bay `0.2.2-alpha.17.6` 的私有候选仓库，目标宿主为 DSH `0.2.2-rc.1`。仓库已经从研究、迁移和历史验收材料中独立出来，方便进行来源审计、兼容性验证和后续公测准备。
 
 > 当前候选仍处于 `private-staging / experimental-unvalidated`。候选记录已包含 rc1 身份、类型检查、严格打包和归档核对；真实 rc1 桌面 smoke 仍未完成。请不要把当前构建当作已发布的稳定包。
 
@@ -15,7 +15,7 @@
 | 产品展示名 | **DSH Bay** |
 | 中文名 | **湾域** |
 | 产品定位 | DSH 插件开发、验证、组合和分享的多区域工作台 |
-| 当前版本 | `0.2.2-alpha.17.5` |
+| 当前版本 | `0.2.2-alpha.17.6` |
 | DSH 兼容版本 | `0.2.2-rc.1` |
 | DSH 上游提交 | `66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db` |
 | 默认交付 | Core-only |
@@ -25,7 +25,7 @@
 
 “湾域”表示一个可以停靠、整理和继续工作的独立工作域：每个任务拥有自己的 Area、Session 和内页组合，多个任务可以并行存在，又不会因为全局 Session 或布局状态而互相串线。`DSH Bay` 是产品展示名，`dsh-bay` 是统一的安装包名和客户端模块名。内部 Core 职责与 `workbench.core` 标识保持不变。
 
-17.5 试用安装包统一命名为 `dsh-bay-0.2.2-alpha.17.5.tgz`。从旧的 `@dsh-workbench/core` 安装迁移时，先在 DSH 插件管理器停用旧包，再安装并启用 `dsh-bay`，避免两个包同时注册工作台。旧工作台分享包中的 Core 名称保留导入兼容，内部布局与设置标识不改名。
+17.6 试用安装包统一命名为 `dsh-bay-0.2.2-alpha.17.6.tgz`。从旧的 `@dsh-workbench/core` 安装迁移时，先在 DSH 插件管理器停用旧包，再安装并启用 `dsh-bay`，避免两个包同时注册工作台。旧工作台分享包中的 Core 名称保留导入兼容，内部布局与设置标识不改名。
 
 DSH Bay 是独立社区项目，不代表 DeepSeek 官方产品。它遵循 DSH 的原生插件、生命周期和 Plugin Manager 契约，尽量以增量方式提供工作台能力。
 
@@ -71,7 +71,7 @@ Settings 继续使用 DSH 原生 Plugin Manager 入口。DSH Bay 不维护第二
 
 ### More 菜单隔离
 
-`0.2.2-alpha.17.5` 采用 Core-only 方向：Workbench 不显示、不消费 Workbench More。DSH 官方页面仍可使用 rc1 的 `ui-entry-customization`；在 Workbench projection boundary 只过滤官方 `entry-customization` 注册，不屏蔽整个 actions Slot，也不影响其他合法的官方或第三方 action。
+`0.2.2-alpha.17.6` 采用 Core-only 方向：Workbench 不显示、不消费 Workbench More。DSH 官方页面仍可使用 rc1 的 `ui-entry-customization`；在 Workbench projection boundary 只过滤官方 `entry-customization` 注册，不屏蔽整个 actions Slot，也不影响其他合法的官方或第三方 action。
 
 因此，官方页面、Workbench 页面和模式切换分别遵循以下行为：
 

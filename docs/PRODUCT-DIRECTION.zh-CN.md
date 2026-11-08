@@ -6,7 +6,7 @@
 开发 → 验证 → 组合 → 分享
 ```
 
-当前 `0.2.2-alpha.17.5` 提供多 Area、Area-local Session、官方内页投影、
+当前 `0.2.2-alpha.17.6` 提供多 Area、Area-local Session、官方内页投影、
 17.1 Home，以及工作台布局、在线引用和离线嵌入分发。Creator 提供扩展开发
 规范与模板，完整包支持经过验证的自包含 Client/Host Bundle 及配置迁移。
 更广泛的组合目录、Dynamic Cordis、Agent/MCP/Skill 完整迁移仍属于后续阶段。

@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.2.2-alpha.17.6 - private staging
+
+- Refined the Workbench container inner-page tab status indicators, tab
+  metadata tooltips and unbound conversation empty state for hands-on UI
+  validation.
+- Added an in-page conversation binding button and unified conversation
+  selection around the grouped picker with collapsible folders.
+- Reworked inner-page and extension settings into compact responsive cards,
+  with capsule switches and extension permissions managed inside each card.
+- Moved tab text size and close-button preferences into Workbench settings.
+- Kept the candidate pinned to DSH `0.2.2-rc.1` and refreshed the private
+  staging package identity.
+
+The candidate remains private staging for local installation testing.
+
 ## 0.2.2-alpha.17.5 — private staging
 
 - Renamed the install package and client module to `dsh-bay`; the internal

@@ -115,7 +115,7 @@
   touch-action: none;
 }
 
-.tab > span {
+.tab > span:not([data-tab-status]) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -220,6 +220,28 @@
   gap: 12px;
   color: var(--dsw-alias-label-secondary, #777);
 }
+
+.tabSearch {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 30px;
+  padding: 4px 8px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 5px;
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-bg-base);
+  font: inherit;
+}
+
+.tabSearch:focus-visible {
+  outline: 2px solid var(--dsw-alias-label-link);
+  outline-offset: -1px;
+}
+
+.tabListItem { min-width: 0; gap: 8px; }
+.tabListCopy { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tabListCopy > small { display: block; overflow: hidden; text-overflow: ellipsis; line-height: 1.6; }
+.tabListItem small { color: var(--dsw-alias-label-tertiary); font-size: 11px; }
 
 .empty p {
   margin: 0;

@@ -18,6 +18,10 @@ export interface WorkbenchConversationInteractionPolicyV1 {
   readonly unknownResource: 'module-default' | 'official-sidebar' | 'disabled'
   /** Whether conversation marker colors should be painted around Areas and the floating workspace. */
   readonly showSessionAccentFrames?: boolean
+  /** Font size used by Workbench Area and floating-workspace tab labels. */
+  readonly tabFontSize?: 'standard' | 'large' | 'larger'
+  /** Whether tab close buttons may be shown on active/hovered tabs. */
+  readonly showTabCloseButtons?: boolean
 }
 
 export const DEFAULT_WORKBENCH_CONVERSATION_INTERACTION_POLICY: WorkbenchConversationInteractionPolicyV1 = Object.freeze({
@@ -33,6 +37,8 @@ export const DEFAULT_WORKBENCH_CONVERSATION_INTERACTION_POLICY: WorkbenchConvers
   }),
   unknownResource: 'module-default',
   showSessionAccentFrames: true,
+  tabFontSize: 'standard',
+  showTabCloseButtons: true,
 })
 
 const placements = new Set<WorkbenchConversationResourcePlacementV1>([
@@ -42,7 +48,7 @@ const placements = new Set<WorkbenchConversationResourcePlacementV1>([
 export function normalizeWorkbenchConversationInteractionPolicy(value: unknown): WorkbenchConversationInteractionPolicyV1 {
   const result: Record<string, WorkbenchConversationResourceClickPolicyV1> = {}
   if (typeof value === 'object' && value !== null) {
-    const candidate = value as { conversationResources?: unknown; unknownResource?: unknown; showSessionAccentFrames?: unknown }
+    const candidate = value as { conversationResources?: unknown; unknownResource?: unknown; showSessionAccentFrames?: unknown; tabFontSize?: unknown; showTabCloseButtons?: unknown }
     if (typeof candidate.conversationResources === 'object' && candidate.conversationResources !== null) {
       for (const [key, raw] of Object.entries(candidate.conversationResources)) {
         if (!/^[a-z0-9][a-z0-9._-]{0,63}$/u.test(key) || typeof raw !== 'object' || raw === null) continue
@@ -58,11 +64,19 @@ export function normalizeWorkbenchConversationInteractionPolicy(value: unknown):
     const showSessionAccentFrames = typeof candidate.showSessionAccentFrames === 'boolean'
       ? candidate.showSessionAccentFrames
       : DEFAULT_WORKBENCH_CONVERSATION_INTERACTION_POLICY.showSessionAccentFrames ?? true
+    const tabFontSize = candidate.tabFontSize === 'large' || candidate.tabFontSize === 'larger' || candidate.tabFontSize === 'standard'
+      ? candidate.tabFontSize
+      : DEFAULT_WORKBENCH_CONVERSATION_INTERACTION_POLICY.tabFontSize ?? 'standard'
+    const showTabCloseButtons = typeof candidate.showTabCloseButtons === 'boolean'
+      ? candidate.showTabCloseButtons
+      : DEFAULT_WORKBENCH_CONVERSATION_INTERACTION_POLICY.showTabCloseButtons ?? true
     return {
       version: 2,
       conversationResources: { ...DEFAULT_WORKBENCH_CONVERSATION_INTERACTION_POLICY.conversationResources, ...result },
       unknownResource: unknownResource ?? DEFAULT_WORKBENCH_CONVERSATION_INTERACTION_POLICY.unknownResource,
       showSessionAccentFrames,
+      tabFontSize,
+      showTabCloseButtons,
     }
   }
   return structuredClone(DEFAULT_WORKBENCH_CONVERSATION_INTERACTION_POLICY)
@@ -107,5 +121,9 @@ export function conversationResourceActionFor(
 export function migrateWorkbenchInteractionPolicy(value: unknown): WorkbenchConversationInteractionPolicyV1 {
   const policy = normalizeWorkbenchConversationInteractionPolicy(value)
   if (value && typeof value === 'object' && 'version' in value && value.version === 2) return policy
-  return { version: 2, conversationResources: Object.fromEntries(Object.entries(policy.conversationResources).map(([key, row]) => [key, { ...row, placement: !row.enabled || row.placement === 'disabled' ? 'disabled' : 'floating' }])), unknownResource: policy.unknownResource === 'disabled' ? 'disabled' : 'module-default', showSessionAccentFrames: policy.showSessionAccentFrames ?? true }
+  return { version: 2, conversationResources: Object.fromEntries(Object.entries(policy.conversationResources).map(([key, row]) => [key, { ...row, placement: !row.enabled || row.placement === 'disabled' ? 'disabled' : 'floating' }])), unknownResource: policy.unknownResource === 'disabled' ? 'disabled' : 'module-default', showSessionAccentFrames: policy.showSessionAccentFrames ?? true, tabFontSize: policy.tabFontSize ?? 'standard', showTabCloseButtons: policy.showTabCloseButtons ?? true }
+}
+
+export function workbenchTabFontSizePx(value: WorkbenchConversationInteractionPolicyV1['tabFontSize'], base = 12): number {
+  return base + (value === 'large' ? 1 : value === 'larger' ? 2 : 0)
 }
