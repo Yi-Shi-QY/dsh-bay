@@ -200,6 +200,13 @@
 @media (prefers-reduced-motion: reduce) { .settingsRoot * { transition: none !important; animation: none !important; scroll-behavior: auto !important; } }
 /* Compact cards keep each control close to its label. */
 .innerPagesPage, .interactionPage { max-width: 800px; margin-inline: auto; gap: 16px; }
+.backgroundAi { display: grid; gap: 14px; min-width: 0; padding: 16px; border: 0.5px solid var(--dsw-alias-border-l3, #cfd4dc); border-radius: 12px; background: var(--dsw-alias-bg-layer-1, Canvas); }
+.backgroundAi fieldset { display: grid; gap: 12px; }
+.backgroundAiModels { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.backgroundAi label { display: grid; gap: 6px; font-size: 12px; }
+.backgroundAiPrompt { border-top: 0.5px solid var(--dsw-alias-border-l3, #cfd4dc); }
+.backgroundAiPrompt textarea { resize: vertical; min-height: 130px; line-height: 1.6; }
+@container workbench-settings (max-width: 580px) { .backgroundAiModels { grid-template-columns: minmax(0, 1fr); } }
 .innerPagesPage > .pageHeader, .interactionPage > .pageHeader { align-items: center; }
 .innerPagesPage .pageHeader p, .interactionPage .pageHeader p { font-size: 12px; line-height: 18px; }
 .innerPagesPage .pageHeader > button, .interactionPage .pageHeader > button { min-height: 32px; border-radius: 8px; font-size: 12px; }

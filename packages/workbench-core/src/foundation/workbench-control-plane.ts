@@ -1,3 +1,4 @@
+import { browserSafeUuid } from '../browser-safe-id.ts'
 import { areasOf, normalizeWorkbenchDocument, type AreaNode, type ModuleInstanceDocument, type WorkbenchNodeV3 } from './document-v3.ts'
 import type { SessionBindingV1 } from './model.ts'
 import { sessionTargetKey } from './model.ts'
@@ -7,6 +8,7 @@ import {
   type WorkbenchContextSection, type WorkbenchContextV1, type WorkbenchContextWriter,
 } from './workbench-context.ts'
 import type { WorkbenchAreaOwnershipV1, WorkbenchRecordV2, WorkbenchSettingsV4 } from './persistence.ts'
+import { workbenchAreas, showWorkbenchArea } from './area-identity.ts'
 
 export const WORKBENCH_CONTROL_PLANE_SERVICE_NAME = 'workbenchControlPlane'
 
@@ -40,7 +42,7 @@ export interface WorkbenchControlPlaneEditorV1 {
 export interface WorkbenchControlPlaneOptions {
   settings: WorkbenchControlPlaneSettings
   editors?: { getSnapshot(): readonly WorkbenchControlPlaneEditorV1[] }
-  createSession?: (input: { workspaceId?: string; agentPreset?: string; requestId: string }) => Promise<{
+  createSession?: (input: { workbenchId?: string; areaId?: string; workspaceId?: string; agentPreset?: string; title?: string; requestId: string }) => Promise<{
     target: SessionBindingV1
     reusedBlank?: boolean
   }>
@@ -69,12 +71,14 @@ export interface WorkbenchBayAgentSessionV1 {
 }
 
 export interface WorkbenchControlPlaneAreaV1 {
+  visible?: boolean
+  project?: import('../workbench-directory-contract.ts').AreaProjectV1
   areaId: string
   label: string
   ownership: WorkbenchAreaOwnershipV1
   active: boolean
   archived: boolean
-  /** Monotonically advances whenever the Area's Session binding changes. */
+  /** Project generation; unrelated to active view or conversation count. */
   generation: number
   context: AreaContextV1
   binding?: SessionBindingV1
@@ -90,6 +94,7 @@ export interface WorkbenchControlPlaneSnapshotV1 {
   context: WorkbenchContextV1
   bayAgentSession?: WorkbenchBayAgentSessionV1
   areas: readonly WorkbenchControlPlaneAreaV1[]
+  sessions?: readonly (import('../workbench-directory-contract.ts').WorkbenchSessionEntryV1 & { sessionId: string; workspaceId?: string })[]
 }
 
 export type WorkbenchControlPlaneReadContext =
@@ -132,6 +137,7 @@ export interface CreateAreaResultV1 {
 }
 
 export interface CreateSessionInputV1 {
+  title?: string
   /** Add a separate conversation without rebinding existing modules. */
   append?: boolean
   workbenchId?: string
@@ -150,6 +156,7 @@ export interface CreateSessionResultV1 {
 }
 
 export interface EnsureEditorInputV1 {
+  sessionId?: string
   workbenchId?: string
   areaId: string
   editorId: string
@@ -179,7 +186,7 @@ export class WorkbenchControlPlane {
 
   constructor(private readonly options: WorkbenchControlPlaneOptions) {
     this.now = options.now ?? (() => Date.now())
-    this.createId = options.createId ?? (kind => `${kind}-${globalThis.crypto.randomUUID()}`)
+    this.createId = options.createId ?? (kind => `${kind}-${browserSafeUuid()}`)
   }
 
   inspect(workbenchId?: string): WorkbenchControlPlaneSnapshotV1 {
@@ -192,7 +199,9 @@ export class WorkbenchControlPlane {
       description: record.description,
       context: workbenchContextOf(record.context),
       ...(record.bayAgentSession === undefined ? {} : { bayAgentSession: structuredClone(record.bayAgentSession) }),
-      areas: areasOf(record.document.root).map(area => this.projectArea(record, area)),
+      areas: workbenchAreas(record).map(area => this.projectArea(record, area)),
+      ...(record.sessionCatalog === undefined ? {} : { sessions: Object.values(record.sessionCatalog).map(entry => ({ ...entry, sessionId: entry.sessionId ?? entry.sessionKey,
+        ...(entry.areaId && record.areaProjects?.[entry.areaId]?.workspaceId ? { workspaceId: record.areaProjects[entry.areaId]!.workspaceId! } : {}) })) }),
     }
   }
 
@@ -209,7 +218,7 @@ export class WorkbenchControlPlane {
   readContext(input: WorkbenchControlPlaneReadContext): WorkbenchContextV1 | AreaContextV1 {
     const { record } = this.readRecord(input.workbenchId)
     if (input.scope === 'workbench') return workbenchContextOf(record.context)
-    if (!areasOf(record.document.root).some(area => area.areaId === input.areaId)) {
+    if (!workbenchAreas(record).some(area => area.areaId === input.areaId)) {
       throw controlPlaneError('area-not-found', `Unknown Area ${input.areaId}`)
     }
     return areaContextOf(record.areaContexts?.[input.areaId])
@@ -242,7 +251,7 @@ export class WorkbenchControlPlane {
           : saved
     }
     if (input.areaId === undefined) return { status: 'rejected', reason: 'invalid-input' }
-    const area = areasOf(record.document.root).find(candidate => candidate.areaId === input.areaId)
+    const area = workbenchAreas(record).find(candidate => candidate.areaId === input.areaId)
     if (area === undefined) return { status: 'rejected', reason: 'area-not-found' }
     const source = areaContextOf(record.areaContexts?.[input.areaId])
     const result = input.section === 'human'
@@ -320,27 +329,30 @@ export class WorkbenchControlPlane {
     if (read.status !== 'ready') return read.result
     const { snapshot, record } = read
     if (record.archivedAt !== undefined) return { status: 'rejected', reason: 'workbench-archived' }
-    const area = areasOf(record.document.root).find(candidate => candidate.areaId === input.areaId)
+    const area = workbenchAreas(record).find(candidate => candidate.areaId === input.areaId)
     if (area === undefined) return { status: 'rejected', reason: 'area-not-found' }
     const metadata = record.areaMetadata?.[input.areaId]
     const ownership = metadata?.ownership ?? 'user-owned'
     if (!input.append && !canManageArea(actor, ownership)) return { status: 'rejected', reason: 'ownership-not-permitted' }
     if (ownership === 'archived') return { status: 'rejected', reason: 'area-archived' }
-    if (!input.append && area.areaBinding !== undefined) return { status: 'rejected', reason: 'area-already-bound' }
+    const project = record.areaProjects?.[input.areaId]
+    if (record.fileWorkbench && !project?.workspaceId) return { status: 'rejected', reason: 'session-binding-required' }
+    if (project?.workspaceId && input.workspaceId && project.workspaceId !== input.workspaceId) return { status: 'rejected', reason: 'invalid-input' }
     const connection = await this.options.createSession({
-      ...(input.workspaceId === undefined ? {} : { workspaceId: input.workspaceId }),
+      workbenchId: record.workbenchId, areaId: input.areaId,
+      ...((project?.workspaceId ?? input.workspaceId) === undefined ? {} : { workspaceId: (project?.workspaceId ?? input.workspaceId)! }),
       ...(input.agentPreset === undefined ? {} : { agentPreset: input.agentPreset }),
+      ...(input.title === undefined ? {} : { title: input.title }),
       requestId: input.requestId,
     })
     const latest = this.tryReadWritableRecord(input.workbenchId)
     if (latest.status !== 'ready') return latest.result
-    const latestArea = areasOf(latest.record.document.root).find(candidate => candidate.areaId === input.areaId)
+    const latestArea = workbenchAreas(latest.record).find(candidate => candidate.areaId === input.areaId)
     if (latestArea === undefined) return { status: 'rejected', reason: 'area-not-found' }
     if (latest.record.archivedAt !== undefined) return { status: 'rejected', reason: 'workbench-archived' }
     const latestOwnership = latest.record.areaMetadata?.[input.areaId]?.ownership ?? 'user-owned'
     if (latestOwnership === 'archived') return { status: 'rejected', reason: 'area-archived' }
     if (!input.append && !canManageArea(actor, latestOwnership)) return { status: 'rejected', reason: 'ownership-not-permitted' }
-    if (!input.append && latestArea.areaBinding !== undefined) return settingsConflict(latest.snapshot.revision)
     const existing = latestArea.moduleHistory.find(row => row.binding?.sessionId === connection.target.sessionId)
     if (existing) return { status: 'committed', value: { target: connection.target, moduleInstanceId: existing.moduleInstanceId, reusedBlank: false, settingsRevision: latest.snapshot.revision ?? 0 }, settingsRevision: latest.snapshot.revision ?? 0 }
     const moduleInstanceId = this.createId('module')
@@ -350,13 +362,13 @@ export class WorkbenchControlPlane {
       binding: structuredClone(connection.target), state,
       sessionStates: { [sessionTargetKey(connection.target)]: {} },
       sessionStateOrder: [sessionTargetKey(connection.target)], bindingGeneration: 0,
-      lastKnownTitle: '对话',
+      lastKnownTitle: input.title?.slice(0, 160) || '对话',
     }
-    const root = mapArea(latest.record.document.root, input.areaId, row => {
+    const visibleRecord = showWorkbenchArea(latest.record, input.areaId, this.createId('split'))
+    const root = mapArea(visibleRecord.document.root, input.areaId, row => {
       const { areaBinding: _binding, ...rest } = row
       return {
-      ...rest, ...(input.append ? {} : { areaBinding: structuredClone(connection.target) }),
-      areaBindingGeneration: (row.areaBindingGeneration ?? 0) + 1,
+      ...rest,
       activeModuleInstanceId: moduleInstanceId,
       moduleHistory: [...row.moduleHistory, module],
     } })
@@ -378,12 +390,31 @@ export class WorkbenchControlPlane {
     return result
   }
 
+  /** Reopen a durable conversation without creating or retargeting a Session. */
+  async openSessionView(input: { workbenchId: string; areaId: string; target: SessionBindingV1; title: string }): Promise<WorkbenchControlPlaneWriteResult<CreateSessionResultV1>> {
+    const read = this.tryReadWritableRecord(input.workbenchId)
+    if (read.status !== 'ready') return read.result
+    const { record, snapshot } = read
+    const area = workbenchAreas(record).find(row => row.areaId === input.areaId)
+    if (!area) return { status: 'rejected', reason: 'area-not-found' }
+    if (record.fileWorkbench && record.areaProjects?.[input.areaId]?.workspaceId !== input.target.workspaceId) return { status: 'rejected', reason: 'invalid-input' }
+    const previous = areasOf(record.document.root).flatMap(row => row.moduleHistory).find(page => page.editorId === 'workbench.conversation' && page.binding?.sessionId === input.target.sessionId)
+    if (previous) return { status: 'committed', value: { target: input.target, moduleInstanceId: previous.moduleInstanceId, reusedBlank: false, settingsRevision: snapshot.revision ?? 0 }, settingsRevision: snapshot.revision ?? 0 }
+    const visible = showWorkbenchArea(record, input.areaId, this.createId('split'))
+    const id = this.createId('module'), key = sessionTargetKey(input.target)
+    const module: ModuleInstanceDocument = { moduleInstanceId: id, editorId: 'workbench.conversation', editorScope: 'session', binding: structuredClone(input.target), bindingGeneration: 0, state: {}, sessionStates: { [key]: {} }, sessionStateOrder: [key], lastKnownTitle: input.title }
+    const root = mapArea(visible.document.root, input.areaId, row => ({ ...row, moduleHistory: [...row.moduleHistory, module], activeModuleInstanceId: id }))
+    const saved = await this.commitRecord(snapshot.revision, record, { ...visible, document: { ...visible.document, root, activeAreaId: input.areaId } })
+    if (saved.status !== 'committed') return saved.status === 'conflict' ? settingsConflict(saved.actualRevision) : saved
+    return { status: 'committed', value: { target: input.target, moduleInstanceId: id, reusedBlank: false, settingsRevision: saved.revision }, settingsRevision: saved.revision }
+  }
+
   async ensureEditor(input: EnsureEditorInputV1): Promise<WorkbenchControlPlaneWriteResult<EnsureEditorResultV1>> {
     const read = this.tryReadWritableRecord(input.workbenchId)
     if (read.status !== 'ready') return read.result
     const { snapshot, record } = read
     if (record.archivedAt !== undefined) return { status: 'rejected', reason: 'workbench-archived' }
-    const area = areasOf(record.document.root).find(candidate => candidate.areaId === input.areaId)
+    const area = workbenchAreas(record).find(candidate => candidate.areaId === input.areaId)
     if (area === undefined) return { status: 'rejected', reason: 'area-not-found' }
     const metadata = record.areaMetadata?.[input.areaId]
     if (!canManageArea(input.actor ?? 'bay-agent', metadata?.ownership ?? 'user-owned')) {
@@ -391,15 +422,18 @@ export class WorkbenchControlPlane {
     }
     const editor = this.options.editors?.getSnapshot().find(candidate => candidate.id === input.editorId)
     if (editor === undefined) return { status: 'rejected', reason: 'editor-not-found' }
-    if (editor.scope === 'session' && area.areaBinding === undefined) {
+    if (record.fileWorkbench && editor.scope === 'session' && !input.sessionId) return { status: 'rejected', reason: 'session-binding-required' }
+    const session = input.sessionId ? Object.values(record.sessionCatalog ?? {}).find(row => row.sessionId === input.sessionId && row.relativePath === record.areaProjects?.[area.areaId]?.relativePath) : undefined
+    const workspaceId = record.areaProjects?.[area.areaId]?.workspaceId
+    const binding = editor.scope === 'session' ? (session ? { sessionId: input.sessionId!, ...(workspaceId ? { workspaceId } : {}) } : area.moduleHistory.find(module => input.sessionId ? module.binding?.sessionId === input.sessionId : module.moduleInstanceId === area.activeModuleInstanceId)?.binding) : undefined
+    if (editor.scope === 'session' && binding === undefined) {
       return { status: 'rejected', reason: 'session-binding-required' }
     }
-    const current = area.moduleHistory.find(module => module.editorId === input.editorId && module.editorScope === editor.scope)
+    const current = area.moduleHistory.find(module => module.editorId === input.editorId && module.editorScope === editor.scope && module.binding?.sessionId === binding?.sessionId)
     if (current !== undefined) {
       return { status: 'committed', value: { areaId: input.areaId, moduleInstanceId: current.moduleInstanceId, settingsRevision: snapshot.revision ?? 0 }, settingsRevision: snapshot.revision ?? 0 }
     }
     const moduleInstanceId = this.createId('module')
-    const binding = editor.scope === 'session' ? structuredClone(area.areaBinding) : undefined
     const key = binding === undefined ? undefined : sessionTargetKey(binding)
     const module: ModuleInstanceDocument = {
       moduleInstanceId, editorId: editor.id, editorScope: editor.scope, state: {},
@@ -408,7 +442,8 @@ export class WorkbenchControlPlane {
       }),
       lastKnownTitle: editor.label ?? editor.id,
     }
-    const root = mapArea(record.document.root, input.areaId, row => ({
+    const visible = showWorkbenchArea(record, input.areaId, this.createId('split'))
+    const root = mapArea(visible.document.root, input.areaId, row => ({
       ...row, activeModuleInstanceId: moduleInstanceId, moduleHistory: [...row.moduleHistory, module],
     }))
     const saved = await this.commitRecord(snapshot.revision, record, { ...record, document: { ...record.document, root, activeAreaId: input.areaId } })
@@ -424,13 +459,14 @@ export class WorkbenchControlPlane {
     const metadata = record.areaMetadata?.[area.areaId]
     return {
       areaId: area.areaId,
-      label: metadata?.label ?? `区域 ${areasOf(record.document.root).findIndex(row => row.areaId === area.areaId) + 1}`,
+      label: metadata?.label ?? `区域 ${workbenchAreas(record).findIndex(row => row.areaId === area.areaId) + 1}`,
       ownership: metadata?.ownership ?? 'user-owned',
       active: record.document.activeAreaId === area.areaId,
       archived: metadata?.ownership === 'archived',
-      generation: area.areaBindingGeneration ?? 0,
+      visible: areasOf(record.document.root).some(row => row.areaId === area.areaId),
+      generation: record.areaProjects?.[area.areaId]?.generation ?? 0,
+      ...(record.areaProjects?.[area.areaId] ? { project: structuredClone(record.areaProjects[area.areaId]!) } : {}),
       context: areaContextOf(record.areaContexts?.[area.areaId]),
-      ...(area.areaBinding === undefined ? {} : { binding: structuredClone(area.areaBinding) }),
       modules: area.moduleHistory.map(module => ({
         moduleInstanceId: module.moduleInstanceId, editorId: module.editorId, scope: module.editorScope,
         title: module.lastKnownTitle, available: this.options.editors?.getSnapshot().some(editor => editor.id === module.editorId && editor.scope === module.editorScope) ?? true,

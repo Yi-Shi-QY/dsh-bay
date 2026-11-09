@@ -16,6 +16,8 @@ export interface AreaClaimV1 {
   areaId: string
   areaGeneration: number
   requestId: string
+  moduleInstanceId?: string
+  moduleFingerprint?: string
 }
 
 /** Why a previously reserved Area can no longer accept an async result. */
@@ -184,13 +186,15 @@ export class WorkbenchRepository {
   claimArea(workbenchId: string, areaId: string, requestId: string): AreaClaimV1 {
     const workbench = this.settings.workbenches[workbenchId]
     if (workbench === undefined) throw new Error(`Unknown Workbench ${workbenchId}`)
-    if (!areasOf(workbench.document.root).some(area => area.areaId === areaId)) {
+    const area = areasOf(workbench.document.root).find(area => area.areaId === areaId)
+    if (!area) {
       throw new Error(`Unknown Area ${areaId}`)
     }
+    const module = area.moduleHistory.find(page => page.moduleInstanceId === area.activeModuleInstanceId)
     const key = areaKey(workbenchId, areaId)
     const areaGeneration = this.areaGenerations.get(key) ?? 0
-    this.claimOwners.set(key, requestId)
-    return { workbenchId, areaId, areaGeneration, requestId }
+    this.claimOwners.set(key + ':' + (module?.moduleInstanceId ?? ''), requestId)
+    return { workbenchId, areaId, areaGeneration, requestId, ...(module ? { moduleInstanceId: module.moduleInstanceId, moduleFingerprint: moduleFingerprint(module) } : {}) }
   }
 
   /**
@@ -212,133 +216,31 @@ export class WorkbenchRepository {
     /* v8 ignore next -- validateClaim already established the Workbench. */
     if (workbench === undefined) return { status: 'stale', reason: 'workbench-closed', target }
     const key = sessionTargetKey(target)
-    if (options?.presentation === 'start') {
-      const area = areasOf(workbench.document.root).find(item => item.areaId === claim.areaId)
-      if (area === undefined) return { status: 'stale', reason: 'area-closed', target }
-      if (area.moduleHistory.some(module => module.moduleInstanceId !== options.startModuleInstanceId
-        && module.binding !== undefined && !sameBinding(module.binding, target))) {
-        return { status: 'failed', code: 'area-already-bound', message: '当前 Area 已绑定其他对话' }
-      }
-      const start = area.moduleHistory.find(module => module.moduleInstanceId === area.activeModuleInstanceId)
-      if (start === undefined || start.editorId !== 'workbench.conversation.start'
-        || start.editorScope !== 'root' || start.moduleInstanceId !== options.startModuleInstanceId) {
-        return { status: 'failed', code: 'start-editor-missing', message: '当前 Area 没有可用的新建对话内页' }
-      }
-      const root = mapArea(workbench.document.root, claim.areaId, row => ({
-        ...row,
-        areaBinding: structuredClone(target),
-        areaBindingGeneration: (row.areaBindingGeneration ?? 0) + 1,
-        moduleHistory: row.moduleHistory.map(module => {
-          if (module.moduleInstanceId === start!.moduleInstanceId) {
-            const state = structuredClone(module.state)
-            return {
-              ...module,
-              // Keep the exact native Session on this root Start until DSH
-              // confirms that its first prompt was accepted. This lets Core
-              // restore the same native Composer after the Workbench reopens.
-              editorScope: 'root' as const,
-              binding: structuredClone(target),
-              state,
-              sessionStates: { ...(module.sessionStates ?? {}), [key]: structuredClone(state) },
-              sessionStateOrder: [...(module.sessionStateOrder ?? []).filter(item => item !== key), key],
-              bindingGeneration: (module.bindingGeneration ?? 0) + 1,
-            }
-          }
-          if (module.editorScope !== 'session' || module.pendingBinding === undefined) return module
-          const { pendingBinding: _pending, ...bound } = module
-          const state = structuredClone(module.state)
-          return {
-            ...bound,
-            binding: structuredClone(target),
-            state,
-            sessionStates: { ...(module.sessionStates ?? {}), [key]: structuredClone(state) },
-            sessionStateOrder: [...(module.sessionStateOrder ?? []).filter(item => item !== key), key],
-            bindingGeneration: (module.bindingGeneration ?? 0) + 1,
-          }
-        }),
-      }))
-      const areaKeyValue = areaKey(claim.workbenchId, claim.areaId)
-      this.areaGenerations.set(areaKeyValue, claim.areaGeneration + 1)
-      this.claimOwners.delete(areaKeyValue)
-      this.replaceDocument(claim.workbenchId, { ...workbench.document, root, activeAreaId: claim.areaId }, false)
-      return { status: 'bound', target, reusedBlank }
+    const area = areasOf(workbench.document.root).find(row => row.areaId === claim.areaId)
+    if (!area) return { status: 'stale', reason: 'area-closed', target }
+    const current = area.moduleHistory.find(row => row.moduleInstanceId === claim.moduleInstanceId)
+    const prepared = options?.presentation === 'start'
+    if (prepared && (current?.editorId !== 'workbench.conversation.start' || current.moduleInstanceId !== options.startModuleInstanceId)) return { status: 'failed', code: 'start-editor-missing', message: '新建对话内页已变化，请重试。' }
+    const existing = area.moduleHistory.find(row => row.binding?.sessionId === target.sessionId && row.editorId === 'workbench.conversation')
+    const replaceStart = current?.editorId === 'workbench.conversation.start'
+    const moduleInstanceId = replaceStart ? current.moduleInstanceId : existing?.moduleInstanceId ?? 'conversation-' + claim.requestId
+    const state = replaceStart ? structuredClone(current.state) : {}
+    const conversation: ModuleInstanceDocument = {
+      moduleInstanceId, editorId: prepared ? 'workbench.conversation.start' : 'workbench.conversation',
+      editorScope: prepared ? 'root' : 'session', binding: structuredClone(target), state,
+      sessionStates: { [key]: structuredClone(state) }, sessionStateOrder: [key], bindingGeneration: (current?.bindingGeneration ?? 0) + 1,
+      lastKnownTitle: prepared ? '新建对话' : '对话',
     }
-    const pending = areasOf(workbench.document.root).find(area => area.areaId === claim.areaId)?.moduleHistory.find(module => module.pendingBinding !== undefined)?.pendingBinding
-    if (pending !== undefined) {
-      let root = workbench.document.root
-      for (const area of areasOf(root)) {
-        if (!area.moduleHistory.some(module => module.pendingBinding === pending)) continue
-        root = mapArea(root, area.areaId, row => ({ ...row, areaBinding: structuredClone(target), areaBindingGeneration: (row.areaBindingGeneration ?? 0) + 1,
-          moduleHistory: row.moduleHistory.map(module => {
-            if (module.editorScope !== 'session') return module
-            const { pendingBinding: _pending, ...bound } = module
-            return { ...bound, binding: structuredClone(target), state: structuredClone(module.state),
-              sessionStates: { ...(module.sessionStates ?? {}), [key]: structuredClone(module.state) },
-              sessionStateOrder: [...(module.sessionStateOrder ?? []).filter(item => item !== key), key],
-              bindingGeneration: (module.bindingGeneration ?? 0) + 1 }
-          }),
-        }))
-        const owned = areaKey(claim.workbenchId, area.areaId)
-        this.areaGenerations.set(owned, (this.areaGenerations.get(owned) ?? 0) + 1)
-        this.claimOwners.delete(owned)
-      }
-      this.replaceDocument(claim.workbenchId, { ...workbench.document, root, activeAreaId: claim.areaId }, false)
-      return { status: 'bound', target, reusedBlank }
-    }
-    const root = mapArea(workbench.document.root, claim.areaId, (area) => {
-      const activeIndex = area.moduleHistory.findIndex(
-        module => module.moduleInstanceId === area.activeModuleInstanceId,
-      )
-      const current = activeIndex < 0 ? undefined : area.moduleHistory[activeIndex]
-      const existing = area.moduleHistory.find(module => module.editorId === 'workbench.conversation' && module.editorScope === 'session')
-      // Selecting a Workspace from a Start editor is a replacement operation.
-      // Keep the occurrence identity so React and the persisted layout do not
-      // briefly expose two tabs for the same Area.  A second Conversation may
-      // still be opened deliberately through the `+` command, which creates a
-      // distinct Area/module occurrence before this path is reached.
-      const replaceStart = current?.editorId === 'workbench.conversation.start'
-        && current.editorScope === 'root'
-      const moduleInstanceId = replaceStart
-        ? current.moduleInstanceId
-        : existing?.moduleInstanceId ?? `conversation-${claim.requestId}`
-      const draft = current?.editorId === 'workbench.conversation.start'
-        && typeof current.state === 'object' && current.state !== null && !Array.isArray(current.state)
-        && typeof current.state.draft === 'string' ? current.state.draft : ''
-      const state = draft === '' ? {} : { workbenchConversationDraft: draft }
-      const conversation: ModuleInstanceDocument = {
-        moduleInstanceId,
-        editorId: 'workbench.conversation',
-        editorScope: 'session',
-        binding: structuredClone(target),
-        state,
-        sessionStates: { [key]: structuredClone(state) },
-        sessionStateOrder: [key],
-        bindingGeneration: (existing?.bindingGeneration ?? 0) + 1,
-        lastKnownTitle: '对话',
-      }
-      const history = replaceStart
-        ? area.moduleHistory.map(module => module.moduleInstanceId === current!.moduleInstanceId ? conversation : module)
-        : area.moduleHistory.some(module => module.editorId === 'workbench.conversation')
-          ? area.moduleHistory.map(module => module.editorId === 'workbench.conversation' ? conversation : module)
-          : [...area.moduleHistory, conversation]
-      return { ...area, areaBinding: structuredClone(target), areaBindingGeneration: (area.areaBindingGeneration ?? 0) + 1,
-        activeModuleInstanceId: moduleInstanceId, moduleHistory: history.map(module => {
-          if (module.editorScope !== 'session' || module === conversation) return module
-          const { pendingBinding: _pending, ...rest } = module
-          const oldKey = module.binding === undefined ? undefined : sessionTargetKey(module.binding)
-          const sessionStates = { ...(module.sessionStates ?? {}), ...(oldKey === undefined ? {} : { [oldKey]: structuredClone(module.state) }) }
-          const state = structuredClone(sessionStates[key] ?? {})
-          return { ...rest, binding: structuredClone(target), state, sessionStates: { ...sessionStates, [key]: state },
-            sessionStateOrder: [...new Set([...(module.sessionStateOrder ?? []), ...(oldKey === undefined ? [] : [oldKey]), key])],
-            bindingGeneration: (module.bindingGeneration ?? 0) + 1 }
-        }) }
-    })
-    const areaKeyValue = areaKey(claim.workbenchId, claim.areaId)
-    this.areaGenerations.set(areaKeyValue, claim.areaGeneration + 1)
-    this.claimOwners.delete(areaKeyValue)
-    this.replaceDocument(claim.workbenchId, {
-      ...workbench.document, root, activeAreaId: claim.areaId,
-    }, false)
+    const { areaBinding: _legacy, ...unbound } = area
+    const nextArea = { ...unbound, activeModuleInstanceId: moduleInstanceId,
+      moduleHistory: area.moduleHistory.some(row => row.moduleInstanceId === moduleInstanceId)
+        ? area.moduleHistory.map(row => row.moduleInstanceId === moduleInstanceId ? conversation : row)
+        : [...area.moduleHistory, conversation] }
+    const root = mapArea(workbench.document.root, claim.areaId, () => nextArea)
+    const owned = areaKey(claim.workbenchId, claim.areaId)
+    this.areaGenerations.set(owned, claim.areaGeneration + 1)
+    this.claimOwners.delete(owned + ':' + (claim.moduleInstanceId ?? ''))
+    this.replaceDocument(claim.workbenchId, { ...workbench.document, root, activeAreaId: claim.areaId }, false)
     return { status: 'bound', target, reusedBlank }
   }
 
@@ -353,8 +255,8 @@ export class WorkbenchRepository {
     const workbench = this.settings.workbenches[workbenchId]
     if (workbench === undefined) return false
     const area = areasOf(workbench.document.root).find(item => item.areaId === areaId)
-    if (area === undefined || area.areaBinding === undefined || !sameBinding(area.areaBinding, target)) return false
-    const module = area.moduleHistory.find(item => item.moduleInstanceId === area.activeModuleInstanceId)
+    if (area === undefined) return false
+    const module = area.moduleHistory.find(item => item.moduleInstanceId === moduleInstanceId)
     if (module === undefined || module.editorId !== 'workbench.conversation.start'
       || module.moduleInstanceId !== moduleInstanceId || module.editorScope !== 'root'
       || module.binding === undefined || !sameBinding(module.binding, target)
@@ -367,38 +269,6 @@ export class WorkbenchRepository {
         : candidate),
     }))
     return this.replaceDocument(workbenchId, { ...workbench.document, root, activeAreaId: areaId }, false)
-  }
-
-  bindAreaSession(workbenchId: string, areaId: string, binding: SessionBindingV1, claim: AreaClaimV1): boolean {
-    const stale = this.validateClaim(claim)
-    if (stale !== undefined || claim.workbenchId !== workbenchId || claim.areaId !== areaId) return false
-    const record = this.settings.workbenches[workbenchId]
-    const area = record === undefined ? undefined : areasOf(record.document.root).find(item => item.areaId === areaId)
-    if (area === undefined || area.areaBinding !== undefined) return false
-    return this.applyAreaBinding(workbenchId, areaId, binding, claim)
-  }
-
-  retargetAreaSession(workbenchId: string, areaId: string, binding: SessionBindingV1, claim: AreaClaimV1): boolean {
-    const stale = this.validateClaim(claim)
-    if (stale !== undefined || claim.workbenchId !== workbenchId || claim.areaId !== areaId) return false
-    return this.applyAreaBinding(workbenchId, areaId, binding, claim)
-  }
-
-  private applyAreaBinding(workbenchId: string, areaId: string, binding: SessionBindingV1, claim: AreaClaimV1): boolean {
-    const record = this.settings.workbenches[workbenchId]
-    if (record === undefined) return false
-    const key = sessionTargetKey(binding)
-    const root = mapArea(record.document.root, areaId, area => ({
-      ...area, areaBinding: structuredClone(binding), areaBindingGeneration: (area.areaBindingGeneration ?? 0) + 1,
-      moduleHistory: area.moduleHistory.map(module => module.editorScope === 'session' ? {
-        ...module, binding: structuredClone(binding), state: structuredClone(module.sessionStates?.[key] ?? module.state),
-        sessionStates: { ...(module.sessionStates ?? {}), [key]: structuredClone(module.state) }, sessionStateOrder: [...(module.sessionStateOrder ?? []).filter(item => item !== key), key], bindingGeneration: (module.bindingGeneration ?? 0) + 1,
-      } : module),
-    }))
-    const areaKeyValue = areaKey(workbenchId, areaId)
-    this.areaGenerations.set(areaKeyValue, claim.areaGeneration + 1)
-    this.claimOwners.delete(areaKeyValue)
-    return this.replaceDocument(workbenchId, { ...record.document, root, activeAreaId: areaId }, false)
   }
 
   /**
@@ -452,8 +322,11 @@ export class WorkbenchRepository {
     const area = areasOf(workbench.document.root).find(item => item.areaId === claim.areaId)
     if (area === undefined) return 'area-closed'
     const key = areaKey(claim.workbenchId, claim.areaId)
-    if ((this.areaGenerations.get(key) ?? 0) !== claim.areaGeneration) return 'area-replaced'
-    if (this.claimOwners.get(key) !== claim.requestId) return 'request-superseded'
+    if (claim.moduleInstanceId) {
+      const module = area.moduleHistory.find(page => page.moduleInstanceId === claim.moduleInstanceId)
+      if (!module || moduleFingerprint(module) !== claim.moduleFingerprint) return 'area-replaced'
+    } else if ((this.areaGenerations.get(key) ?? 0) !== claim.areaGeneration) return 'area-replaced'
+    if (this.claimOwners.get(key + ':' + (claim.moduleInstanceId ?? '')) !== claim.requestId) return 'request-superseded'
     return undefined
   }
 
@@ -488,8 +361,12 @@ function sameBinding(left: SessionBindingV1, right: SessionBindingV1): boolean {
 }
 
 function areaFingerprint(area: AreaNode): string {
-  return JSON.stringify([area.areaBinding, area.areaBindingGeneration, area.activeModuleInstanceId,
+  return JSON.stringify([
     ...area.moduleHistory.map(module => [module.moduleInstanceId, module.editorId, module.pendingBinding, module.binding, module.bindingGeneration])])
+}
+
+function moduleFingerprint(module: ModuleInstanceDocument): string {
+  return JSON.stringify([module.editorId, module.pendingBinding, module.binding, module.bindingGeneration])
 }
 
 function mapArea(

@@ -12,6 +12,7 @@ export function WorkbenchBayAgentTasks({ controller, snapshot, workspaces, openW
   const [objective, setObjective] = useState(''), [areaId, setArea] = useState(''), [workspaceId, setWorkspace] = useState(''), [mode, setMode] = useState('standard')
   const [answers, setAnswers] = useState<Record<string, string>>({}), [pending, setPending] = useState(false), [error, setError] = useState('')
   const attention = snapshot.attention.filter(row => row.status === 'open')
+  const selectedMode = snapshot.agentModeCapabilities?.find(row => row.id === mode)
   const run = async (operation: () => Promise<unknown>) => { if (pending) return; setPending(true); setError(''); try { await operation() } catch (error) { setError(String(error)) } finally { setPending(false) } }
   return <details className={css.tasks}>
     <summary>工作台任务 · {snapshot.workItems.filter(row => row.status === 'running').length} 执行中{attention.length ? <strong> · {attention.length} 待处理</strong> : null}</summary>
@@ -43,6 +44,8 @@ export function WorkbenchBayAgentTasks({ controller, snapshot, workspaces, openW
           <label>项目<select value={workspaceId || workspaces[0]?.workspaceId || ''} onChange={event => setWorkspace(event.target.value)}>{workspaces.map(row => <option key={row.workspaceId} value={row.workspaceId}>{row.title || row.path || row.workspaceId}</option>)}</select></label>
           <label>Agent 模式<select value={mode} onChange={event => setMode(event.target.value)}>{(snapshot.agentModes?.length ? snapshot.agentModes : [{ id: "standard", name: "Standard" }]).map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label>
         </div>
+        {selectedMode?.known && !selectedMode.compaction ? <p className={css.warning} role="status">当前模式没有自动上下文压缩。任务仍会按你选择的模式创建；长时间运行前请确认该模式的历史治理方式。</p> : null}
+        {selectedMode && !selectedMode.known ? <p className={css.warning} role="status">当前模式的能力信息暂不可用，Bay Agent 不会替换你的模式选择。</p> : null}
         <button disabled={pending || !objective.trim() || !snapshot.areas.length || !workspaces.length}>创建并派发</button>
       </form>
     </div>

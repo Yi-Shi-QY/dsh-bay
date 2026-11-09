@@ -1,3 +1,4 @@
+import { browserSafeUuid } from '../browser-safe-id.ts'
 import { createWorkbenchPresetDocument, type WorkbenchLayoutPresetId, type WorkbenchAreaEditorChoice } from './workbench-layout-presets.ts'
 import type { SettingsScopeSnapshot, WorkbenchSettingsScope as SettingsScope } from '../client/workbench-settings-contracts.ts'
 import type { SettingsScopePathOperation, SettingsScopePatchResult } from '../client/workbench-settings-contracts.ts'
@@ -7,6 +8,7 @@ import {
 } from './document-v3.ts'
 import type { WorkbenchDocumentV3 } from './document-v3.ts'
 import { defaultLayout, groupsOf, type WorkbenchLayoutDocument } from './model.ts'
+import { workbenchAreas } from './area-identity.ts'
 import { decodeWorkbenchHiddenEditorIds, normalizeWorkbenchTags, type WorkbenchAiSelectionV1, type WorkbenchPackageOriginV1, type WorkbenchSettings, type WorkbenchSettingsV4 } from './persistence.ts'
 import { areaContextOf, createWorkbenchContext, type AreaContextV1, type WorkbenchContextV1 } from './workbench-context.ts'
 import { workbenchExtensionConsentKey, type WorkbenchExtensionConsentV1 } from '../workbench-extension-access.ts'
@@ -51,6 +53,9 @@ export type WorkbenchDirectoryOperationResult = SettingsScopePatchResult | {
 }
 
 export interface WorkbenchDirectoryCreateOptions {
+  parentPath?: string
+  folderName?: string
+  requestId?: string
   templateId?: string
   layoutPresetId?: WorkbenchLayoutPresetId
   areaEditors?: readonly (WorkbenchAreaEditorChoice | null)[]
@@ -82,6 +87,15 @@ export type WorkbenchDirectoryCreateResult = WorkbenchDirectoryOperationResult |
 
 /** Named-Workbench selector backed by the same revision-aware Settings scope. */
 export interface WorkbenchDirectory {
+  getHiddenAreas?(workbenchId: string): readonly { areaId: string; label: string }[]
+  showArea?(workbenchId: string, areaId: string): Promise<void>
+  memoryRequest?<T>(input: Record<string, unknown>): Promise<T>
+  completeRequest?<T>(input: Record<string, unknown>): Promise<T>
+  pickParentDirectory?(): Promise<string | undefined>
+  getAreaProjects?(workbenchId: string): Readonly<Record<string, import('../workbench-directory-contract.ts').AreaProjectV1>>
+  getRootPath?(workbenchId: string): string | undefined
+  listProjectDirectories?(workbenchId: string, relativePath?: string): Promise<{ name: string; relativePath: string }[]>
+  bindAreaProject?(input: { workbenchId: string; areaId: string; relativePath: string; createDirectory: boolean }): Promise<void>
   getSnapshot(): WorkbenchDirectorySnapshot
   /** Read a persisted document without selecting or mutating the Workbench. */
   getDocument?(workbenchId: string): WorkbenchDocumentV3 | undefined
@@ -194,6 +208,7 @@ export function createProjectNeutralFrameSettings(
     workbenchId?: string
     isBrowserOwned?: (id: string) => boolean
     contextPatch?: WorkbenchDirectoryContextPatch
+    createFileWorkbench?: (input: { record: import('./persistence.ts').WorkbenchRecordV2; parentPath: string; folderName: string; requestId: string }) => Promise<WorkbenchDirectoryCreateResult>
   } = {},
 ): ProjectNeutralFrameSettings {
   // A companion is a pinned view, never a second directory or layout Store.
@@ -214,7 +229,7 @@ export function createProjectNeutralFrameSettings(
       ? undefined
       : {
         version: 2,
-        layouts: { ungrouped: projectDocumentV3ToLayoutV2(active.document) },
+        layouts: { ungrouped: projectDocumentV3ToLayoutV2(active.document, active.areaProjects) },
         invalidLayouts: value.invalidWorkbenches[activeId(value)] === undefined
           ? {}
           : { ungrouped: structuredClone(value.invalidWorkbenches[activeId(value)]) },
@@ -303,6 +318,14 @@ export function createProjectNeutralFrameSettings(
     const nextValue = transform(value)
     if (Object.entries(nextValue.workbenches).some(([id, record]) => record !== value.workbenches[id] && options.isBrowserOwned?.(id))
       || Object.keys(value.workbenches).some(id => nextValue.workbenches[id] === undefined && options.isBrowserOwned?.(id))) return Promise.resolve({ status: 'unavailable' })
+    if (options.workbenchId !== undefined) {
+      const id = options.workbenchId, record = nextValue.workbenches[id]
+      if (!record || Object.keys(nextValue.workbenches).some(key => key !== id && nextValue.workbenches[key] !== value.workbenches[key])) return Promise.resolve({ status: 'unavailable' })
+      // Browser-local navigation is not a Profile replacement. Submit only the
+      // current file-authoritative definition, retaining optimistic concurrency.
+      return patchWorkbenchSettings(source, { operation: 'set', path: ['workbenches', id], value: record,
+        ...(snapshot.revision === undefined ? {} : { expectedRevision: snapshot.revision }) }).catch(() => ({ status: 'unavailable' as const }))
+    }
     const { migrationRequired: _migrationRequired, ...persisted } = nextValue
     return patchWorkbenchSettings(source, { operation: 'set', path: [], value: persisted,
       ...(snapshot.revision === undefined ? {} : { expectedRevision: snapshot.revision }) })
@@ -379,7 +402,7 @@ export function createProjectNeutralFrameSettings(
       if (options.workbenchId !== undefined && workbenchId !== options.workbenchId) return undefined
       const record = source.getSnapshot().value?.workbenches[workbenchId]
       if (record === undefined) return undefined
-      const area = areasOf(record.document.root).find(row => row.areaId === areaId)
+      const area = workbenchAreas(record).find(row => row.areaId === areaId)
       return area === undefined ? undefined : structuredClone(areaContextOf(record.areaContexts?.[areaId]))
     },
     getWorkbenchAi: (workbenchId) => {
@@ -433,7 +456,8 @@ export function createProjectNeutralFrameSettings(
       const snapshot = source.getSnapshot()
       if (snapshot.status !== 'ready' || !snapshot.writable) return Promise.resolve({ status: 'unavailable' })
       const value = snapshot.value
-      const workbenchId = `workbench-${globalThis.crypto.randomUUID()}`
+      const requestId = requested?.requestId ?? browserSafeUuid()
+      const workbenchId = `workbench-${requestId}`
       const now = Date.now()
       const template = requested?.templateId === undefined || value === undefined ? undefined
         : value.layoutTemplates[requested.templateId] ?? value.workbenches[requested.templateId]
@@ -457,6 +481,10 @@ export function createProjectNeutralFrameSettings(
         createdAt: now, updatedAt: now,
         ...(initialWorkbenchContext(requested?.background) === undefined ? {} : { context: initialWorkbenchContext(requested?.background)! }),
         ...(tags.length === 0 ? {} : { tags }),
+      }
+      if (options.createFileWorkbench) {
+        if (!requested?.parentPath) throw new Error('请选择工作台存放位置。')
+        return options.createFileWorkbench({ record, parentPath: requested.parentPath, folderName: requested.folderName?.trim() || name, requestId })
       }
       const next: WorkbenchSettingsV4 = value === undefined
         ? {
@@ -485,7 +513,7 @@ export function createProjectNeutralFrameSettings(
         return Promise.resolve({ status: 'rejected', reason: 'duplicate-name' })
       }
       const now = Date.now()
-      const workbenchId = `saved-layout-${globalThis.crypto.randomUUID()}`
+      const workbenchId = `saved-layout-${browserSafeUuid()}`
       return rootUpdate(current => ({
         ...current,
         workbenches: {

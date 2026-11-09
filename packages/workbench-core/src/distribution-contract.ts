@@ -2,6 +2,7 @@ import type { PortableLayoutV2 } from './foundation/workbench-layout-package.ts'
 import type { WorkbenchPackageDependencyV4, WorkbenchPackageManifestV4, WorkbenchPackageModeV4 } from './foundation/workbench-package-v4.ts'
 import type { WorkbenchDocumentV3 } from './foundation/document-v3.ts'
 import type { RestoredPortableWorkbenchContextV1 } from './foundation/workbench-context-portability.ts'
+import type { PortableBayAgentOrchestrationV1 } from './foundation/workbench-bay-agent-work.ts'
 import type { WorkbenchExtensionConsentV1 } from './workbench-extension-access.ts'
 export const DISTRIBUTION_ROUTE = '/api/workbench/distribution/v4'
 export const CORE_PORTABLE_EDITORS = ['workbench.conversation.start','workbench.conversation','workbench.agent-trajectory','workbench.workspace-files','workbench.document-preview','workbench.browser','workbench.terminal','workbench.plan','workbench.changes-review','workbench.subagent-chat','workbench.schedule-task','workbench.guide'] as const
@@ -21,7 +22,7 @@ export interface DistributionClientV4 {
   inspect(bytes: Uint8Array): Promise<DistributionImportStatus>
   consent(id: string, digest: string): Promise<DistributionImportStatus>
   resume(id: string): Promise<DistributionImportStatus>
-  complete(id: string, document: WorkbenchDocumentV3, consents: Record<string, WorkbenchExtensionConsentV1>, pendingPageIds?: string[], context?: RestoredPortableWorkbenchContextV1): Promise<DistributionImportStatus>
+  complete(id: string, document: WorkbenchDocumentV3, consents: Record<string, WorkbenchExtensionConsentV1>, pendingPageIds?: string[], context?: RestoredPortableWorkbenchContextV1, orchestration?: PortableBayAgentOrchestrationV1): Promise<DistributionImportStatus>
   restorePending(id: string, document: WorkbenchDocumentV3, expectedDocument: WorkbenchDocumentV3, restoredPageIds: string[]): Promise<DistributionImportStatus>
   cancel(id: string): Promise<DistributionImportStatus>
   history(): Promise<DistributionImportStatus[]>

@@ -110,6 +110,12 @@ importers:
       '@deepseek-ai/dsh-agent-preset-registry':
         specifier: 0.2.2-rc.1
         version: 0.2.2-rc.1(7137409e0258bf069afa9a47c7e154d1)
+      '@deepseek-ai/dsh-api-gateway':
+        specifier: 0.2.2-rc.1
+        version: 0.2.2-rc.1(@deepseek-ai/cordis@4.1.0)
+      '@deepseek-ai/dsh-api-remote-access':
+        specifier: 0.2.2-rc.1
+        version: 0.2.2-rc.1(@deepseek-ai/cordis@4.1.0)
       '@deepseek-ai/dsh-api-remotes':
         specifier: 0.2.2-rc.1
         version: 0.2.2-rc.1(@deepseek-ai/cordis@4.1.0)(@deepseek-ai/dsh-scope@0.2.2-rc.1(@deepseek-ai/cordis@4.1.0))
@@ -194,6 +200,9 @@ importers:
       '@deepseek-ai/dsh-credentials':
         specifier: 0.2.2-rc.1
         version: 0.2.2-rc.1(@deepseek-ai/cordis@4.1.0)
+      '@deepseek-ai/dsh-host-webserver':
+        specifier: 0.2.2-rc.1
+        version: 0.2.2-rc.1(@deepseek-ai/cordis@4.1.0)
       '@deepseek-ai/dsh-llm':
         specifier: 0.2.2-rc.1
         version: 0.2.2-rc.1(@deepseek-ai/cordis@4.1.0)
@@ -203,6 +212,9 @@ importers:
       '@deepseek-ai/dsh-session':
         specifier: 0.2.2-rc.1
         version: 0.2.2-rc.1(@deepseek-ai/cordis@4.1.0)(@deepseek-ai/dsh-scope@0.2.2-rc.1(@deepseek-ai/cordis@4.1.0))
+      '@deepseek-ai/dsh-session-format-v3-to-v4':
+        specifier: 0.2.2-rc.1
+        version: 0.2.2-rc.1(@deepseek-ai/cordis@4.1.0)
       '@deepseek-ai/dsh-settings':
         specifier: 0.2.2-rc.1
         version: 0.2.2-rc.1(a36d0088b82fbb61bf41830a69b6d121)
@@ -221,12 +233,24 @@ importers:
       '@deepseek-ai/dsh-tools':
         specifier: 0.2.2-rc.1
         version: 0.2.2-rc.1(71e9b8099add9aaf7bb42662f07c41a3)
+      '@deepseek-ai/dsh-typert-protocol':
+        specifier: 0.2.2-rc.1
+        version: 0.2.2-rc.1(@deepseek-ai/cordis@4.1.0)
       '@deepseek-ai/dsh-util-workspace-path':
         specifier: 0.2.2-rc.1
         version: 0.2.2-rc.1(@deepseek-ai/cordis@4.1.0)
+      '@deepseek-ai/dsh-working-directory':
+        specifier: 0.2.2-rc.1
+        version: 0.2.2-rc.1(2e93c6a6b6944e263e4a70a777c66b49)
       '@deepseek-ai/schemastery':
         specifier: ~3.19.0
         version: 3.19.0
+      tar:
+        specifier: 7.5.22
+        version: 7.5.22
+      ws:
+        specifier: 8.21.3
+        version: 8.21.3
     devDependencies:
       '@types/react':
         specifier: ~18.3.1
@@ -255,9 +279,6 @@ importers:
       react-dom:
         specifier: ^18.3.1
         version: 18.3.1(react@18.3.1)
-      tar:
-        specifier: 7.5.22
-        version: 7.5.22
       use-sync-external-store:
         specifier: 1.2.0
         version: 1.2.0(react@18.3.1)

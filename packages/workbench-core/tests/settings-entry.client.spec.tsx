@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { WorkbenchCoreInnerPage } from '../src/foundation/WorkbenchCoreInnerPage.tsx'
 import { createWorkbenchModeController } from '../src/mode-controller.ts'
 import { defaultLayout } from '../src/foundation/model.ts'
+import { WorkbenchCoreSettingsSection } from '../src/foundation/WorkbenchCoreSettingsSection.tsx'
+import { settingsFixture } from './settings-fixtures.ts'
 
 beforeEach(() => {
   // jsdom has no native modal implementation; browser acceptance covers its
@@ -47,6 +49,23 @@ function bench(coreOnly = false) {
 }
 
 describe('Workbench Settings entry', () => {
+  it('provides all four current-workbench sections from the browser settings entry', () => {
+    const editors: never[] = []
+    const settings = { status: 'ready', revision: 1, writable: true, mode: 'host', value: settingsFixture() }
+    const view = render(<WorkbenchCoreSettingsSection {...{
+      settingsContext: { mode: 'browser-workbench', workbenchId: 'a' }, openOptions: { section: 'interactions' },
+      editorCatalog: { getSnapshot: () => editors, subscribe: () => () => {} },
+      useWorkbenchSettings: (select: (state: unknown) => unknown) => select(settings),
+      useSessions: (select: (state: unknown) => unknown) => select({ ids: [], byId: {} }),
+      useWorkspaces: (select: (state: unknown) => unknown) => select({ items: [] }), close: () => {},
+    } as never} />)
+    expect(view.getAllByRole('tab').map(tab => tab.textContent)).toEqual(['当前工作台', '使用中的内页', '背景 AI', '导入与分享'])
+    expect(view.getByRole('tabpanel', { name: '背景 AI' })).toBeTruthy()
+    expect(view.queryByRole('tab', { name: '交互偏好' })).toBeNull()
+    expect(view.queryByLabelText('新建工作台提示词')).toBeNull()
+    fireEvent.click(view.getByRole('tab', { name: '导入与分享' }))
+    expect(view.getByRole('heading', { name: '导入与分享' })).toBeTruthy()
+  })
   it('opens the migrated settings without exiting or remounting the Frame', async () => {
     const { view, modeController } = bench()
     expect(view.container.innerHTML).toBe('')

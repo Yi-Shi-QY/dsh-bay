@@ -1,3 +1,7 @@
+import { WorkbenchImportDirectoryRequests } from './WorkbenchCompletePackagePanel.tsx'
+import { WorkbenchCollaborationApprovals, WorkbenchShareGrantControls } from './WorkbenchSharePermissions.tsx'
+import { workbenchAccess } from '../client/workbench-access.ts'
+import { REVIEW_GRANT } from '../workbench-access-contract.ts'
 import { RetainedEditorTarget, useFloatingWorkspace, FloatingWorkspaceUnread } from './FloatingWorkspaceContext.tsx'
 import type { FloatingWorkspaceRuntime } from '../client/floating-workspace-runtime.ts'
 import { floatingInstanceKey } from '../client/floating-workspace-runtime.ts'
@@ -7,6 +11,9 @@ import { WorkbenchEditorPicker } from './WorkbenchEditorPicker.tsx'
 import type { WorkbenchEditorSvgIconV1 } from './workbench-editor-icons.ts'
 import { WorkbenchCreateDialog } from './WorkbenchCreateDialog.tsx'
 import { WorkbenchContextDialog } from './WorkbenchContextDialog.tsx'
+import { AreaProjectDialog } from './AreaProjectDialog.tsx'
+import { AreaProjectButton } from './AreaProjectButton.tsx'
+import { WorkbenchMemoryDialog } from './WorkbenchMemoryDialog.tsx'
 import { WorkbenchCreateMenu } from './WorkbenchCreateMenu.tsx'
 import type { WorkbenchLayoutPresetId } from './workbench-layout-presets.ts'
 import { WorkbenchEditorIcon as EditorIcon } from './WorkbenchEditorIcon.tsx'
@@ -61,7 +68,7 @@ import {
   type SessionBindingV1, type SplitNode, type TabDocument, type WorkbenchLayoutDocument,
 } from './model.ts'
 import { workbenchEditorStateFailureV1 } from '../workbench-editor-state.ts'
-import { areaSessionBinding } from './area-session-binding.ts'
+import { activePageSessionBinding } from './area-session-binding.ts'
 import accentFrameCss from './SessionAccentFrame.module.css'
 import {
   accountFor, normalizeWorkbenchTags, type SessionMarkerRecord, type WorkbenchSettings, type WorkbenchSettingsV4,
@@ -71,6 +78,7 @@ import {
   allocateSessionMarker, ensureSessionMarkers, SESSION_ACCENT_TOKENS, SESSION_MARKER_EMOJIS, validateSessionLabel,
 } from './session-markers.ts'
 import { sessionBindingCopy } from './binding-copy.ts'
+import { placementReason, sameEditorSource, areaOperationCopy } from './area-identity.ts'
 import type { WorkbenchDirectory } from './frame-settings-adapter.ts'
 import {
   applyWorkbenchCommandV3, migrateDocumentV2ToV3, projectDocumentV3ToLayoutV2, validateWorkbenchDocumentV3,
@@ -802,19 +810,15 @@ function openSessionCommands(
       ids: { groupId: nextId('group'), splitId: nextId('split') },
     }]
   }
-  const activeGroup = groupsOf(document.root).find(group => group.id === document.activeGroupId)
-  const reusable = disposition === 'reuse'
-    ? activeGroup?.tabs.find(tab => tab.editorId === 'workbench.conversation')
-    : undefined
-  if (activeGroup !== undefined && reusable !== undefined) {
-    return [
-      { type: 'retarget-session', tabId: reusable.id, binding: target },
-      { type: 'activate', groupId: activeGroup.id, tabId: reusable.id },
-    ]
-  }
+  const groups = groupsOf(document.root)
+  const focused = groups.find(group => group.id === document.activeGroupId)
+  const activeGroup = groups.some(group => group.project)
+    ? (focused?.project?.workspaceId === target.workspaceId ? focused : groups.find(group => group.project?.workspaceId === target.workspaceId))
+    : focused
+  if (!activeGroup) return []
   const tab = createSessionTab(nextId('tab'), 'workbench.conversation', target, '对话')
-  if (disposition === 'reuse') return [{ type: 'add-tab', groupId: document.activeGroupId, tab }]
-  const commands: LayoutCommand[] = [{ type: 'add-tab', groupId: document.activeGroupId, tab }]
+  if (disposition === 'reuse') return [{ type: 'add-tab', groupId: activeGroup.id, tab }]
+  const commands: LayoutCommand[] = [{ type: 'add-tab', groupId: activeGroup.id, tab }]
   // Adding the new tab makes it active. Restore the prior Area view before
   // moving the new tab out; move-tab then focuses the new right-hand Area
   // without exposing an older hidden editor in the source Area.
@@ -822,7 +826,7 @@ function openSessionCommands(
     commands.push({ type: 'activate', groupId: activeGroup.id, tabId: activeGroup.activeTabId })
   }
   commands.push({
-    type: 'move-tab', tabId: tab.id, targetGroupId: document.activeGroupId, edge: 'right',
+    type: 'move-tab', tabId: tab.id, targetGroupId: activeGroup.id, edge: 'right',
     ids: { groupId: nextId('group'), splitId: nextId('split') },
   })
   return commands
@@ -963,6 +967,8 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
     subscribeWorkbenchShare, getWorkbenchShareSnapshot, getWorkbenchShareSnapshot,
   )
   const shareGuest = isWorkbenchShareGuestPage()
+  const accessSnapshot = useSyncExternalStore(workbenchAccess.subscribe, workbenchAccess.getSnapshot, workbenchAccess.getSnapshot)
+  const canEditLayout = !shareGuest || accessSnapshot?.capabilities.includes('layout') === true
   const [shareBusy, setShareBusy] = useState(false)
   const [shareNotice, setShareNotice] = useState<string>()
   const [guestNickname, setGuestNickname] = useState<string>()
@@ -1087,6 +1093,8 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
   const [workbenchClosing, setWorkbenchClosing] = useState(false)
   const [createPreset, setCreatePreset] = useState<WorkbenchLayoutPresetId>()
   const [contextDialog, setContextDialog] = useState<{ workbenchId: string; areaId?: string }>()
+  const [memoryWorkbenchId, setMemoryWorkbenchId] = useState<string>()
+  const [projectDialog, setProjectDialog] = useState<{ workbenchId: string; areaId: string }>()
   const [workbenchMenuOpenId, setWorkbenchMenuOpenId] = useState<string>()
   const [toolGatewayOpenId, setToolGatewayOpenId] = useState<string>()
   const [workbenchMenuPosition, setWorkbenchMenuPosition] = useState<{ top: number; left: number }>()
@@ -1385,7 +1393,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
       const localDirty = documentRef.current !== lastSavedRef.current
         && JSON.stringify(documentRef.current) !== JSON.stringify(lastSavedRef.current)
       if (remote === undefined || pendingRef.current.length !== 0
-        || conflictRef.current !== undefined || localDirty) return
+        || conflictRef.current !== undefined || localDirty && !shareGuest) return
       const sameOrOlderRevision = settingsSnapshot.revision !== undefined
         && lastSavedRevisionRef.current !== undefined
         && settingsSnapshot.revision <= lastSavedRevisionRef.current
@@ -1393,14 +1401,23 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
       if (sameOrOlderRevision) return
       const cleanedRemote = migrateOuterShellEditors(remote)
       lastSavedRef.current = cleanedRemote
-      setLayout(cleanedRemote)
+      let visible = cleanedRemote
+      if (shareGuest) {
+        const selections = groupsOf(documentRef.current.root)
+        for (const group of groupsOf(cleanedRemote.root)) {
+          const selected = selections.find(row => row.id === group.id)?.activeTabId
+          if (selected && group.tabs.some(tab => tab.id === selected)) visible = applyLayoutCommand(visible, { type: 'activate', groupId: group.id, tabId: selected })
+        }
+        if (groupsOf(visible.root).some(group => group.id === documentRef.current.activeGroupId)) visible = { ...visible, activeGroupId: documentRef.current.activeGroupId }
+      }
+      setLayout(visible)
       setSaveState('saved')
     }
     // Hydration can finish between the first render and this passive effect.
     // Reconcile once before subscribing so that transition cannot be missed.
     reconcileSettings()
     return settings.subscribe(reconcileSettings)
-  }, [settings])
+  }, [settings, shareGuest])
 
   useEffect(() => {
     if (accountRef.current === account) return
@@ -1616,6 +1633,12 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
   const guardedCommands = useRef(new WeakSet<object>())
   const pendingDestructiveCommands = useRef(new Set<string>())
   const commit = useCallback<Commit>((command) => {
+    if (shareGuest && command.type === 'activate') {
+      const next = applyLayoutCommand(documentRef.current, command)
+      documentRef.current = next; setLayout(next)
+      return true
+    }
+    if (!canEditLayout) { setStateDiagnostic('当前分享未授权修改布局。'); return false }
     if (floatingPinPending.current) return false
     const currentWorkbenchId = props.floatingRuntime?.visibleWorkbenchId
     if (currentWorkbenchId && props.floatingRuntime?.hasControl?.(currentWorkbenchId) === false) return false
@@ -1635,7 +1658,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
     const candidate = applyLayoutCommand(before, command)
     if (candidate === before) return false
     if (!validateWorkbenchDocumentV3(migrateDocumentV2ToV3(candidate))) {
-      setStateDiagnostic('此操作无法生成有效布局，已保留原工作台和内页。请检查区域绑定后重试。')
+      setStateDiagnostic('此操作无法生成有效布局，已保留原工作台和内页。请检查目标区域项目和此内页来源后重试。')
       return false
     }
     const nextTabs = tabsOf(candidate.root)
@@ -1677,7 +1700,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
       else closeWorkbenchNative(tab.id)
     }
     return true
-  }, [browserOwnedWorkbench, layoutLockPending, layoutLocked, props.floatingRuntime])
+  }, [browserOwnedWorkbench, layoutLockPending, layoutLocked, props.floatingRuntime, shareGuest, canEditLayout])
 
   const replaceVisibleDocument = useCallback((next: WorkbenchLayoutDocument) => {
     const previous = documentRef.current
@@ -1703,7 +1726,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
       migrateDocumentV2ToV3(document),
       { type: 'split-empty', sourceAreaId, edge, ratio },
       kind => nextId(kind),
-    ))
+    ), workbenchDirectory.getAreaProjects?.(workbenchDirectory.getSnapshot().activeWorkbenchId ?? ''))
     if (next.root !== document.root) replaceVisibleDocument(next)
   }, [replaceVisibleDocument])
 
@@ -1714,7 +1737,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
     if (result.status !== 'bound' || placementRepositoryRef.current !== holder) return result
     const record = holder.repository.getWorkbench(holder.workbenchId)
     if (record === undefined) return result
-    const next = projectDocumentV3ToLayoutV2(record.document)
+    const next = projectDocumentV3ToLayoutV2(record.document, record.areaProjects)
     replaceVisibleDocument(next)
     return result
   }, [replaceVisibleDocument])
@@ -1726,7 +1749,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
     target: SessionBindingV1
   }): boolean => {
     const group = groupsOf(documentRef.current.root).find(candidate => candidate.id === input.areaId)
-    const active = group === undefined ? undefined : activeTab(group)
+    const active = group?.tabs.find(tab => tab.id === input.moduleInstanceId)
     if (active === undefined || active.id !== input.moduleInstanceId
       || active.editorId !== 'workbench.conversation.start'
       || active.bindingGeneration !== input.bindingGeneration
@@ -1740,7 +1763,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
     )) return false
     const record = holder.repository.getWorkbench(holder.workbenchId)
     if (record === undefined) return false
-    replaceVisibleDocument(projectDocumentV3ToLayoutV2(record.document))
+    replaceVisibleDocument(projectDocumentV3ToLayoutV2(record.document, record.areaProjects))
     return true
   }, [replaceVisibleDocument])
 
@@ -1752,7 +1775,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
       isStartCurrent: (workbenchId, areaId, moduleInstanceId) => {
         if (placementRepositoryRef.current !== holder || workbenchId !== holder.workbenchId) return false
         const group = groupsOf(documentRef.current.root).find(candidate => candidate.id === areaId)
-        const active = group === undefined ? undefined : activeTab(group)
+        const active = group?.tabs.find(tab => tab.id === moduleInstanceId)
         return active?.id === moduleInstanceId && active.editorId === 'workbench.conversation.start'
       },
       connectWorkspace: async (workspaceId, options) => {
@@ -1776,6 +1799,11 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
   ): Promise<SessionBindingV1> => {
     const holder = placementRepositoryRef.current
     if (holder === undefined) throw new Error('Workbench placement owner is unavailable')
+    if (workbenchDirectory.getAreaProjects) {
+      const project = workbenchDirectory.getAreaProjects(holder.workbenchId)[areaId]
+      if (!project?.workspaceId) throw new Error('请先在区域顶栏设置项目文件夹。')
+      if (input.workspaceId !== project.workspaceId) throw new Error('新对话必须使用当前区域的项目文件夹。')
+    }
     holder.repository.replaceDocument(holder.workbenchId, migrateDocumentV2ToV3(documentRef.current))
     const requestId = nextId('area-conversation')
     const claim = holder.repository.claimArea(holder.workbenchId, areaId, requestId)
@@ -1891,9 +1919,9 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
       selectSession(sessionId)
       return
     }
-    for (const layoutCommand of openSessionCommands(
-      documentRef.current, target, command.disposition,
-    )) commit(layoutCommand)
+    const commands = openSessionCommands(documentRef.current, target, command.disposition)
+    if (!commands.length) { setStateDiagnostic('此对话属于另一个项目，请先显示对应项目区域，或新建区域并设置该项目文件夹。'); return }
+    for (const layoutCommand of commands) commit(layoutCommand)
   }, [commit, projectNeutral, selectSession, workspaces])
 
   const reserveNavigation = useCallback((
@@ -1914,7 +1942,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
         kind => nextId(kind),
       )
       holder.repository.replaceDocument(holder.workbenchId, document)
-      replaceVisibleDocument(projectDocumentV3ToLayoutV2(document))
+      replaceVisibleDocument(projectDocumentV3ToLayoutV2(document, workbenchDirectory.getAreaProjects?.(holder.workbenchId)))
     }
     const claim = holder.repository.claimArea(
       holder.workbenchId, document.activeAreaId, request.requestId,
@@ -2088,7 +2116,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
   const markerProjectionChanged = Object.values(markerProjections).some(projection => projection.changed)
   const markerOverrideActive = Object.values(markerOverrides).some(rows => Object.keys(rows).length !== 0)
   useEffect(() => {
-    if (!markerProjectionChanged || markerOverrideActive
+    if (props.browserView || !markerProjectionChanged || markerOverrideActive
       || settingsSnapshot.status !== 'ready' || ! settingsSnapshot.writable
       || settingsSnapshot.revision === undefined) return
     const attempt = `all:${String(settingsSnapshot.revision)}:${markerSignature}`
@@ -2098,7 +2126,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
       operation: 'set', path: ['sessionMarkers'],
       value: allWorkspaceSessionMarkers, expectedRevision: settingsSnapshot.revision,
     })
-  }, [allWorkspaceSessionMarkers, markerOverrideActive, markerProjectionChanged, markerSignature, settings, settingsSnapshot])
+  }, [allWorkspaceSessionMarkers, markerOverrideActive, markerProjectionChanged, markerSignature, settings, settingsSnapshot, props.browserView])
   const updateSessionMarker = useCallback((
     requestedWorkspaceId: string | undefined,
     sessionId: string,
@@ -2110,6 +2138,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
       ...current,
       [workspaceId]: { ...current[workspaceId], [sessionId]: marker },
     }))
+    if (props.browserView) return
     const snapshot = settings.getSnapshot()
     if (snapshot.status !== 'ready' || ! snapshot.writable || snapshot.revision === undefined) {
       setStateDiagnostic('对话标记尚未保存；请重新连接后重试。')
@@ -2126,7 +2155,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
       })
       setStateDiagnostic('对话标记保存冲突；已重新载入远端标记。')
     })
-  }, [markerWorkspaceId, settings])
+  }, [markerWorkspaceId, settings, props.browserView])
   const workspaceTitle = activeWorkspace?.title ?? '未分组'
   const sessionTitle = current === undefined ? undefined : sessionRows[current]?.displayTitle
   const flushCurrentWorkbench = useCallback((): Promise<boolean> => {
@@ -2221,9 +2250,9 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
     const before = documentRef.current
     const target = groupsOf(before.root).find(group => group.id === areaId)
     if (!target || tabsOf(before.root).some(existing => existing.id === tab.id)) return false
-    const targetSession = target.areaBinding?.sessionId ?? target.tabs.find(item => item.sessionId)?.sessionId
-    if (edge === 'center' && tab.sessionId && targetSession && tab.sessionId !== targetSession) throw new Error('目标区域属于另一对话，请选择分屏或其他区域。')
-    if (edge === 'center' && tab.binding?.workspaceId && target.areaBinding?.workspaceId && tab.binding.workspaceId !== target.areaBinding.workspaceId) throw new Error('目标区域属于另一工作区，请选择分屏或其他区域。')
+    const targetProject = workbenchDirectory.getAreaProjects?.(ownerId)[areaId]
+    const reason = placementReason(tab, targetProject, workbenchDirectory.getAreaProjects !== undefined)
+    if (tab.id === 'bay-agent-main' || edge === 'center' && reason) throw new Error(reason ?? areaOperationCopy.mainFixed)
     if (edge !== 'center') {
       const element = [...(resizeCanvasRef.current?.querySelectorAll<HTMLElement>('[data-workbench-group]') ?? [])].find(item => item.dataset.workbenchGroup === areaId)
       const rect = element?.getBoundingClientRect()
@@ -2232,12 +2261,17 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
     }
     const placed = prepareFloatingTabForArea(tab, edge === 'center' ? target : { kind: 'group', id: 'new-area', tabs: [] }, tabsOf(before.root))
     let next = applyLayoutCommand(before, { type: 'add-tab', groupId: areaId, tab: placed })
-    if (edge !== 'center') next = applyLayoutCommand(next, { type: 'move-tab', tabId: tab.id, targetGroupId: areaId, edge, ids: { groupId: nextId('group'), splitId: nextId('split') } })
-    if (placed.binding) {
-      const bindDestination = (node: WorkbenchLayoutDocument['root']): WorkbenchLayoutDocument['root'] => node.kind === 'split'
-        ? { ...node, first: bindDestination(node.first), second: bindDestination(node.second) }
-        : node.tabs.some(item => item.id === tab.id) ? { ...node, areaBinding: placed.binding! } : node
-      next = { ...next, root: bindDestination(next.root) }
+    if (edge !== 'center') {
+      const ids = { groupId: nextId('group'), splitId: nextId('split') }
+      next = applyLayoutCommand(next, { type: 'move-tab', tabId: tab.id, targetGroupId: areaId, edge, ids })
+      const source = tab.binding?.workspaceId ? Object.entries(workbenchDirectory.getAreaProjects?.(ownerId) ?? {}).find(([, project]) => project.workspaceId === tab.binding?.workspaceId) : undefined
+      const projectSplit = (node: LayoutNode): LayoutNode => {
+        if (node.kind === 'split') return { ...node, first: projectSplit(node.first), second: projectSplit(node.second) }
+        if (node.id !== ids.groupId) return node
+        const { project: _project, projectSourceAreaId: _hint, ...rest } = node
+        return { ...rest, ...(source ? { project: source[1], projectSourceAreaId: source[0] } : {}) }
+      }
+      next = { ...next, root: projectSplit(next.root) }
     }
     if (!validateWorkbenchDocumentV3(migrateDocumentV2ToV3(next))) throw new Error('此内页暂时无法安全写入布局，临时内容仍保留。请先检查来源绑定。')
     const snapshot = settings.getSnapshot()
@@ -2384,7 +2418,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
             setTemplateError('目标工作台布局暂不可用，请重新打开菜单后重试。')
             return
           }
-          document = projectDocumentV3ToLayoutV2(persisted)
+          document = projectDocumentV3ToLayoutV2(persisted, workbenchDirectory.getAreaProjects?.(targetWorkbenchId))
         }
       } else {
         const persisted = workbenchDirectory.getDocument?.(targetWorkbenchId)
@@ -2392,7 +2426,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
           setTemplateError('目标工作台布局不可用，请重新打开菜单后重试。')
           return
         }
-        document = projectDocumentV3ToLayoutV2(persisted)
+        document = projectDocumentV3ToLayoutV2(persisted, workbenchDirectory.getAreaProjects?.(targetWorkbenchId))
       }
       const latest = workbenchDirectory.getSnapshot()
       if (!latest.rows.some(row => row.workbenchId === targetWorkbenchId)) {
@@ -2525,22 +2559,8 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
         setStateDiagnostic('无法确认此浏览器工作台的收回身份；请返回 DSH 客户端处理。')
         return
       }
-      let shareActive = workbenchShareSnapshot.links[workbenchId] !== undefined
-        || workbenchShareSnapshot.sessions.some(row => row.workbenchId === workbenchId)
-      if (!shareActive && shareController !== undefined) {
-        try { shareActive = await shareController.refresh(workbenchId) !== undefined } catch { /* reclaim still reports the Host state below */ }
-      }
-      if (shareActive) {
-        if (typeof window !== 'undefined' && !window.confirm('当前 Workbench 正在局域网分享。收回到 DSH 客户端会停止分享并断开所有访客，确定继续吗？')) return
-        if (shareController === undefined) {
-          setStateDiagnostic('无法停止当前局域网分享；请返回 DSH 客户端处理。')
-          return
-        }
-      }
       setReclaimingBrowserWorkbench(true)
-      if (shareActive) setShareBusy(true)
       try {
-        if (shareActive) await shareController!.stop(workbenchId)
         const accepted = await props.requestBrowserReclaim(workbenchId)
         if (accepted) {
           setBrowserHandoff({ workbenchId, status: 'reclaiming' })
@@ -2551,7 +2571,6 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
       } catch {
         setStateDiagnostic('收回请求未能到达 DSH Host；此工作台仍由浏览器控制，请重试。')
       } finally {
-        if (shareActive) setShareBusy(false)
         setReclaimingBrowserWorkbench(false)
       }
       return
@@ -2648,7 +2667,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
     workbenchShareSnapshot.links[props.browserWorkbenchId] !== undefined
       || workbenchShareSnapshot.sessions.some(session => session.workbenchId === props.browserWorkbenchId)
   )
-  const layoutActionsEnabled = frameTransition === undefined
+  const layoutActionsEnabled = canEditLayout && frameTransition === undefined
     && !browserOpening
     && browserActionPhase === undefined
     && !browserOwnedWorkbench
@@ -2708,6 +2727,9 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
         })}
       </aside> : null}
       <main className={css.workspaceShell} data-workbench-workspace data-workbench-browser-view={props.browserView || undefined}>
+        {!shareGuest && props.browserView !== true && workbenchDirectory.pickParentDirectory ? <WorkbenchImportDirectoryRequests pickParentDirectory={workbenchDirectory.pickParentDirectory} /> : null}
+        {!shareGuest && selectedWorkbenchId && !activeBrowserOwned ? <WorkbenchCollaborationApprovals workbenchId={selectedWorkbenchId} /> : null}
+
         {props.browserView === true ? (
           <header className={`${css.workspaceBar} ${css.browserWorkspaceBar}`} data-workbench-browser-toolbar>
             <div className={css.browserWorkspaceIdentity}>
@@ -2733,7 +2755,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
                 aria-atomic="true"
                 data-state={saveState}
               >{saveLabel}</span>
-              {!shareGuest && props.floatingRuntime && selectedWorkbenchId ? <FloatingWorkspaceToolbarButton runtime={props.floatingRuntime} workbenchId={selectedWorkbenchId} canvasRef={resizeCanvasRef} className={css.browserWorkspaceIconButton} disabled={!layoutActionsEnabled} /> : null}
+              {props.floatingRuntime && selectedWorkbenchId ? <FloatingWorkspaceToolbarButton runtime={props.floatingRuntime} workbenchId={selectedWorkbenchId} canvasRef={resizeCanvasRef} className={css.browserWorkspaceIconButton} disabled={browserOpening} /> : null}
               {workbenchDirectory.setLayoutLocked === undefined ? null : <button
                 type="button"
                 className={css.browserWorkspaceIconButton}
@@ -2795,7 +2817,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
                       setShareBusy(true); setShareNotice(undefined)
                       void props.shareController!.start(props.browserWorkbenchId!).then(async result => {
                         await navigator.clipboard?.writeText(result.url)
-                        setShareNotice('分享链接已复制；链接持有者拥有完整 Workbench 操作权限')
+                        setShareNotice('分享链接已复制；访客按本次授权范围参与工作台')
                       }).catch(error => setShareNotice(error instanceof Error ? error.message : '启动共享失败')).finally(() => setShareBusy(false))
                     }}
                   >{browserShareActive ? <IconCopyOutlineMedium size={17} /> : <IconShareOutlineMedium size={17} />}</button>
@@ -2810,6 +2832,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
                       void props.shareController!.stop(props.browserWorkbenchId!).then(() => setShareNotice('已停止局域网共享')).catch(error => setShareNotice(error instanceof Error ? error.message : '停止共享失败')).finally(() => setShareBusy(false))
                     }}
                   ><IconCloseOutlineMedium size={17} /></button>}
+                  {workbenchShareSnapshot.sessions.filter(session => session.workbenchId === props.browserWorkbenchId).map(session => <WorkbenchShareGrantControls key={session.workbenchId} controller={props.shareController!} session={session} />)}
                 </div>
                 <span className={css.browserWorkspaceActionDivider} role="separator" aria-orientation="vertical" />
               </> : null}
@@ -3027,6 +3050,13 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
                                 void returnFocus
                               }}
                             ><span>编辑工作台背景</span></button>
+                            {(workbenchDirectory.getHiddenAreas?.(row.workbenchId) ?? []).map(area => <button key={area.areaId} type="button" role="menuitem" disabled={browserOwned || frameTransition !== undefined} onClick={() => {
+                              setWorkbenchMenuOpenId(undefined)
+                              void workbenchDirectory.showArea?.(row.workbenchId, area.areaId).catch(error => setStateDiagnostic(String(error)))
+                            }}>重新显示区域 · {area.label}</button>)}
+                            {workbenchDirectory.memoryRequest ? <button type="button" role="menuitem" disabled={browserOwned} onClick={() => {
+                              setWorkbenchMenuOpenId(undefined); setWorkbenchMenuPosition(undefined); setMemoryWorkbenchId(row.workbenchId)
+                            }}>工作台专属记忆</button> : null}
                             <button
                               type="button"
                               role="menuitem"
@@ -3184,17 +3214,19 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
           data-session-accent-frames={props.showSessionAccentFrames === false ? 'hidden' : undefined}
           {...(frameTransition !== undefined || browserOpening || browserActionPhase !== undefined ? { inert: '' } : {})}
         >
-          {!shareGuest && props.floatingRuntime && selectedWorkbenchId ? <WorkbenchFloatingWorkspace
+          {props.floatingRuntime && selectedWorkbenchId ? <WorkbenchFloatingWorkspace
             runtime={props.floatingRuntime} workbenchId={selectedWorkbenchId} canvasRef={resizeCanvasRef}
-            visible={surfaceView === 'workbench' && !activeBrowserOwned && layoutActionsEnabled}
+            visible={surfaceView === 'workbench' && !activeBrowserOwned && !browserOpening}
             editors={editors} hidden={workbenchDirectorySnapshot.globalHiddenEditorIds ?? []} extensionAccess={extensionAccess}
             frame={props} layout={layout} policy={conversationResourcePolicy} sessionMarkers={allWorkspaceSessionMarkers}
-            selectedAreaBinding={areaSessionBinding(groupsOf(layout.root).find(group => group.id === layout.activeGroupId), workspaces, projectNeutral, account)}
+            selectedAreaBinding={activePageSessionBinding(groupsOf(layout.root).find(group => group.id === layout.activeGroupId), workspaces, projectNeutral, account)}
             commit={commit} pin={pinFloatingTab} {...(props.bayAgent === undefined ? {} : { bayAgent: props.bayAgent })} /> : null}
           {createPreset && props.browserView !== true ? <WorkbenchCreateDialog directory={workbenchDirectory} presetId={createPreset} {...(props.generateContextDraft === undefined ? {} : { generateDraft: props.generateContextDraft })}
             onClose={() => { setCreatePreset(undefined); requestAnimationFrame(() => createWorkbenchButtonRef.current?.focus()) }}
             onCreated={() => { props.onShowWorkbench?.(); navigationReservationsRef.current.clear(); setStateDiagnostic(undefined) }} /> : null}
-          {contextDialog && props.browserView !== true && workbenchDirectory.getWorkbenchContext !== undefined ? (() => {
+          {projectDialog ? <AreaProjectDialog directory={workbenchDirectory} {...projectDialog} onClose={() => setProjectDialog(undefined)} /> : null}
+          {memoryWorkbenchId ? <WorkbenchMemoryDialog directory={workbenchDirectory} workbenchId={memoryWorkbenchId} onClose={() => setMemoryWorkbenchId(undefined)} /> : null}
+          {contextDialog && workbenchDirectory.getWorkbenchContext !== undefined ? (() => {
             const areaId = contextDialog.areaId
             const context = areaId === undefined
               ? workbenchDirectory.getWorkbenchContext!(contextDialog.workbenchId)
@@ -3233,6 +3265,10 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
             }}
           /> : <Profiler id="workbench-layout" onRender={reportWorkbenchLayoutCommit}>
           <LayoutView
+            {...(workbenchDirectory.getAreaProjects === undefined ? {} : {
+              areaProjects: workbenchDirectory.getAreaProjects(placementWorkbenchId),
+              editAreaProject: (areaId: string) => setProjectDialog({ workbenchId: placementWorkbenchId, areaId }),
+            })}
             onManageEditors={props.onManageEditors}
             {...(workbenchDirectory.getAreaContext === undefined ? {} : {
               editAreaBackground: (areaId: string) => { setContextDialog({ workbenchId: placementWorkbenchId, areaId }) },
@@ -3445,6 +3481,8 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
 }
 
 interface LayoutViewProps {
+  areaProjects?: Readonly<Record<string, import('../workbench-directory-contract.ts').AreaProjectV1>>
+  editAreaProject?: (areaId: string) => void
   onManageEditors?: (() => void) | undefined
   editAreaBackground?: (areaId: string) => void
   /** Runtime identity; never part of a persisted Area or editor state. */
@@ -3986,10 +4024,10 @@ function siblingArea(document: WorkbenchLayoutDocument, groupId: string): Siblin
 }
 
 function directionLabel(direction: MergeDirection): string {
-  if (direction === 'left') return '向左合并'
-  if (direction === 'right') return '向右合并'
-  if (direction === 'up') return '向上合并'
-  return '向下合并'
+  if (direction === 'left') return '向左合并显示'
+  if (direction === 'right') return '向右合并显示'
+  if (direction === 'up') return '向上合并显示'
+  return '向下合并显示'
 }
 
 function mergeDirectionBetween(source: DOMRect, target: DOMRect): MergeDirection {
@@ -4444,12 +4482,12 @@ function SeparatorMenu({
       ) : (
         <>
           <div className={css.menuDivider} />
-          <button role="menuitem" disabled={!canMerge} title={canMerge ? undefined : '两个区域绑定了不同的会话，不能合并'} onClick={() => {
+          <button role="menuitem" disabled={!canMerge} title={canMerge ? undefined : '项目文件夹不同或尚未设置，无法合并显示'} onClick={() => {
             run({ type: 'merge-group', sourceGroupId: first.id, targetGroupId: second.id })
-          }}>{split.axis === 'horizontal' ? '向右合并' : '向下合并'}</button>
-          <button role="menuitem" disabled={!canMerge} title={canMerge ? undefined : '两个区域绑定了不同的会话，不能合并'} onClick={() => {
+          }}>{split.axis === 'horizontal' ? '向右合并显示' : '向下合并显示'}</button>
+          <button role="menuitem" disabled={!canMerge} title={canMerge ? undefined : '项目文件夹不同或尚未设置，无法合并显示'} onClick={() => {
             run({ type: 'merge-group', sourceGroupId: second.id, targetGroupId: first.id })
-          }}>{split.axis === 'horizontal' ? '向左合并' : '向上合并'}</button>
+          }}>{split.axis === 'horizontal' ? '向左合并显示' : '向上合并显示'}</button>
           <button role="menuitem" onClick={() => {
             run({ type: 'swap-groups', firstGroupId: first.id, secondGroupId: second.id })
           }}>互换两侧区域</button>
@@ -4488,6 +4526,9 @@ interface PendingSessionBindingPickerProps {
   open: boolean
   setOpen: (open: boolean) => void
   onSelect: (binding: SessionBindingV1) => void
+  triggerLabel?: string
+  disabled?: boolean
+  emptyMessage?: string
 }
 
 /**
@@ -4495,9 +4536,9 @@ interface PendingSessionBindingPickerProps {
  * conversation" action: choosing a module in an unbound Area must remain a
  * pending tab until the user explicitly chooses an existing Conversation.
  */
-function PendingSessionBindingPicker({
+export function PendingSessionBindingPicker({
   sessionRows, sessionIds, sessionMarkers, sessionMarkersByWorkspace, workspaces,
-  archivedSessionIds, open, setOpen, onSelect,
+  archivedSessionIds, open, setOpen, onSelect, triggerLabel, disabled, emptyMessage,
 }: PendingSessionBindingPickerProps) {
   const controlRef = useRef<HTMLDivElement>(null)
   const pickerRef = useRef<HTMLDivElement>(null)
@@ -4505,6 +4546,7 @@ function PendingSessionBindingPicker({
   const pickerId = useId()
   const [query, setQuery] = useState('')
   const [collapsedWorkspaceGroups, setCollapsedWorkspaceGroups] = useState<Set<string>>(() => new Set())
+  useEffect(() => { if (!open) setQuery('') }, [open])
   const archived = new Set(archivedSessionIds)
   const workspaceOf = new Map<string, { id: string; title: string }>()
   for (const workspace of workspaces) {
@@ -4553,7 +4595,7 @@ function PendingSessionBindingPicker({
     const updatedAt = row?.updatedAt === undefined ? '最近更新未知' : `最近更新 ${new Date(row.updatedAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`
     return <button key={sessionTargetKey(candidate.binding)} type="button" role="option" aria-label={`${title} · ${candidate.workspaceTitle} · ${candidate.binding.sessionId}`} onClick={() => { onSelect(candidate.binding); setOpen(false); triggerRef.current?.focus() }}>
       <span className={css.markerLabel} data-accent={candidate.marker.accentToken}>{candidate.marker.label}</span>
-      <span className={css.pickerIdentity}><strong>{title}</strong><small>空闲 · {updatedAt} · {candidate.binding.sessionId.slice(-8)}</small></span>
+      <span className={css.pickerIdentity}><strong>{title}</strong><small>{row?.running ? '进行中' : '空闲'} · {updatedAt} · {candidate.binding.sessionId.slice(-8)}</small></span>
     </button>
   }
   useEffect(() => {
@@ -4573,15 +4615,15 @@ function PendingSessionBindingPicker({
     }
   }, [open, setOpen])
   return <div ref={controlRef} className={css.bindingControl} data-workbench-pending-binding-picker>
-    <button ref={triggerRef} type="button" className={css.bindingChip} aria-label="选择要绑定的对话" aria-haspopup="listbox" aria-expanded={open} aria-controls={open ? pickerId : undefined} onClick={(event) => { event.stopPropagation(); setOpen(!open) }}>
+    <button ref={triggerRef} type="button" disabled={disabled} className={css.bindingChip} aria-label="选择此内页的对话" aria-haspopup="listbox" aria-expanded={open} aria-controls={open ? pickerId : undefined} onClick={(event) => { event.stopPropagation(); setOpen(!open) }}>
       <span className={css.markerLabel} aria-hidden="true">＋</span>
-      <span className={css.bindingTitle}>待绑定对话</span>
+      <span className={css.bindingTitle}>{triggerLabel ?? '待绑定对话'}</span>
     </button>
-    {open ? <WorkbenchFloatingMenu kind="binding" ownerId={pickerId} anchorRef={triggerRef} surfaceRef={pickerRef} side="bottom" className={css.bindingPicker} label="选择要绑定的对话">
-      <div className={css.bindingPickerHeading}><span><strong>选择要绑定的对话</strong><small>不会创建新的对话</small></span><kbd>Esc</kbd></div>
+    {open ? <WorkbenchFloatingMenu kind="binding" ownerId={pickerId} anchorRef={triggerRef} surfaceRef={pickerRef} side="bottom" className={css.bindingPicker} label="选择此内页的对话">
+      <div className={css.bindingPickerHeading}><span><strong>选择此内页的对话</strong><small>不会创建新的对话</small></span><kbd>Esc</kbd></div>
       <div className={css.bindingSearch} role="search"><IconSearchOutlineMedium className={css.searchIcon} size={15} /><label className={css.visuallyHidden} htmlFor={`${pickerId}-search`}>搜索对话</label><input id={`${pickerId}-search`} autoFocus type="search" role="searchbox" placeholder="搜索对话、标记或 Session ID" value={query} onChange={event => setQuery(event.currentTarget.value)} /></div>
-      <div id={pickerId} role="listbox" aria-label="可绑定的对话">
-        {candidates.length === 0 ? <span className={css.bindingPickerEmpty}>没有可绑定的非空对话。请先在 DSH 原版中创建对话，或继续保持待绑定。</span> : <section className={css.bindingPickerSection} data-binding-section="recent">
+      <div id={pickerId} role="listbox" aria-label="可选择的对话">
+        {candidates.length === 0 ? <span className={css.bindingPickerEmpty}>{query.trim() ? '没有匹配的对话，请尝试其他关键词。' : emptyMessage ?? '没有可选择的非空对话。请先在 DSH 原版中创建对话，或继续保持待绑定。'}</span> : <section className={css.bindingPickerSection} data-binding-section="recent">
           <span className={css.bindingPickerSectionLabel}>最近对话</span>
           <WorkspacePickerGroups
             groups={groupedCandidates.map(group => ({ key: group.key, title: group.title, items: group.candidates }))}
@@ -5064,7 +5106,7 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
     splitPlacement, requestSplitPlacement, updateSplitPlacement, confirmSplitPlacement, cancelSplitPlacement,
     collapsedAreaIds, expandedAreaCount, toggleAreaCollapsed,
     summary,
-    editAreaBackground,
+    editAreaBackground, editAreaProject, areaProjects,
     conversationResourcePolicy,
   } = props
   const floating = useFloatingWorkspace()
@@ -5076,14 +5118,14 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
     && tab.binding === undefined
     && tab.sessionId === undefined
     && tab.pendingBinding === undefined
-  const hasPendingSessionTabs = group.tabs.some(tab => tab.editorScope === 'session'
-    && (tab.pendingBinding !== undefined || isUnboundConversationTab(tab)))
+  const activePendingSession = active?.editorScope === 'session'
+    && (active.pendingBinding !== undefined || isUnboundConversationTab(active))
   const activeSessionId = active?.sessionId
   const areaClaim = `workbench-area:${group.id}:${active?.id ?? 'empty'}:${active?.bindingGeneration ?? 0}`
   const activeRosterWorkspace = activeSessionId === undefined
     ? undefined
     : workspaces.find(workspace => workspace.sessionIds.includes(activeSessionId))
-  const activeBinding = areaSessionBinding(group, workspaces, projectNeutral, account)
+  const activeBinding = activePendingSession ? undefined : activePageSessionBinding(group, workspaces, projectNeutral, account)
   const currentRosterWorkspace = currentSession === undefined
     ? undefined
     : workspaces.find(workspace => workspace.sessionIds.includes(currentSession))
@@ -5117,6 +5159,9 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
     : sessionMarkersByWorkspace[activeBinding.workspaceId] ?? sessionMarkers
   const areaMarker = activeBinding === undefined ? undefined
     : areaSessionMarkers[activeBinding.sessionId] ?? allocateSessionMarker(areaSessionMarkers)
+  const pickerWorkspaces = areaProjects === undefined ? workspaces
+    : workspaces.filter(workspace => workspace.workspaceId === areaProjects[group.id]?.workspaceId)
+  const pickerSessionIds = areaProjects === undefined ? areaSessionIds : pickerWorkspaces.flatMap(workspace => workspace.sessionIds)
   const areaRef = useRef<HTMLElement>(null)
   const bodyRef = useRef<HTMLDivElement>(null)
   const collapsePreviewId = useId()
@@ -5145,8 +5190,9 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
   const [tabOverviewQuery, setTabOverviewQuery] = useState('')
   const tabOverviewAnchorRef = useRef<HTMLElement | null>(null)
   const [tabStripOverflow, setTabStripOverflow] = useState({ left: false, right: false })
-  const [bindingOpen, setBindingOpen] = useState(false)
-  const pendingEditorRef = useRef<WorkbenchEditorCatalogRow>()
+  const [bindingTabId, setBindingTabId] = useState<string>()
+  const bindingOpen = active !== undefined && bindingTabId === active.id
+  const setBindingOpen = (open: boolean) => setBindingTabId(open ? active?.id : undefined)
   const [gesture, setGesture] = useState<AreaGesture>()
   const [areaMergeDragging, setAreaMergeDragging] = useState(false)
   const sibling = siblingArea(document, group.id)
@@ -5381,7 +5427,7 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
     }
     return {
       id: nextId('tab'), editorId: editor.id, editorScope: 'root',
-      lastKnownTitle: editor.label, state: structuredClone(initialState),
+      lastKnownTitle: editor.label, state: editor.id === 'workbench.workspace-files' ? { projectAreaId: group.id } : structuredClone(initialState),
     }
   }
 
@@ -5403,9 +5449,12 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
   const replaceEditor = (
     editor: import('./catalog.ts').WorkbenchEditorCatalogRow,
   ) => {
-    const tab = makeReplacementTab(editor)
+    const tab = active && editor.scope === 'session'
+      ? createPendingSessionTab(editor, active.id, group, tabsOf(document.root))
+      : makeReplacementTab(editor)
     if (tab !== undefined) {
       commit({ type: 'replace-tab', tabId: tab.id, tab })
+      if (tab.pendingBinding) setBindingTabId(tab.id)
     }
     setMenu(undefined)
   }
@@ -5413,10 +5462,14 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
   const addEditor = (
     editor: import('./catalog.ts').WorkbenchEditorCatalogRow,
   ) => {
-    const tab = makeTab(editor)
+    const tab = editor.scope === 'session'
+      ? createPendingSessionTab(editor, nextId('tab'), group, tabsOf(document.root))
+      : makeTab(editor)
     /* v8 ignore next -- makeTab is undefined only behind the disabled Session-editor action. */
-    if (tab !== undefined) commit({ type: 'add-tab', groupId: group.id, tab })
-    else { pendingEditorRef.current = editor; setBindingOpen(true) }
+    if (tab !== undefined) {
+      commit({ type: 'add-tab', groupId: group.id, tab })
+      if (tab.pendingBinding) setBindingTabId(tab.id)
+    }
     setMenu(undefined)
   }
 
@@ -5475,7 +5528,7 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
     if (!replace && options?.revealIfOpened !== false) {
       const requestedParams = options?.params
       const existing = group.tabs.find(tab => {
-        if (tab.editorId !== editor.id || tab.editorScope !== 'session') return false
+        if (tab.editorId !== editor.id || tab.editorScope !== 'session' || !sameEditorSource(tab, targetBinding)) return false
         const previous = tab.state !== null && typeof tab.state === 'object' && !Array.isArray(tab.state)
           ? tab.state as { readonly nativeParams?: unknown; readonly nativeContentId?: unknown }
           : undefined
@@ -5583,7 +5636,7 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
       editorId: active.editorId,
       editorScope: active.editorScope,
       ...(active.sessionId === undefined ? {} : { sessionId: active.sessionId }),
-      ...(active.binding?.workspaceId === undefined ? {} : { workspaceId: active.binding.workspaceId }),
+      ...((active.binding?.workspaceId ?? areaProjects?.[group.id]?.workspaceId ?? group.project?.workspaceId) === undefined ? {} : { workspaceId: (active.binding?.workspaceId ?? areaProjects?.[group.id]?.workspaceId ?? group.project?.workspaceId)! }),
       bindingGeneration: active.bindingGeneration ?? 0,
       state: active.state,
       availability: sessionUnavailable ?? (editors.some(row => row.id === active.editorId && row.scope === active.editorScope)
@@ -5717,7 +5770,7 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
           }
         } else if (!canMergeGroups(document, group.id, targetGroupId)) {
           preview = {
-            kind: 'invalid', message: '两个区域绑定了不同的会话，无法合并。请先分别保留为独立区域。',
+            kind: 'invalid', message: '项目文件夹不同或尚未设置，无法合并显示。请保留独立区域，或交换区域位置。',
             style: fixedPreviewStyle(target.getBoundingClientRect()),
           }
         } else {
@@ -5867,7 +5920,7 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
       if (target === undefined || targetGroupId === undefined) {
         preview = {
           kind: 'invalid',
-          message: '拖到另一个容器后松开，即可把当前容器合并到目标容器。',
+          message: '拖到另一个容器后松开，即可把当前容器的内页合并显示到目标容器。',
           style: fixedPreviewStyle(sourceRect),
         }
       } else {
@@ -5881,7 +5934,7 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
             }
           : {
               kind: 'invalid',
-              message: '两个区域绑定了不同的会话，无法合并。请先分别保留为独立区域。',
+              message: '项目文件夹不同或尚未设置，无法合并显示。请保留独立区域，或交换区域位置。',
               style: fixedPreviewStyle(targetRect),
             }
       }
@@ -6062,26 +6115,27 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
               onSelect={editor => editorMenuMode === 'replace' ? replaceEditor(editor) : addEditor(editor)} />
           </WorkbenchFloatingMenu>
         ) : null}
-        {activeBinding === undefined || resolvedActive === undefined ? hasPendingSessionTabs ? (
+        {areaProjects !== undefined ? <AreaProjectButton relativePath={areaProjects[group.id]?.relativePath} onClick={() => editAreaProject?.(group.id)} /> : null}
+        {activePendingSession ? (
           <PendingSessionBindingPicker
+            key={active?.id}
             sessionRows={sessionRows}
-            sessionIds={areaSessionIds}
+            sessionIds={pickerSessionIds}
             sessionMarkers={areaSessionMarkers}
             sessionMarkersByWorkspace={sessionMarkersByWorkspace}
-            workspaces={workspaces}
+            workspaces={pickerWorkspaces}
             archivedSessionIds={archivedSessionIds}
             open={bindingOpen}
+            {...(areaProjects === undefined ? {} : { emptyMessage: areaProjects[group.id]
+              ? '此项目暂无可选择的非空对话。可以通过“新建对话”添加。'
+              : '请先设置此区域的项目文件夹，再选择已有对话。' })}
             setOpen={(open) => { setBindingOpen(open); if (open) setMenu(undefined) }}
             onSelect={(binding) => {
-              for (const tab of group.tabs) {
-                if (tab.editorScope === 'session' && (tab.pendingBinding !== undefined || isUnboundConversationTab(tab))) {
-                  commit({ type: 'retarget-session', tabId: tab.id, binding })
-                }
-              }
+              if (active) commit({ type: 'retarget-session', tabId: active.id, binding })
               setBindingOpen(false)
             }}
           />
-        ) : null : (
+        ) : activeBinding !== undefined && resolvedActive !== undefined ? (
           <SessionBindingChip
             binding={activeBinding}
             resolved={resolvedActive}
@@ -6089,21 +6143,14 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
             sessionRows={sessionRows}
             sessionMarkers={areaSessionMarkers}
             sessionMarkersByWorkspace={sessionMarkersByWorkspace}
-            sessionIds={areaSessionIds}
-            workspaces={workspaces}
+            sessionIds={pickerSessionIds}
+            workspaces={pickerWorkspaces}
             workspaceTitle={areaWorkspaceTitle}
             archivedSessionIds={archivedSessionIds}
             open={bindingOpen}
             setOpen={(open) => { setBindingOpen(open); if (open) setMenu(undefined) }}
             onSelect={(binding) => {
-              const pending = pendingEditorRef.current
-              pendingEditorRef.current = undefined
-              if (pending !== undefined && pending.scope === 'session') {
-                commit({ type: 'add-tab', groupId: group.id, tab: createSessionTab(nextId('tab'), pending.id, binding, pending.label) })
-                setBindingOpen(false)
-                return
-              }
-              for (const tab of group.tabs) if (tab.editorScope === 'session') commit({ type: 'retarget-session', tabId: tab.id, binding })
+              if (active?.editorScope === 'session') commit({ type: 'retarget-session', tabId: active.id, binding })
             }}
             onOpenExternal={(binding) => {
               if (projectNeutral && active !== undefined) {
@@ -6114,7 +6161,7 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
               updateSessionMarker(activeBinding.workspaceId, activeBinding.sessionId, marker)
             }}
           />
-        )}
+        ) : null}
         <div className={css.areaActions} data-area-actions>
           {group.tabs.length > 0 ? <button
             ref={tabOverviewTriggerRef}
@@ -6188,7 +6235,7 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
             type="button"
             className={css.iconButton}
             aria-label="区域操作"
-            title="点击打开区域菜单；按住拖到另一个容器可快速合并"
+            title="点击打开区域菜单；按住拖到另一个容器可合并显示"
             aria-haspopup="menu"
             aria-expanded={menu === 'area' || menu === 'editor' && editorMenuAnchorRef.current === areaMenuTriggerRef.current || tabOverviewOpen && tabOverviewAnchorRef.current === areaMenuTriggerRef.current}
             data-area-merge-drag-handle="true"
@@ -6225,6 +6272,7 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
                 setTabOverviewOpen(true)
               }}
               {...(editAreaBackground === undefined ? {} : { editBackground: () => editAreaBackground(group.id) })}
+              {...(editAreaProject === undefined ? {} : { editProject: () => editAreaProject(group.id) })}
               {...(collapseEdge === undefined ? {} : { toggleCollapse: () => toggleAreaCollapsed(group.id), canCollapse, collapseLabel })}
               requestSplit={(axis) => {
                 setMenu(undefined)
@@ -6285,8 +6333,8 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
           type="button"
           aria-hidden="true"
           tabIndex={-1}
-          aria-label="从右上角拖动以分割或合并区域"
-          title="拖动以分割或合并区域"
+          aria-label="从右上角拖动以分割或合并显示"
+          title="拖动以分割或合并显示"
           onPointerDown={startCornerGesture}
         />
         <button
@@ -6295,8 +6343,8 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
           type="button"
           aria-hidden="true"
           tabIndex={-1}
-          aria-label="从左下角拖动以分割或合并区域"
-          title="拖动以分割或合并区域"
+          aria-label="从左下角拖动以分割或合并显示"
+          title="拖动以分割或合并显示"
           onPointerDown={startCornerGesture}
         />
         {areaCollapsed || gesture === undefined ? null : <GesturePreview gesture={gesture} />}
@@ -6381,7 +6429,7 @@ function WorkbenchAreaTabLabel({ tab, fallback, fontSize }: { tab: TabDocument; 
 }
 
 function AreaMenu({
-  anchorRef, surfaceRef, side, align, active, group, sibling, document, commit, close, requestSplit, splitActive, openRelated, openOfficial, addPage, showPages, editBackground, toggleCollapse, canCollapse, collapseLabel,
+  anchorRef, surfaceRef, side, align, active, group, sibling, document, commit, close, requestSplit, splitActive, openRelated, openOfficial, addPage, showPages, editBackground, editProject, toggleCollapse, canCollapse, collapseLabel,
 }: {
   anchorRef: RefObject<HTMLElement>
   surfaceRef: RefObject<HTMLDivElement>
@@ -6396,6 +6444,7 @@ function AreaMenu({
   addPage: () => void
   showPages: () => void
   editBackground?: () => void
+  editProject?: () => void
   toggleCollapse?: () => void
   canCollapse?: boolean
   collapseLabel?: string
@@ -6422,6 +6471,7 @@ function AreaMenu({
       <button role="menuitem" onClick={addPage}>添加内页</button>
       <button role="menuitem" disabled={group.tabs.length === 0} onClick={showPages}>查看全部内页</button>
       {editBackground === undefined ? null : <button role="menuitem" onClick={() => { editBackground(); close() }}>编辑区域背景</button>}
+      {editProject === undefined ? null : <button role="menuitem" onClick={() => { editProject(); close() }}>设置项目文件夹</button>}
       {toggleCollapse === undefined ? null : <button role="menuitem" disabled={!canCollapse} onClick={() => { toggleCollapse(); close() }}>{collapseLabel}</button>}
       <div className={css.menuDivider} />
       <button role="menuitem" disabled={active === undefined} onClick={() => {
@@ -6455,12 +6505,12 @@ function AreaMenu({
       {sibling === undefined ? null : (
         <>
           <div className={css.menuDivider} />
-          <button role="menuitem" disabled={!canMerge} title={canMerge ? undefined : '两个区域绑定了不同的会话，不能合并'} onClick={() => {
+          <button role="menuitem" disabled={!canMerge} title={canMerge ? undefined : '项目文件夹不同或尚未设置，无法合并显示'} onClick={() => {
             run({ type: 'merge-group', sourceGroupId: group.id, targetGroupId: sibling.group.id })
           }}>{directionLabel(sibling.direction)}</button>
           <button role="menuitem" onClick={() => {
             run({ type: 'swap-groups', firstGroupId: group.id, secondGroupId: sibling.group.id })
-          }}>与相邻区域互换</button>
+          }}>与相邻区域交换位置</button>
         </>
       )}
       <div className={css.menuDivider} />
@@ -6468,7 +6518,7 @@ function AreaMenu({
         /* v8 ignore next -- the button is disabled when no active editor exists. */
         if (active !== undefined) run({ type: 'close-tab', tabId: active.id })
       }}>关闭当前视图</button>
-      <span className={css.menuHint}>区域内容与区域几何相互独立；切换编辑器不会改变分割。</span>
+      <span className={css.menuHint}>合并显示保留各区域的背景和任务归属；关闭内页只关闭视图。</span>
     </WorkbenchFloatingMenu>
   )
 }
@@ -6553,7 +6603,7 @@ function Editor({
     const accepted = commands.commit({ type: 'update-tab-state', tabId: tab.id, state: tab.state, bindingGeneration: tab.bindingGeneration ?? 0 })
     if (accepted !== false && managed.tab.state === tab.state) managed.pendingState = false
   }, [managed, tab.state, tab.bindingGeneration, commands, effectiveLifecycle.visibility, sourceEpoch, floating?.visibleWorkbenchId, managed?.busy])
-  const workspaceId = tab.binding?.workspaceId
+  const workspaceId = tab.binding?.workspaceId ?? (tab.editorId === 'workbench.conversation.start' ? projection.workspaceId : undefined)
   const persistedStateFailure = editor?.extension === undefined || editor.declaration === undefined
     ? undefined
     : workbenchEditorStateFailureV1(tab.state, editor.declaration)
@@ -6668,10 +6718,10 @@ function Editor({
     const policy: WorkbenchEditorBindingPolicyV1 = editor?.declaration?.binding ?? {
       requirement: editor?.declaration?.requiredBinding ?? 'session',
       unbound: 'pending',
-      sharing: 'area',
+      sharing: 'independent',
     }
     const requirement = policy.requirement === 'workspace' ? '工作区' : '对话'
-    const sharedTarget = policy.sharing === 'area' ? '当前 Area 的' + requirement : '一个已有' + requirement
+    const sharedTarget = '所选' + requirement
     return <div className={css.body + ' ' + css.pendingBindingBody} data-workbench-pending-binding>
       <section className={css.pendingBindingPanel} role="region" aria-label="待绑定对话内页">
         <div className={css.pendingBindingMain}>
@@ -6679,7 +6729,7 @@ function Editor({
           <h2 className={css.pendingBindingTitle}>连接一个已有对话</h2>
           <p className={css.pendingBindingDescription}>这个内页还没有来源对话。选择后会在这里继续原有消息，并使用对应的工具和运行状态。</p>
           <div className={css.pendingBindingSteps} role="list" aria-label="绑定步骤">
-            <div role="listitem"><span>1</span><span><strong>选择对话</strong><small>从当前工作台的已有对话中选择</small></span></div>
+            <div role="listitem"><span>1</span><span><strong>选择对话</strong><small>为这个内页选择要继续的已有对话</small></span></div>
             <div role="listitem"><span>2</span><span><strong>继续当前工作</strong><small>内页会沿用 {sharedTarget} 的上下文</small></span></div>
           </div>
           <button type="button" className={css.pendingBindingPrimary} data-workbench-bind-conversation onClick={commands.openBindingPicker}><IconLinkOutlineMedium size={16} />选择已有对话</button>

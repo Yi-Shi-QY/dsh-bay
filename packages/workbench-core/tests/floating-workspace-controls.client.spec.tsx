@@ -7,7 +7,7 @@ import { createFloatingWorkspaceRuntime } from '../src/client/floating-workspace
 import { defaultLayout } from '../src/foundation/model.ts'
 import type { ConversationTabStatusSource, ConversationTabStatus } from '../src/client/conversation-tab-status.ts'
 
-vi.mock('../src/foundation/WorkbenchFrame.tsx', () => ({ MemoizedEditor: () => null, WorkbenchFloatingMenu: () => null }))
+vi.mock('../src/foundation/WorkbenchFrame.tsx', () => ({ MemoizedEditor: () => null, WorkbenchFloatingMenu: () => null, PendingSessionBindingPicker: () => null }))
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
 function setup(bayAgent?: ComponentProps<typeof WorkbenchFloatingWorkspace>['bayAgent'], conversationStatus?: ConversationTabStatusSource, policy?: ComponentProps<typeof WorkbenchFloatingWorkspace>['policy']) {

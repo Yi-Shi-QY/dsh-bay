@@ -1,10 +1,14 @@
 import { createServer, request as httpRequest, type IncomingMessage, type ServerResponse } from 'node:http'
 import { networkInterfaces } from 'node:os'
-import { connect as connectNet } from 'node:net'
 import type { Duplex } from 'node:stream'
 import { createHash } from 'node:crypto'
+import { randomUUID } from 'node:crypto'
+import { Readable } from 'node:stream'
+import { once } from 'node:events'
+import type { HostWorkbenchAccess } from './host-workbench-access.ts'
+import { WORKBENCH_ACCESS_HEADER, COLLABORATION_GRANT, type WorkbenchGrant, type WorkbenchAccessContext } from './workbench-access-contract.ts'
 import { URL } from 'node:url'
-import { guestDistributionDenied, GuestDistributionMuxGuard } from './host-distribution-guest-guard.ts'
+import { guestDistributionDenied } from './host-distribution-guest-guard.ts'
 import type { WorkbenchShareSessionManagerV1, WorkbenchShareSessionV1, WorkbenchShareViewLeaseV1 } from './host-workbench-share-session.ts'
 
 const SHARE_COOKIE = 'dsh-workbench-share'
@@ -26,6 +30,12 @@ interface PreparedViewV1 {
 }
 
 export interface WorkbenchShareGatewayOptionsV1 {
+  readonly access?: HostWorkbenchAccess
+  readonly guestHttp?: (request: Request, context: WorkbenchAccessContext) => Promise<Response>
+  readonly guestUpgrade?: (request: IncomingMessage, socket: Duplex, head: Buffer, context: WorkbenchAccessContext) => void
+  readonly revokeGuest?: (accessId: string) => void
+  readonly guestPresence?: (payload: unknown, context: WorkbenchAccessContext) => Promise<unknown>
+  readonly guestDocument?: (context: WorkbenchAccessContext) => Promise<string>
   readonly upstreamOrigin: string
   readonly manager: WorkbenchShareSessionManagerV1
   readonly prepareView: (workbenchId: string) => Promise<PreparedViewV1>
@@ -48,7 +58,8 @@ export interface WorkbenchShareGatewayV1 {
   readonly host: string
   readonly port: number
   readonly origin: string
-  startShare(workbenchId: string): Promise<{ readonly url: string; readonly status: 'started' | 'already-active' }>
+  startShare(workbenchId: string, grant?: WorkbenchGrant): Promise<{ readonly url: string; readonly status: 'started' | 'already-active' }>
+  reduceShare(workbenchId: string, grant: WorkbenchGrant): void
   stopShare(workbenchId: string): Promise<void>
   kickGuest(workbenchId: string, leaseId: string): Promise<boolean>
   getMetrics(workbenchId: string): WorkbenchShareGatewayMetricsV1
@@ -275,8 +286,14 @@ export async function createWorkbenchShareGateway(options: WorkbenchShareGateway
         throw new Error('workbench-share-session-stopped')
       }
       created.lease.nativeView = { windowId: redeemed.windowId, closeToken: redeemed.closeToken }
+      if (options.access) {
+        const token = options.access.registerGuest(created.lease.leaseId, session.workbenchId, session.grant, () => session.leases.has(created.lease.leaseId) && sessions.getSession(session.workbenchId) === session)
+        created.lease.accessToken = token
+        await options.closeView(redeemed.closeToken)
+        created.lease.nativeView = { windowId: randomUUID(), closeToken: token }
+      }
       created.lease.ownerCookie = ownerCookie
-      return { lease: created.lease, view: redeemed, ownerCookie, documentHtml: document.body.toString('utf8') }
+      return { lease: created.lease, view: leaseNativeView(created.lease)!, ownerCookie, documentHtml: document.body.toString('utf8') }
     } catch (error) {
       if (ownsLease) sessions.removeLease(created.lease)
       throw error
@@ -286,6 +303,7 @@ export async function createWorkbenchShareGateway(options: WorkbenchShareGateway
   async function handleHttp(request: IncomingMessage, response: ServerResponse): Promise<void> {
     if (request.method !== 'GET' && request.method !== 'HEAD' && request.method !== 'POST') { writeSecurityHeaders(response); response.writeHead(405); response.end(); return }
     const url = new URL(request.url ?? '/', `http://${host}:${String(gateway.port)}`)
+    if (request.headers.host !== url.host || request.headers.origin !== undefined && request.headers.origin !== url.origin) { writeSecurityHeaders(response); response.writeHead(403); response.end('workbench origin denied'); return }
     if (url.pathname === '/api/workbench-share/lifecycle') {
       if (request.method !== 'GET' && request.method !== 'HEAD') { writeSecurityHeaders(response); response.writeHead(405); response.end(); return }
       const rawCookie = cookieValue(request)
@@ -348,6 +366,18 @@ export async function createWorkbenchShareGateway(options: WorkbenchShareGateway
     response.once('finish', finishRequest)
     response.once('close', finishRequest)
     const ownerCookie = lease.ownerCookie
+    // All Workbench fetch routes get a Host-owned credential, never an incoming role/header.
+    delete request.headers[WORKBENCH_ACCESS_HEADER]
+    if (lease.accessToken) request.headers[WORKBENCH_ACCESS_HEADER] = lease.accessToken
+    if (url.pathname.startsWith('/api/workbench-window/') && request.method === 'POST') {
+      try {
+        const envelope = JSON.parse((await readResponseBody(request, 16 * 1024)).toString('utf8'))
+        const action = url.pathname.slice('/api/workbench-window/'.length)
+        if (!['status', 'ready', 'heartbeat', 'metrics'].includes(action) || envelope.payload?.windowId !== lease.nativeView?.windowId) throw new Error('guest-view-denied')
+        writeSecurityHeaders(response, { 'content-type': 'application/json' }); response.writeHead(200)
+        response.end(JSON.stringify({ type: 'server-response', rpcId: envelope.rpcId, result: { ok: true, value: { status: 'ready' } } })); return
+      } catch { writeSecurityHeaders(response); response.writeHead(403); response.end('guest view denied'); return }
+    }
     if (url.pathname === '/api/workbench-share/guest-profile' && request.method === 'GET') {
       const payload = JSON.stringify({ nickname: lease.nickname })
       writeSecurityHeaders(response, { 'content-type': 'application/json; charset=utf-8', 'content-length': String(Buffer.byteLength(payload)) })
@@ -397,6 +427,7 @@ export async function createWorkbenchShareGateway(options: WorkbenchShareGateway
         const upstreamResponse = await requestUpstream(new URL('/workbench', upstream), request, ownerCookie ?? '')
         documentHtml = upstreamResponse.body.toString('utf8')
       }
+      if (options.guestDocument && options.access) documentHtml = await options.guestDocument(options.access.getContext(lease.leaseId))
       const html = injectView(documentHtml, native!)
       writeSecurityHeaders(response, { 'content-type': 'text/html; charset=utf-8', 'content-length': String(Buffer.byteLength(html)) })
       response.writeHead(200); response.end(request.method === 'HEAD' ? undefined : html); finishRequest(); return
@@ -406,12 +437,19 @@ export async function createWorkbenchShareGateway(options: WorkbenchShareGateway
       try {
         const parsed = JSON.parse(body.toString('utf8')) as { closeToken?: unknown }
         if (typeof parsed.closeToken === 'string' && lease.nativeView?.closeToken === parsed.closeToken) {
-          await options.closeView(parsed.closeToken)
-          delete lease.nativeView
-          delete lease.ownerCookie
+          // A guest reload is independent of the owner-control lease.
+          sessions.updateGuest(lease, { lastSeenAt: Date.now() })
         }
       } catch { /* malformed beacon is treated like a closed view */ }
       writeSecurityHeaders(response); response.writeHead(204); response.end(); finishRequest(); return
+    }
+    if (url.pathname === '/api/workbench-share/presence' && request.method === 'POST' && options.guestPresence && options.access) {
+      try {
+        const envelope = JSON.parse((await readResponseBody(request, 24 * 1024)).toString('utf8'))
+        const result = await options.guestPresence(envelope.payload, options.access.getContext(lease.leaseId))
+        writeSecurityHeaders(response, { 'content-type': 'application/json' }); response.writeHead(200)
+        response.end(JSON.stringify({ type: 'server-response', rpcId: envelope.rpcId, result })); return
+      } catch { response.writeHead(403); response.end('presence denied'); return }
     }
     if (url.pathname.startsWith('/api/workbench-share/')) {
       writeSecurityHeaders(response); response.writeHead(403); response.end('share management is host-only'); return
@@ -421,6 +459,20 @@ export async function createWorkbenchShareGateway(options: WorkbenchShareGateway
     if (guestDistributionDenied(url.pathname)) {
       writeSecurityHeaders(response); response.writeHead(403); response.end('package distribution is host-only'); finishRequest(); return
     }
+    const scopedWorkbenchRoute = ['/api/workbench/directory/v1', '/api/workbench/bay-agent', '/api/workbench/bay-agent/draft'].includes(url.pathname)
+    if (url.pathname.startsWith('/api/') && !scopedWorkbenchRoute) {
+      if (!options.access || !options.guestHttp || !lease.accessToken) { writeSecurityHeaders(response); response.writeHead(403); response.end('guest capability unavailable'); return }
+      const headers = new Headers()
+      for (const [key, value] of Object.entries(request.headers)) if (value !== undefined && !['cookie', 'host', 'authorization', WORKBENCH_ACCESS_HEADER].includes(key)) headers.set(key, Array.isArray(value) ? value.join(', ') : value)
+      const body = request.method === 'GET' || request.method === 'HEAD' ? undefined : Readable.toWeb(request) as ReadableStream<Uint8Array>
+      const native = await options.guestHttp(new Request(new URL(request.url ?? '/', upstream), { method: request.method ?? 'GET', headers, ...(body ? { body, duplex: 'half' } : {}) } as RequestInit), options.access.getContext(lease.leaseId))
+      native.headers.forEach((value, key) => { if (!['set-cookie', 'connection', 'transfer-encoding'].includes(key)) response.setHeader(key, value) })
+      writeSecurityHeaders(response); response.writeHead(native.status)
+      if (native.body) for await (const chunk of native.body) { if (!response.write(chunk)) await once(response, 'drain') }
+      response.end(); return
+    }
+    if (scopedWorkbenchRoute && (!lease.accessToken || request.method !== 'POST')) { response.writeHead(403); response.end('workbench access required'); return }
+    if (!scopedWorkbenchRoute && (!['GET', 'HEAD'].includes(request.method ?? '') || !/^\/(?:plugins\/|assets\/|favicon\.)/u.test(url.pathname))) { response.writeHead(403); response.end('guest route denied'); return }
     const upstreamUrl = new URL(`${url.pathname}${url.search}`, upstream)
     const result = await requestUpstream(upstreamUrl, request, ownerCookie ?? '')
     const headers = responseHeaders(result.response, upstream, `http://${host}:${String(gateway.port)}`)
@@ -433,6 +485,7 @@ export async function createWorkbenchShareGateway(options: WorkbenchShareGateway
 
   server.on('upgrade', (request, clientSocket, head) => {
     const requestUrl = new URL(request.url ?? '/', `http://${host}:${String(gateway.port)}`)
+    if (request.headers.host !== requestUrl.host || request.headers.origin !== undefined && request.headers.origin !== requestUrl.origin) { clientSocket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n'); return }
     if (requestUrl.pathname !== '/api/remote.mux' || request.headers.upgrade?.toLowerCase() !== 'websocket') {
       clientSocket.end('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n')
       return
@@ -450,30 +503,16 @@ export async function createWorkbenchShareGateway(options: WorkbenchShareGateway
     const sockets = guestSockets.get(found.lease.leaseId) ?? new Set<Duplex>()
     sockets.add(clientSocket)
     guestSockets.set(found.lease.leaseId, sockets)
-    const target = connectNet(Number(upstream.port), upstream.hostname)
-    const headers = cleanHeaders(request.headers, upstream, found.lease.ownerCookie ?? '')
-    headers.connection = 'Upgrade'
-    headers.upgrade = 'websocket'
-    // No negotiated compression: inspect plaintext mux requests before the owner carrier.
-    delete headers['sec-websocket-extensions']
-    const guard=new GuestDistributionMuxGuard()
-    guard.once('error',()=>{clientSocket.destroy();target.destroy()})
-    target.once('connect', () => {
-      const path = request.url ?? '/'
-      const lines = [`GET ${path} HTTP/1.1`, ...Object.entries(headers).filter(([, value]) => value !== undefined).map(([name, value]) => `${name}: ${value}`), '', '']
-      target.write(lines.join('\r\n'))
-      guard.pipe(target)
-      if (head.length > 0) guard.write(head)
-      clientSocket.pipe(guard); target.pipe(clientSocket)
-    })
-    const close = () => {
-      clientSocket.destroy(); target.destroy()
-      sockets.delete(clientSocket)
-      socketMetrics.websocketConnections = Math.max(0, socketMetrics.websocketConnections - 1)
-      sessions.updateGuest(found.lease, { websocketState: 'disconnected', lastSeenAt: Date.now() })
-      if (sockets.size === 0) guestSockets.delete(found.lease.leaseId)
+    if (options.access && options.guestUpgrade) {
+      try {
+        options.guestUpgrade(request, clientSocket, head, options.access.getContext(found.lease.leaseId))
+        clientSocket.once('close', () => { sockets.delete(clientSocket); socketMetrics.websocketConnections = Math.max(0, socketMetrics.websocketConnections - 1); sessions.updateGuest(found.lease, { websocketState: 'disconnected' }) })
+      } catch { clientSocket.destroy() }
+      return
     }
-    target.once('error', close); clientSocket.once('error', close); clientSocket.once('close', () => target.destroy()); target.once('close', () => clientSocket.destroy())
+    clientSocket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n')
+    return
+
   })
 
   const shareUrls = new Map<string, string>()
@@ -482,6 +521,7 @@ export async function createWorkbenchShareGateway(options: WorkbenchShareGateway
     const session = sessions.getSession(workbenchId)
     if (session === undefined) return
     for (const lease of session.leases.values()) {
+      options.access?.revoke(lease.leaseId); options.revokeGuest?.(lease.leaseId)
       for (const socket of guestSockets.get(lease.leaseId) ?? []) socket.destroy()
       guestSockets.delete(lease.leaseId)
       if (lease.nativeView !== undefined) await options.closeView(lease.nativeView.closeToken).catch(() => {})
@@ -492,23 +532,31 @@ export async function createWorkbenchShareGateway(options: WorkbenchShareGateway
   }
   return {
     host, port: gateway.port, origin: `http://${host}:${String(gateway.port)}`,
-    async startShare(workbenchId) {
+    async startShare(workbenchId, grant = COLLABORATION_GRANT) {
       const existing = sessions.getSession(workbenchId)
       if (existing !== undefined) {
         const current = shareUrls.get(workbenchId)
         if (current !== undefined) return { status: 'already-active', url: current }
       }
-      const started = sessions.start(workbenchId, host, gateway.port, '')
+      const started = sessions.start(workbenchId, host, gateway.port, '', grant)
       if (!started.ok || started.token === undefined) throw new Error(started.error ?? 'workbench-share-start-failed')
       const url = `http://${host}:${String(gateway.port)}/workbench?share=${encodeURIComponent(started.token)}`
       shareUrls.set(workbenchId, url)
       return { status: 'started', url }
     },
     stopShare,
+    reduceShare(workbenchId, grant) {
+      const session = sessions.reduce(workbenchId, grant)
+      for (const lease of session.leases.values()) {
+        if (lease.accessToken) options.access?.reduceGuest(lease.leaseId, session.grant)
+        for (const socket of guestSockets.get(lease.leaseId) ?? []) socket.destroy()
+      }
+    },
     async kickGuest(workbenchId, leaseId) {
       const session = sessions.getSession(workbenchId)
       const lease = sessions.revokeLease(workbenchId, leaseId, 'kicked')
       if (session === undefined || lease === undefined) return false
+      options.access?.revoke(lease.leaseId); options.revokeGuest?.(lease.leaseId)
       for (const socket of guestSockets.get(lease.leaseId) ?? []) socket.destroy()
       guestSockets.delete(lease.leaseId)
       if (lease.nativeView !== undefined) await options.closeView(lease.nativeView.closeToken).catch(() => {})

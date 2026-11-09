@@ -1,14 +1,15 @@
+import { browserSafeUuid } from '../browser-safe-id.ts'
 import type { WorkbenchEditorCatalogRow } from './catalog.ts'
 import { areasOf, validateWorkbenchDocumentV3, type WorkbenchDocumentV3, type WorkbenchNodeV3 } from './document-v3.ts'
 import type { JsonValue, SessionBindingV1 } from './model.ts'
 import type { WorkbenchRecordV2 } from './persistence.ts'
-import { canonicalJson, decodeDeterministicZip, decodeWorkbenchPackageArchive, encodeDeterministicZip, importPortableWorkbench, sha256Hex, type PortableWorkbenchV1 } from './workbench-sharing.ts'
-import { inspectWorkbenchOfflinePackage } from '../offline-package.ts'
+import { canonicalJson, decodeDeterministicZip, encodeDeterministicZip, sha256Hex, type PortableWorkbenchV1 } from './workbench-sharing.ts'
 import { WORKBENCH_CORE_VERSION, WORKBENCH_DSH_GENERATION, isWorkbenchCorePackageName } from '../release-compatibility.ts'
 import { CORE_PORTABLE_EDITORS } from '../distribution-contract.ts'
 import { workbenchEditorStateFailureV1 } from '../workbench-editor-state.ts'
 import { areaContextOf } from './workbench-context.ts'
 import { projectPortableWorkbenchContext, renderPortableAreaContextMarkdown, renderPortableWorkbenchContextMarkdown, restorePortableWorkbenchContext, validatePortableWorkbenchContext, type PortableWorkbenchContextV1, type WorkbenchContextExportPolicyV1 } from './workbench-context-portability.ts'
+import { validatePortableBayAgentOrchestration, type PortableBayAgentOrchestrationV1 } from './workbench-bay-agent-work.ts'
 
 export interface LayoutPackageModuleV3 { editorId: string; scope: 'root' | 'session'; packageName?: string; version?: string; digest?: string }
 export interface PortableLayoutV2 {
@@ -23,6 +24,7 @@ export interface PortableLayoutV2 {
   warnings: string[]
   context?: PortableWorkbenchContextV1
   modelPreference?: PortableWorkbenchV1['modelPreference']
+  orchestration?: PortableBayAgentOrchestrationV1
 }
 export interface LayoutPackageManifestV3 {
   schemaVersion: 3
@@ -65,6 +67,7 @@ export function projectLayoutPackage(
   let ordinal = 0
   let moduleOrdinal = 0
   const areaIds = new Map<string, string>()
+  const sources = new Map<string, string>()
   const visit = (node: WorkbenchNodeV3): WorkbenchNodeV3 => {
     if (node.kind === 'split') return { kind: 'split', id: `split-${++ordinal}`, axis: node.axis, ratio: node.ratio, first: visit(node.first), second: visit(node.second) }
     const areaId = `area-${++ordinal}`
@@ -87,8 +90,10 @@ export function projectLayoutPackage(
           else warnings.push(`「${editor.label}」配置未通过可迁移检查，仅分享内页引用。`)
         } catch { warnings.push(`「${editor.label}」配置投影失败，仅分享内页引用。`) }
       } else warnings.push(`「${editor?.label ?? module.editorId}」没有可迁移配置处理器，仅分享内页引用。`)
+      const source = module.binding ? `session:${module.binding.sessionId}` : `${node.areaId}:${module.pendingBinding ?? module.moduleInstanceId}`
+      if (module.editorScope === 'session' && !sources.has(source)) sources.set(source, 'binding-' + (sources.size + 1))
       return { moduleInstanceId, editorId: module.editorId, editorScope: module.editorScope, lastKnownTitle: editor?.label ?? module.editorId,
-        state, ...(module.editorScope === 'session' ? { pendingBinding: 'binding-1' } : {}) }
+        state, ...(module.editorScope === 'session' ? { pendingBinding: sources.get(source)! } : {}) }
     })
     return { kind: 'area', areaId, moduleHistory, ...(activeModuleInstanceId ? { activeModuleInstanceId } : {}) }
   }
@@ -101,11 +106,12 @@ export function projectLayoutPackage(
   return { schemaVersion: context === undefined ? 2 : 3, format: 'dsh-portable-workbench', retention: 'all-retained-tabs', name: record.name, description: record.description,
     tags: [...record.tags ?? []], document: { version: 3, root, activeAreaId: areaIds.get(record.document.activeAreaId)! }, modules: [...modules.values()], warnings: [...new Set(warnings)],
     ...(context === undefined ? {} : { context }),
-    ...(record.workbenchAi === undefined ? {} : { modelPreference: record.workbenchAi }) }
+    ...(record.workbenchAi === undefined ? {} : { modelPreference: record.workbenchAi }),
+    ...(record.bayAgentOrchestration === undefined ? {} : { orchestration: structuredClone(record.bayAgentOrchestration) }) }
 }
 
 export function validatePortableLayout(value: unknown): asserts value is PortableLayoutV2 {
-  if (!record(value) || !keys(value, ['schemaVersion', 'format', 'retention', 'name', 'description', 'tags', 'document', 'modules', 'warnings', 'context', 'modelPreference'])
+  if (!record(value) || !keys(value, ['schemaVersion', 'format', 'retention', 'name', 'description', 'tags', 'document', 'modules', 'warnings', 'context', 'modelPreference', 'orchestration'])
     || ![2, 3].includes(value.schemaVersion as number) || value.format !== 'dsh-portable-workbench' || value.retention !== 'all-retained-tabs'
     || typeof value.name !== 'string' || !value.name.trim() || value.name.length > 160 || typeof value.description !== 'string' || value.description.length > 4000
     || !Array.isArray(value.tags) || value.tags.length > 32 || value.tags.some(tag => typeof tag !== 'string' || tag.length > 64)
@@ -135,7 +141,7 @@ export function validatePortableLayout(value: unknown): asserts value is Portabl
     for (const page of node.moduleHistory) {
       if (++pages > 256 || !record(page) || !keys(page, ['moduleInstanceId', 'editorId', 'editorScope', 'state', 'lastKnownTitle', 'pendingBinding'])
         || !moduleKeys.has(`${String(page.editorScope)}:${String(page.editorId)}`) || typeof page.lastKnownTitle !== 'string' || page.lastKnownTitle.length > 256
-        || (page.pendingBinding !== undefined && page.pendingBinding !== 'binding-1') || !portableStateSafe(page.state) || json(page.state).length > 256 * 1024) throw new Error('内页引用或可迁移状态无效。')
+        || (page.pendingBinding !== undefined && (typeof page.pendingBinding !== 'string' || !/^binding-[1-9][0-9]{0,2}$/u.test(page.pendingBinding))) || !portableStateSafe(page.state) || json(page.state).length > 256 * 1024) throw new Error('内页引用或可迁移状态无效。')
       identity(page.moduleInstanceId)
     }
     if (node.activeModuleInstanceId !== undefined && !node.moduleHistory.some(page => page.moduleInstanceId === node.activeModuleInstanceId)) throw new Error('当前内页不在区域中。')
@@ -144,6 +150,7 @@ export function validatePortableLayout(value: unknown): asserts value is Portabl
   if (value.modelPreference !== undefined && (typeof value.modelPreference !== 'object' || value.modelPreference === null || Array.isArray(value.modelPreference)
     || Object.keys(value.modelPreference).some(key => !['provider', 'model', 'label', 'reasoningEffort'].includes(key))
     || Object.values(value.modelPreference).some(item => item !== undefined && (typeof item !== 'string' || item.length > 256)))) throw new Error('模型配置无效。')
+  if (value.orchestration !== undefined) validatePortableBayAgentOrchestration(value.orchestration)
   if ((value.schemaVersion === 2 && value.context !== undefined) || (value.schemaVersion === 3 && value.context === undefined)) throw new Error('布局版本与 Context 不一致。')
   if (!record(value.document) || !keys(value.document, ['version', 'root', 'activeAreaId']) || value.document.version !== 3) throw new Error('布局版本无效。')
   visit(value.document.root, 0)
@@ -160,6 +167,7 @@ export async function buildLayoutPackage(layout: PortableLayoutV2): Promise<Uint
     files.push({ path: 'context/工作台整体背景说明.md', content: new TextEncoder().encode(renderPortableWorkbenchContextMarkdown(layout.context)) })
     for (const areaKey of Object.keys(layout.context.areas).sort()) files.push({ path: `context/areas/${areaKey}-区域说明.md`, content: new TextEncoder().encode(renderPortableAreaContextMarkdown(layout.context, areaKey)) })
   }
+  if (layout.orchestration !== undefined) files.push({ path: 'orchestration.json', content: json(layout.orchestration) })
   const declaredFiles = await Promise.all(files.map(async file => ({ path: file.path, size: file.content.length, sha256: await sha256Hex(file.content) })))
   const manifest: LayoutPackageManifestV3 = { schemaVersion: 3, format: 'dsh-workbench-package', mode: 'layout-only',
     compatibility: { dsh: WORKBENCH_DSH_GENERATION, core: WORKBENCH_CORE_VERSION, portableLayout: layout.context === undefined ? 2 : 3 }, files: declaredFiles,
@@ -181,7 +189,7 @@ export async function inspectLayoutPackage(bytes: Uint8Array): Promise<LayoutPac
   if (manifest.schemaVersion === 3) {
     if (!keys(manifest, ['schemaVersion', 'format', 'mode', 'compatibility', 'files', 'contextPath', 'contextPolicy', 'contextDigest']) || manifest.format !== 'dsh-workbench-package' || manifest.mode !== 'layout-only'
       || !record(manifest.compatibility) || !keys(manifest.compatibility, ['dsh', 'core', 'portableLayout']) || manifest.compatibility.dsh !== WORKBENCH_DSH_GENERATION
-      || ![WORKBENCH_CORE_VERSION, '0.2.2-alpha.17.1'].includes(manifest.compatibility.core as string) || ![2, 3].includes(manifest.compatibility.portableLayout as number)
+      || manifest.compatibility.core !== WORKBENCH_CORE_VERSION || ![2, 3].includes(manifest.compatibility.portableLayout as number)
       || (manifest.contextPath !== undefined && manifest.contextPath !== 'context.json')
       || (manifest.contextPolicy !== undefined && !['human', 'handoff'].includes(String(manifest.contextPolicy)))
       || (manifest.contextDigest !== undefined && (typeof manifest.contextDigest !== 'string' || !/^[A-Fa-f0-9]{64}$/u.test(manifest.contextDigest)))) throw new Error('Layout package manifest is invalid')
@@ -200,8 +208,16 @@ export async function inspectLayoutPackage(bytes: Uint8Array): Promise<LayoutPac
     if (!file) throw new Error('workbench.json is missing')
     const layout = parse(file.content)
     validatePortableLayout(layout)
+    const orchestrationFile = entries.find(entry => entry.path === 'orchestration.json')
+    if (layout.orchestration === undefined && orchestrationFile !== undefined) throw new Error('orchestration.json is undeclared')
+    if (layout.orchestration !== undefined) {
+      if (!orchestrationFile) throw new Error('orchestration.json is missing')
+      const orchestration = parse(orchestrationFile.content)
+      validatePortableBayAgentOrchestration(orchestration)
+      if (canonicalJson(orchestration) !== canonicalJson(layout.orchestration)) throw new Error('orchestration.json does not match workbench.json')
+    }
     if (manifest.compatibility.portableLayout === 2) {
-      if (entries.length !== 2 || manifest.files.length !== 1 || layout.context !== undefined || manifest.contextPath !== undefined || manifest.contextPolicy !== undefined || manifest.contextDigest !== undefined) throw new Error('Legacy layout package cannot contain Context')
+      if (entries.length !== 2 + (layout.orchestration === undefined ? 0 : 1) || manifest.files.length !== 1 + (layout.orchestration === undefined ? 0 : 1) || layout.context !== undefined || manifest.contextPath !== undefined || manifest.contextPolicy !== undefined || manifest.contextDigest !== undefined) throw new Error('Legacy layout package cannot contain Context')
     } else {
       if (entries.length < 4 || layout.context === undefined || manifest.contextPath !== 'context.json' || manifest.contextPolicy !== layout.context.policy || manifest.contextDigest === undefined) throw new Error('Context file set is incomplete')
       const contextFile = entries.find(entry => entry.path === 'context.json')
@@ -216,29 +232,22 @@ export async function inspectLayoutPackage(bytes: Uint8Array): Promise<LayoutPac
         const areaMarkdown = entries.find(entry => entry.path === 'context/areas/' + areaKey + '-区域说明.md')
         if (!areaMarkdown || new TextDecoder('utf-8', { fatal: true }).decode(areaMarkdown.content) !== renderPortableAreaContextMarkdown(context, areaKey)) throw new Error('Area Context Markdown is missing or stale: ' + areaKey)
       }
-      const expectedPaths = new Set(['manifest.json', 'workbench.json', 'context.json', 'context/工作台整体背景说明.md', ...Object.keys(context.areas).map(areaKey => `context/areas/${areaKey}-区域说明.md`)] )
+      const expectedPaths = new Set(['manifest.json', 'workbench.json', 'context.json', 'context/工作台整体背景说明.md', ...Object.keys(context.areas).map(areaKey => `context/areas/${areaKey}-区域说明.md`), ...(layout.orchestration === undefined ? [] : ['orchestration.json'])] )
       if (entries.length !== expectedPaths.size || entries.some(entry => !expectedPaths.has(entry.path))) throw new Error('Context package contains undeclared files')
     }
     return { digest, layout, warnings: layout.warnings, legacy: false }
   }
-  let document: WorkbenchDocumentV3
-  let name: string
-  let description: string
-  let tags: string[] = []
-  if (manifest.kind === 'dsh-workbench-offline') {
-    const old = await inspectWorkbenchOfflinePackage(bytes)
-    if (old.manifest.dsh.generation !== WORKBENCH_DSH_GENERATION) throw new Error('旧离线包 DSH 代际不兼容，需要迁移。')
-    document = old.layout.document; name = old.layout.name; description = old.layout.description; tags = [...old.layout.tags]
-  } else {
-    const old = await decodeWorkbenchPackageArchive(bytes)
-    if (old.manifest.compatibility.dsh.minimum !== WORKBENCH_DSH_GENERATION || (old.manifest.compatibility.dsh.maximum !== undefined && old.manifest.compatibility.dsh.maximum !== WORKBENCH_DSH_GENERATION)) throw new Error('旧工作台包 DSH 代际不兼容，需要迁移。')
-    const projection = parse(old.files.find(file => file.path === 'workbench.json')!.content) as PortableWorkbenchV1
-    document = importPortableWorkbench(projection, { editors: [] }).document; name = projection.name; description = projection.description
+  throw new Error('18.0 不支持此工作台格式，原文件未修改。请使用 18.0 完整工作台包。')
+}
+
+/** One choice per distinct source; multiple views of that source share the choice. */
+export function layoutBindingSources(layout: PortableLayoutV2) {
+  const result = new Map<string, { key: string; titles: string[] }>()
+  for (const area of areasOf(layout.document.root)) for (const page of area.moduleHistory) if (page.pendingBinding) {
+    const source = result.get(page.pendingBinding) ?? { key: page.pendingBinding, titles: [] }
+    source.titles.push(page.lastKnownTitle); result.set(source.key, source)
   }
-  const sanitized = projectLayoutPackage({ workbenchId: 'legacy', name, description, tags, createdAt: 0, updatedAt: 0, document }, [])
-  sanitized.warnings.unshift('旧格式未保存或已压缩的标签无法恢复；旧内页配置仅保留引用，内嵌插件不安装。')
-  validatePortableLayout(sanitized)
-  return { digest, layout: sanitized, warnings: sanitized.warnings, legacy: true }
+  return [...result.values()]
 }
 
 export function restoreLayoutPackage(layout: PortableLayoutV2, editors: readonly WorkbenchEditorCatalogRow[], bindings: Readonly<Record<string, SessionBindingV1>> = {}, strict = false, verifiedOnly = false): {
@@ -247,22 +256,23 @@ export function restoreLayoutPackage(layout: PortableLayoutV2, editors: readonly
   pendingPageIds: string[]
   modelPreference?: PortableWorkbenchV1['modelPreference']
   context?: ReturnType<typeof restorePortableWorkbenchContext>
+  orchestration?: PortableBayAgentOrchestrationV1
 } {
   validatePortableLayout(layout)
   const warnings: string[] = []
   const document = structuredClone(layout.document)
   const pendingPageIds: string[] = []
   const areaIds = new Map<string, string>()
-  const fresh = (kind: string) => `${kind}-${globalThis.crypto.randomUUID()}`
+  const fresh = (kind: string) => `${kind}-${browserSafeUuid()}`
   const visit = (node: WorkbenchNodeV3) => {
     if (node.kind === 'split') { node.id = fresh('split'); visit(node.first); visit(node.second); return }
     const oldAreaId = node.areaId
     node.areaId = fresh('area'); areaIds.set(oldAreaId, node.areaId)
-    const binding = bindings[oldAreaId]
-    if (binding && (binding.detached || !binding.sessionId.trim())) throw new Error('必须选择有效的本机会话。')
-    if (binding) { node.areaBinding = { ...binding }; node.areaBindingGeneration = 0 }
+    delete node.areaBinding; delete node.areaBindingGeneration
     const current = node.activeModuleInstanceId
     for (const page of node.moduleHistory) {
+      const binding = page.pendingBinding ? bindings[page.pendingBinding] : undefined
+      if (binding && (binding.detached || !binding.sessionId.trim())) throw new Error('必须为此来源组选择有效的本机对话。')
       const oldId = page.moduleInstanceId
       page.moduleInstanceId = fresh('page')
       if (oldId === current) node.activeModuleInstanceId = page.moduleInstanceId
@@ -295,7 +305,8 @@ export function restoreLayoutPackage(layout: PortableLayoutV2, editors: readonly
     }
   }
   visit(document.root)
+  for (const area of areasOf(document.root)) for (const page of area.moduleHistory) if (page.editorId === 'workbench.workspace-files') page.state = { projectAreaId: area.areaId }
   document.activeAreaId = areaIds.get(layout.document.activeAreaId)!
   if (!validateWorkbenchDocumentV3(document)) throw new Error('恢复后的布局无效。')
-  return { document, warnings, pendingPageIds, ...(layout.modelPreference === undefined ? {} : { modelPreference: structuredClone(layout.modelPreference) }), ...(layout.context === undefined ? {} : { context: restorePortableWorkbenchContext(layout.context, areaIds) }) }
+  return { document, warnings, pendingPageIds, ...(layout.modelPreference === undefined ? {} : { modelPreference: structuredClone(layout.modelPreference) }), ...(layout.context === undefined ? {} : { context: restorePortableWorkbenchContext(layout.context, areaIds) }), ...(layout.orchestration === undefined ? {} : { orchestration: structuredClone(layout.orchestration) }) }
 }

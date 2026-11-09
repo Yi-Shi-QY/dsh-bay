@@ -32,6 +32,58 @@ function makeContext(entry: object, bindingSource: () => { getSnapshot: () => ob
 describe('Workbench Area-local native sidebar adapter', () => {
   afterEach(() => cleanup())
 
+  it('remounts a native Composer scope when the retained Session generation changes', () => {
+    const rootContext = {}
+    const sessionContextA = {}
+    const sessionContextB = {}
+    const listeners = new Set<() => void>()
+    let binding = { key: 'session-a', hooks: {}, keyedHooks: {}, props: {}, ctx: sessionContextA }
+    const sessionSource = {
+      getSnapshot: () => binding,
+      subscribe: (listener: () => void) => { listeners.add(listener); return () => listeners.delete(listener) },
+    }
+    const mounts = vi.fn()
+    const unmounts = vi.fn()
+    const entry = {
+      component: () => {
+        useEffect(() => { mounts(); return unmounts }, [])
+        return <textarea aria-label="native composer" />
+      },
+      options: { id: 'native-composer' },
+    }
+    const reference = { sessionId: 'session-a' } as never
+    const context = {
+      slots: {
+        spec: (name: string) => name === 'conversation.composer.bar' ? { kind: 'single', scope: 'session-maybe' } : undefined,
+        entries: (name: string) => name === 'conversation.composer.bar' ? [entry] : [],
+        entriesOfSlot: (name: string) => name === 'conversation.composer.bar' ? [entry] : [],
+        subscribe: () => () => {},
+        getVersion: () => 0,
+        _host: {
+          root: source({ hooks: {}, keyedHooks: {}, props: {}, ctx: rootContext }),
+          scope: () => ({ current: sessionSource, bindingSource: () => sessionSource }),
+        },
+      },
+      locale: undefined,
+      resources: { source: () => source(undefined) },
+      sessions: { list: { getSnapshot: () => ({ byId: {} }) } },
+    } as never
+    const renderer = createWorkbenchNativeAreaSlotRenderer(context, 'session-a', {}, { sessionReference: reference })
+    const view = render(renderer.render('conversation.composer.bar', {}))
+
+    expect(mounts).toHaveBeenCalledTimes(1)
+    act(() => {
+      binding = { ...binding, ctx: sessionContextB }
+      listeners.forEach(listener => listener())
+    })
+
+    expect(screen.getByRole('textbox', { name: 'native composer' })).toBeTruthy()
+    expect(unmounts).toHaveBeenCalledTimes(1)
+    expect(mounts).toHaveBeenCalledTimes(2)
+    view.unmount()
+    renderer.dispose()
+  })
+
   it.each([
     'sidebar.panellist.actions',
     'conversation.session.header.views.actions',

@@ -1,3 +1,4 @@
+import { browserSafeUuid } from '../browser-safe-id.ts'
 import type { WorkbenchDocumentV3, WorkbenchNodeV3 } from './document-v3.ts'
 
 export type WorkbenchPresetNode = number | { axis: 'horizontal' | 'vertical'; ratio: number; first: WorkbenchPresetNode; second: WorkbenchPresetNode }
@@ -25,12 +26,12 @@ export function createWorkbenchPresetDocument(presetId: string, choices: readonl
   if (!preset || choices.length > preset.areas || choices.some(choice => choice !== null && (!choice || typeof choice.editorId !== 'string' || !choice.editorId.trim() || choice.editorId.length > 512 || (choice.scope !== 'root' && choice.scope !== 'session') || typeof choice.label !== 'string' || choice.label.length > 512))) return undefined
   let activeAreaId = ''
   const build = (node: WorkbenchPresetNode): WorkbenchNodeV3 => {
-    if (typeof node !== 'number') return { kind: 'split', id: 'split-' + crypto.randomUUID(), axis: node.axis, ratio: node.ratio, first: build(node.first), second: build(node.second) }
-    const areaId = 'area-' + crypto.randomUUID()
+    if (typeof node !== 'number') return { kind: 'split', id: 'split-' + browserSafeUuid(), axis: node.axis, ratio: node.ratio, first: build(node.first), second: build(node.second) }
+    const areaId = 'area-' + browserSafeUuid()
     if (!activeAreaId) activeAreaId = areaId
     const choice = choices[node]
     if (!choice) return { kind: 'area', areaId, moduleHistory: [] }
-    const moduleInstanceId = 'module-' + crypto.randomUUID()
+    const moduleInstanceId = 'module-' + browserSafeUuid()
     return { kind: 'area', areaId, activeModuleInstanceId: moduleInstanceId, moduleHistory: [{ moduleInstanceId, editorId: choice.editorId, editorScope: choice.scope, lastKnownTitle: choice.label, state: {}, ...(choice.scope === 'session' ? { pendingBinding: 'binding-' + (node + 1) } : {}) }] }
   }
   const root = build(preset.root)

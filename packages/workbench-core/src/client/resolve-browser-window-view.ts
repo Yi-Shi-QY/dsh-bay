@@ -3,11 +3,15 @@ import type { ClientConnectionRpc, ConnectionRpcResult } from '@deepseek-ai/dsh-
 import type { WorkbenchWindowViewV1 } from './workbench-window-view.ts'
 import { WORKBENCH_WINDOW_RPC_CHANNEL, workbenchWindowRpcEndpoint } from '../workbench-window-rpc.ts'
 import type { FloatingHandoffV1 } from '../floating-handoff.ts'
+import { isWorkbenchShareGuestPage } from './workbench-share-guest.ts'
+import { browserSafeUuid } from '../browser-safe-id.ts'
 
 const STORAGE_KEY = 'dsh-workbench.browser-view.v1'
 const RPC_TIMEOUT_MS = 8_000
 const HEARTBEAT_INTERVAL_MS = 15_000
 const RPC_READY_WAIT_MS = 10_000
+const PAGE_ID = browserSafeUuid()
+const proof = (view: WorkbenchWindowViewV1) => ({ windowId: view.windowId, closeToken: view.closeToken, pageId: PAGE_ID })
 
 export type BrowserWorkbenchViewResolutionV1 =
   | { readonly status: 'none' }
@@ -76,7 +80,10 @@ async function verifyStoredView(rpc: ClientConnectionRpc | undefined, view: Work
   if (rpc === undefined) { forgetView(); return undefined }
   try {
     const result = await call(rpc, 'status', { windowId: view.windowId }) as { status?: unknown }
-    if (result.status === 'ready' || result.status === 'reclaim-requested') return view
+    if (result.status === 'ready' || result.status === 'redeemed' || result.status === 'reclaim-requested') {
+      if (!isWorkbenchShareGuestPage()) await call(rpc, 'attach', { closeToken: view.closeToken, pageId: PAGE_ID })
+      return view
+    }
   } catch { /* a stale browser page must not regain control without Host confirmation */ }
   forgetView()
   return undefined
@@ -129,6 +136,7 @@ export async function resolveBrowserWorkbenchView(ctx: ClientContext): Promise<B
     const result = await call(rpc, 'redeem', { ticket }) as { status?: unknown; view?: unknown }
     const view = result.status === 'redeemed' ? validate(result.view) : undefined
     if (view !== undefined) {
+      await call(rpc, 'attach', { closeToken: view.closeToken, pageId: PAGE_ID })
       // Consume the one-time query only after Host redemption succeeds.
       // A connection timeout must leave the page recoverable with its ticket.
       window.history.replaceState(null, '', window.location.pathname)
@@ -146,14 +154,19 @@ export async function reportBrowserWorkbenchReady(ctx: ClientContext, view: Work
   try {
     const current = await call(rpc, 'status', { windowId: view.windowId }) as { status?: unknown }
     if (current.status === 'ready' || current.status === 'reclaim-requested') return true
-    await call(rpc, 'ready', { windowId: view.windowId })
+    await call(rpc, 'ready', proof(view))
     return true
   }
   catch {
-    try { await call(rpc, 'failed', { windowId: view.windowId, code: 'browser-view-runtime-failed' }) }
+    try { await call(rpc, 'failed', { ...proof(view), code: 'browser-view-runtime-failed' }) }
     catch { /* the DSH Connection lifecycle reports Host availability independently */ }
     return false
   }
+}
+
+export async function reportBrowserWorkbenchFailed(ctx: ClientContext, view: WorkbenchWindowViewV1, code: string): Promise<void> {
+  const rpc = rpcFor(ctx)
+  if (rpc) { try { await call(rpc, 'failed', { ...proof(view), code }) } catch { /* Host expiry remains the fallback. */ } }
 }
 
 /** Request reclaim from the browser view using its own Host-issued window identity. */
@@ -217,7 +230,7 @@ export function startBrowserWorkbenchHeartbeat(
     if (stopped) return
     if (pending) { wakeAfterPending = true; return }
     pending = true
-    void call(rpc, 'heartbeat', { windowId: view.windowId })
+    void call(rpc, 'heartbeat', proof(view))
       .then(async result => {
         const status = typeof result === 'object' && result !== null ? (result as { status?: unknown }).status : undefined
         if (status === 'reclaim-requested') {
@@ -255,7 +268,7 @@ export function reportBrowserWorkbenchClosed(ctx: ClientContext, view: Workbench
   try {
     let floating: FloatingHandoffV1 | undefined
     try { floating = floatingSnapshot?.() } catch { /* Preserve the source copy when a busy tab cannot transfer. */ }
-    const payload = new Blob([JSON.stringify({ closeToken: view.closeToken, ...(floating ? { floating } : {}) })], { type: 'text/plain;charset=UTF-8' })
+    const payload = new Blob([JSON.stringify({ action: 'suspend', closeToken: view.closeToken, pageId: PAGE_ID, ...(floating ? { floating } : {}) })], { type: 'text/plain;charset=UTF-8' })
     navigator.sendBeacon('/api/workbench-window-close', payload)
   } catch { /* page teardown must never affect DSH or Workbench state */ }
 }

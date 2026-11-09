@@ -36,14 +36,13 @@ export function waitForSessionBinding(
 }
 
 interface SessionCreationServices {
-  create(workspaceId: string, options?: { agentPreset?: string }): Promise<string>
+  create(workspaceId: string, options?: { agentPreset?: string; requestId?: string; workbenchId?: string; areaId?: string }): Promise<string>
 }
 
 /** Return an Area placement target from the Host's exact create result. */
 export function createAreaSessionCreator(services: SessionCreationServices): ConversationAreaServices['createWorkspaceSession'] {
   return async (workspaceId, options) => {
-    const sessionId = await services.create(workspaceId,
-      options.agentPreset === undefined ? undefined : { agentPreset: options.agentPreset })
+    const sessionId = await services.create(workspaceId, { ...(options.agentPreset === undefined ? {} : { agentPreset: options.agentPreset }), requestId: options.requestId, ...(options as { workbenchId?: string; areaId?: string }) })
     return { target: { sessionId, workspaceId }, reusedBlank: false }
   }
 }

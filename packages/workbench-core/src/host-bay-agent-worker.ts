@@ -1,11 +1,16 @@
 import type { SessionController } from '@deepseek-ai/dsh-api-session-controller'
-import type { BayAgentAssignmentV1, BayAgentWorkerRuntimeEventV1, BayAgentWorkerRuntimeV1, BayAgentWorkItemV1 } from './foundation/workbench-bay-agent-work.ts'
+import { randomUUID } from 'node:crypto'
+import type { BayAgentAssignmentV1, BayAgentWorkerRuntimeEventEnvelopeV1, BayAgentWorkerRuntimeEventV1, BayAgentWorkerRuntimeV1, BayAgentWorkItemV1 } from './foundation/workbench-bay-agent-work.ts'
 import { WorkbenchBayAgentAdapter } from './foundation/workbench-bay-agent-adapter.ts'
 import type { WorkbenchControlPlane } from './foundation/workbench-control-plane.ts'
 
 export class NativeBayWorkerRuntime implements BayAgentWorkerRuntimeV1 {
   readonly name = 'dsh-session-controller'
+  readonly capabilities = { dispatch: true, reuseSession: true, observe: true, pause: true, resume: true, migrateSession: false, eventEnvelope: 1 as const }
   private readonly listeners = new Set<(event: BayAgentWorkerRuntimeEventV1) => void>()
+  private readonly envelopeListeners = new Set<(envelope: BayAgentWorkerRuntimeEventEnvelopeV1) => void>()
+  private readonly runtimeEpoch = randomUUID()
+  private sequence = 0
   private readonly workers = new Map<string, { workItem: BayAgentWorkItemV1; assignment: BayAgentAssignmentV1; controller: AbortController }>()
   constructor(private readonly options: {
     sessions: SessionController
@@ -14,17 +19,47 @@ export class NativeBayWorkerRuntime implements BayAgentWorkerRuntimeV1 {
     deliver: (sessionId: string, requestId: string, text: string, authorize?: () => void) => Promise<void>
   }) {}
   subscribe(listener: (event: BayAgentWorkerRuntimeEventV1) => void) { this.listeners.add(listener); return () => { this.listeners.delete(listener) } }
-  async report(event: BayAgentWorkerRuntimeEventV1): Promise<void> { await Promise.all([...this.listeners].map(listener => listener(event))) }
+  subscribeEnvelope(listener: (envelope: BayAgentWorkerRuntimeEventEnvelopeV1) => void) { this.envelopeListeners.add(listener); return () => { this.envelopeListeners.delete(listener) } }
+  async report(event: BayAgentWorkerRuntimeEventV1): Promise<void> {
+    const worker = this.workers.get(event.runtimeAssignmentId), assignment = worker?.assignment
+    const envelope: BayAgentWorkerRuntimeEventEnvelopeV1 = { schemaVersion: 1, eventId: `${this.runtimeEpoch}:${++this.sequence}`, emittedAt: Date.now(), runtimeName: this.name, runtimeAssignmentId: event.runtimeAssignmentId,
+      ...(worker ? { workbenchId: worker.workItem.workbenchId, workItemId: worker.workItem.workItemId, ...(assignment?.assignmentId ? { assignmentId: assignment.assignmentId } : {}), ...(assignment?.workerSessionId ? { sessionId: assignment.workerSessionId } : {}) } : {}), runtimeEpoch: this.runtimeEpoch, sequence: this.sequence, event }
+    await Promise.all([...this.listeners].map(listener => listener(event)))
+    await Promise.all([...this.envelopeListeners].map(listener => listener(envelope)))
+  }
   async createAssignment(input: Parameters<BayAgentWorkerRuntimeV1['createAssignment']>[0]) {
     if (!input.assignment) throw new Error('Bay Assignment identity required')
     const { workItem: item, assignment } = input
-    const area = this.options.plane.inspect(item.workbenchId).areas.find(row => row.areaId === item.areaId)
-    const workspaceId = item.workspaceId ?? area?.binding?.workspaceId ?? area?.modules.find(row => row.binding?.workspaceId)?.binding?.workspaceId
+    const snapshot = this.options.plane.inspect(item.workbenchId)
+    const area = snapshot.areas.find(row => row.areaId === item.areaId)
+    const workspaceId = area?.project?.workspaceId ?? item.workspaceId ?? area?.binding?.workspaceId ?? area?.modules.find(row => row.binding?.workspaceId)?.binding?.workspaceId
     if (!workspaceId) throw new Error('请先为任务选择一个项目（Workspace）。')
-    let created = await this.options.plane.createSession({ workbenchId: item.workbenchId, areaId: item.areaId, workspaceId, agentPreset: item.agentPreset ?? 'standard', requestId: assignment.assignmentId, append: true })
-    for (let attempt = 0; created.status === 'conflict' && attempt < 3; attempt++) created = await this.options.plane.createSession({ workbenchId: item.workbenchId, areaId: item.areaId, workspaceId, agentPreset: item.agentPreset ?? 'standard', requestId: assignment.assignmentId, append: true })
-    if (created.status !== 'committed') throw new Error('Worker 内页创建失败：' + JSON.stringify(created))
-    const { target, moduleInstanceId } = created.value
+    const previous = input.previousAssignment
+    const priorPage = previous?.workerSessionId ? snapshot.areas.flatMap(row => row.modules).find(row => row.binding?.sessionId === previous.workerSessionId && row.binding?.workspaceId === workspaceId) : undefined
+    const priorSession = snapshot.sessions?.find(row => row.sessionId === previous?.workerSessionId && row.areaId === item.areaId && row.workspaceId === workspaceId && row.agentPreset === (item.agentPreset ?? 'standard'))
+    const priorTarget = priorSession ? { sessionId: priorSession.sessionId, workspaceId } : snapshot.sessions === undefined ? priorPage?.binding : undefined
+    let reused: { target: { sessionId: string; workspaceId?: string }; moduleInstanceId: string } | undefined
+    if (priorTarget) {
+      const resolved = await this.options.sessions.resolveAgent(priorTarget.sessionId as never)
+      if (!('error' in resolved)) {
+        const state = await this.options.sessions.state({ sessionId: priorTarget.sessionId as never }, new AbortController().signal)
+        if (state.running || state.queue?.length) throw new Error('原任务对话仍在执行，请等待当前轮次结束后继续。')
+        if (priorPage) reused = { target: priorTarget, moduleInstanceId: priorPage.moduleInstanceId }
+        else {
+          const opened = await this.options.plane.openSessionView({ workbenchId: item.workbenchId, areaId: item.areaId, target: priorTarget, title: item.objective })
+          if (opened.status !== 'committed') throw new Error('无法重新打开任务对话，请重试。')
+          reused = opened.value
+        }
+      } else if (resolved.error.code !== 'session/not-found') throw resolved.error
+    }
+    if (!reused) {
+      const request = { workbenchId: item.workbenchId, areaId: item.areaId, workspaceId, agentPreset: item.agentPreset ?? 'standard', title: item.objective, requestId: assignment.assignmentId, append: true }
+      let created = await this.options.plane.createSession(request)
+      for (let attempt = 0; created.status === 'conflict' && attempt < 3; attempt++) created = await this.options.plane.createSession(request)
+      if (created.status !== 'committed') throw new Error('Worker 内页创建失败：' + JSON.stringify(created))
+      reused = created.value
+    }
+    const { target, moduleInstanceId } = reused
     const lease = { ...new WorkbenchBayAgentAdapter(this.options.plane).captureExecutionLease({ workbenchId: item.workbenchId, areaId: item.areaId }), moduleInstanceId, sessionId: target.sessionId }
     const result = { runtimeAssignmentId: assignment.assignmentId, sessionId: target.sessionId, moduleInstanceId, lease }
     await input.onPrepared?.(result)
@@ -32,11 +67,10 @@ export class NativeBayWorkerRuntime implements BayAgentWorkerRuntimeV1 {
     try {
       await this.options.decorate(target.sessionId, item, prepared)
       await this.options.deliver(target.sessionId, 'assignment:' + assignment.assignmentId, '执行以下 Bay Agent 任务。完成、受阻或需要输入时调用 bay_report；不要把空闲状态当成完成。\n' + input.prompt, () => {
-        const current = this.options.plane.inspect(item.workbenchId).areas.find(row => row.areaId === item.areaId)
-        if (!current || current.archived || !current.modules.some(row => row.moduleInstanceId === moduleInstanceId && row.binding?.sessionId === target.sessionId)) throw new Error('Worker target changed before dispatch')
+        this.assertTarget(item, prepared)
       })
-      await this.report({ type: 'assignment.started', runtimeAssignmentId: assignment.assignmentId, sessionId: target.sessionId })
       await this.observeAssignment({ workItem: item, assignment: prepared })
+      await this.report({ type: 'assignment.started', runtimeAssignmentId: assignment.assignmentId, sessionId: target.sessionId })
     } catch (error) {
       this.options.sessions.cancel({ sessionId: target.sessionId as never })
       this.finish(assignment.assignmentId)
@@ -63,8 +97,7 @@ export class NativeBayWorkerRuntime implements BayAgentWorkerRuntimeV1 {
       const worker = this.workers.get(id)
       if (!worker) return
       try {
-        const area = this.options.plane.inspect(worker.workItem.workbenchId).areas.find(row => row.areaId === worker.workItem.areaId)
-        if (!area || area.archived || !area.modules.some(row => row.moduleInstanceId === worker.assignment.moduleInstanceId && row.binding?.sessionId === sessionId)) throw new Error('Worker target changed')
+        this.assertTarget(worker.workItem, worker.assignment)
       } catch {
         await this.cancelAssignment({ runtimeAssignmentId: id })
         await this.report({ type: 'assignment.interrupted', runtimeAssignmentId: id })
@@ -83,6 +116,11 @@ export class NativeBayWorkerRuntime implements BayAgentWorkerRuntimeV1 {
         return
       }
     }
+  }
+  private assertTarget(item: BayAgentWorkItemV1, assignment: BayAgentAssignmentV1) {
+    const snapshot = this.options.plane.inspect(item.workbenchId), area = snapshot.areas.find(row => row.areaId === item.areaId)
+    if (!area || area.archived || assignment.lease?.projectGeneration !== area.project?.generation) throw new Error('Worker project changed')
+    if (snapshot.sessions !== undefined && !snapshot.sessions.some(row => row.sessionId === assignment.workerSessionId && row.areaId === item.areaId && row.workspaceId === area.project?.workspaceId)) throw new Error('Worker conversation ownership changed')
   }
   finish(id: string) { this.workers.get(id)?.controller.abort(); this.workers.delete(id) }
   async cancelWorkbench(workbenchId: string) { for (const [id, row] of this.workers) if (row.workItem.workbenchId === workbenchId) await this.cancelAssignment({ runtimeAssignmentId: id }) }

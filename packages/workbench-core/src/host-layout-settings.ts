@@ -58,6 +58,7 @@ const WorkbenchSettingsV4Schema = z.object({
   // The client decoder performs strict normalization; the host keeps this
   // field open so older profiles can be read and upgraded atomically.
   interactionPolicy: z.any().default({}),
+  backgroundAi: z.any().default({}),
   extensionConsents: z.dict(z.object({
     packageName: z.string(), moduleId: z.string(), apiVersion: z.const(1),
     editorIds: z.array(z.string()).max(32).default([]),

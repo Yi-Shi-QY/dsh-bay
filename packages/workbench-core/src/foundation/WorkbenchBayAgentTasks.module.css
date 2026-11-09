@@ -16,3 +16,4 @@
 .tasks button:disabled { opacity: .45; cursor: default; }
 .fields { margin-top: 8px; }
 .error { color: #b84242; }
+.warning { color: var(--dsw-alias-label-warning, #8a6500); }

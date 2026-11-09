@@ -171,4 +171,69 @@ describe('Bay Agent Work Item and Worker Runtime', () => {
     await controller.recoverWorkItem(item.workItemId)
     expect(controller.getSnapshot().workItems[0]?.status).toBe('running')
   })
+
+  it('records an idempotent orchestration ledger, exposes a projection and rebuilds it after restart', async () => {
+    const states = new Map<string, import('../src/foundation/workbench-bay-agent-work.ts').BayAgentWorkStateV1>()
+    const listeners = new Set<(event: import('../src/foundation/workbench-bay-agent-work.ts').BayAgentWorkerRuntimeEventV1) => void>()
+    let next = 0
+    const runtime: BayAgentWorkerRuntimeV1 = {
+      name: 'ledger-runtime',
+      async createAssignment() { return { runtimeAssignmentId: `ledger-${++next}` } },
+      async cancelAssignment() {},
+      async retryAssignment() { return { runtimeAssignmentId: `ledger-${++next}` } },
+      async recoverAssignment() { return { runtimeAssignmentId: `ledger-${++next}` } },
+      subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener) },
+    }
+    const options = { workbenchId: 'wb', adapter: adapter(), inspect: () => snapshot, runtime, createId: kind => `${kind}-${++next}`, loadWorkState: (id: string) => states.get(id), persistWorkState: async (id: string, state: import('../src/foundation/workbench-bay-agent-work.ts').BayAgentWorkStateV1) => { states.set(id, structuredClone(state)) } }
+    const controller = new BayAgentController(options)
+    const item = await controller.createWorkItem({ areaId: 'area-a', objective: 'ledger', start: true })
+    const assignment = controller.getSnapshot().assignments[0]!
+    const send = (event: import('../src/foundation/workbench-bay-agent-work.ts').BayAgentWorkerRuntimeEventV1) => Promise.all([...listeners].map(listener => listener(event)))
+    await send({ type: 'assignment.started', runtimeAssignmentId: assignment.runtimeAssignmentId! })
+    await send({ type: 'assignment.progress', runtimeAssignmentId: assignment.runtimeAssignmentId!, summary: 'working' })
+    await send({ type: 'assignment.progress', runtimeAssignmentId: assignment.runtimeAssignmentId!, summary: 'working' })
+    await send({ type: 'assignment.report', runtimeAssignmentId: assignment.runtimeAssignmentId!, state: 'ready', summary: 'verified' })
+    const projection = controller.getOrchestrationProjection()
+    expect(projection.currentEventSeq).toBeGreaterThan(0)
+    expect(projection.recentReports[0]).toMatchObject({ assignmentId: assignment.assignmentId, state: 'ready', summary: 'verified' })
+    expect(controller.listOrchestrationEvents({ assignmentId: assignment.assignmentId, limit: 100 }).filter(event => event.kind === 'assignment.progress' && event.payload.summary === 'working')).toHaveLength(1)
+    const savedSeq = projection.currentEventSeq
+    controller.dispose()
+    const restored = new BayAgentController(options)
+    expect(restored.getOrchestrationProjection().currentEventSeq).toBe(savedSeq)
+    expect(restored.listOrchestrationEvents({ workItemId: item.workItemId, afterSeq: savedSeq - 1, limit: 2 })).toHaveLength(1)
+    restored.dispose()
+  })
+
+  it('compacts long ledgers and exposes the checkpoint boundary', async () => {
+    const controller = new BayAgentController({ workbenchId: 'wb', inspect: () => snapshot, adapter: adapter(), runtime: createBayAgentInMemoryWorkerRuntime({ autoComplete: false }), persistWorkState: async () => {} })
+    for (let index = 0; index < 513; index++) await controller.createWorkItem({ areaId: 'area-a', objective: `item-${index}` })
+    const projection = controller.getOrchestrationProjection()
+    expect(projection.currentEventSeq).toBe(513)
+    expect(projection.compactedThroughSeq).toBeGreaterThan(0)
+    expect(projection.checkpoint?.retainedEventCount).toBe(128)
+    expect(controller.listOrchestrationEvents({ limit: 100 })).toHaveLength(100)
+    controller.dispose()
+  })
+
+  it('accepts formal Runtime envelopes and deduplicates by envelope eventId', async () => {
+    let receive!: (envelope: import('../src/foundation/workbench-bay-agent-work.ts').BayAgentWorkerRuntimeEventEnvelopeV1) => Promise<void>
+    const runtime: BayAgentWorkerRuntimeV1 = {
+      name: 'envelope-runtime',
+      async createAssignment() { return { runtimeAssignmentId: 'runtime-1' } },
+      async cancelAssignment() {},
+      async retryAssignment() { return { runtimeAssignmentId: 'runtime-2' } },
+      async recoverAssignment() { return { runtimeAssignmentId: 'runtime-3' } },
+      subscribe() { return () => {} },
+      subscribeEnvelope(listener) { receive = listener as typeof receive; return () => {} },
+    }
+    const controller = new BayAgentController({ workbenchId: 'wb', inspect: () => snapshot, adapter: adapter(), runtime })
+    const item = await controller.createWorkItem({ areaId: 'area-a', objective: 'envelope', start: true })
+    const envelope = { schemaVersion: 1 as const, eventId: 'envelope-1', emittedAt: 42, runtimeName: 'envelope-runtime', runtimeAssignmentId: 'runtime-1', event: { type: 'assignment.report' as const, runtimeAssignmentId: 'runtime-1', state: 'ready' as const, summary: 'verified' } }
+    await receive(envelope); await receive(envelope)
+    const reports = controller.listOrchestrationEvents({ workItemId: item.workItemId, limit: 100 }).filter(event => event.kind === 'assignment.report')
+    expect(reports).toHaveLength(1)
+    expect(reports[0]?.payload).toMatchObject({ runtimeEventId: 'envelope-1', runtimeName: 'envelope-runtime', emittedAt: 42 })
+    controller.dispose()
+  })
 })

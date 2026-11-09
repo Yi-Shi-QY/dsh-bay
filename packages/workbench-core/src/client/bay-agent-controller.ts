@@ -1,10 +1,11 @@
 import { BAY_AGENT_ROUTE } from '../bay-agent-contract.ts'
+import { workbenchFetch } from './workbench-access.ts'
 import type { BayAgentControllerSnapshotV1, BayAgentControllerV1, BayAgentWorkerRuntimeV1 } from '../foundation/workbench-bay-agent-work.ts'
 
 /** Browser owns presentation only; Host owns lifecycle, delivery and persistence. */
-export function createRemoteBayAgentController(initialWorkbenchId: string, fetcher: typeof fetch = fetch, refreshSessions?: () => Promise<unknown>): BayAgentControllerV1 & { dispose(): void } {
+export function createRemoteBayAgentController(initialWorkbenchId: string, fetcher: typeof fetch = workbenchFetch, refreshSessions?: () => Promise<unknown>): BayAgentControllerV1 & { dispose(): void } {
   let workbenchId = initialWorkbenchId, disposed = false, sequence = 0, applied = 0
-  const empty = (id: string): BayAgentControllerSnapshotV1 => ({ workbenchId: id, areas: [], workItems: [], assignments: [], attention: [] })
+  const empty = (id: string): BayAgentControllerSnapshotV1 => ({ workbenchId: id, areas: [], workItems: [], assignments: [], attention: [], orchestration: { workbenchId: id, currentEventSeq: 0, activeWorkItems: [], activeAssignments: [], openAttention: [], recentReports: [], recentBlockers: [], recentDecisions: [], recentEvents: [] } })
   let snapshot = empty(workbenchId)
   const listeners = new Set<() => void>(), ensures = new Map<string, Promise<string | undefined>>()
   const notify = () => { for (const listener of listeners) listener() }

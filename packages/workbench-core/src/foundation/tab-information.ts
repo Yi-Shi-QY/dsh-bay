@@ -59,7 +59,7 @@ export function buildWorkbenchTabInformation(input: {
   const state = record(tab.state)
   const address = text(state?.resourceAddress)
   const pending = tab.pendingBinding !== undefined
-  const binding = pending ? undefined : tab.binding ?? (tab.sessionId ? { sessionId: tab.sessionId } : tab.editorScope === 'session' ? input.areaBinding : undefined)
+  const binding = pending ? undefined : tab.binding ?? (tab.sessionId ? { sessionId: tab.sessionId } : undefined)
   const resourceSession = !pending && address ? workbenchResourceSessionId(address) : undefined
   const sessionId = resourceSession ?? binding?.sessionId
   const session = sessionId ? facts?.sessions[sessionId] : undefined

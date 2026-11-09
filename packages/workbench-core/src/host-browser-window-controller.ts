@@ -11,6 +11,11 @@ import { createWorkbenchShareSessionManager } from './host-workbench-share-sessi
 import { createWorkbenchShareGateway, type WorkbenchShareGatewayV1 } from './host-workbench-share-gateway.ts'
 import { createWorkbenchSharePresenceBroker } from './host-workbench-share-presence.ts'
 import { decodeFloatingHandoff, type FloatingHandoffV1 } from './floating-handoff.ts'
+import { WORKBENCH_ACCESS_SERVICE, parseWorkbenchGrant } from './workbench-access-contract.ts'
+import type { HostWorkbenchAccess } from './host-workbench-access.ts'
+import { WORKBENCH_NATIVE_SERVICE } from './host-workbench-native-service.ts'
+import type { createGuestNativeTransport } from './host-workbench-native-access.ts'
+import { createWorkbenchOwnerGateway } from './host-workbench-owner-gateway.ts'
 
 const TICKET_TTL_MS = 2 * 60_000
 const TERMINAL_TTL_MS = 5 * 60_000
@@ -49,6 +54,8 @@ interface ViewRecord {
   shared?: boolean
   floating?: FloatingHandoffV1
   floatingReturned?: boolean
+  pageId?: string
+  suspendedUntil?: number
 }
 
 function isLoopback(hostname: string): boolean {
@@ -113,6 +120,8 @@ export interface HostBrowserWindowControllerOptionsV1 {
   readonly lookupWorkbench: (workbenchId: string) => boolean
   readonly openExternalBrowser?: ((url: string) => boolean | Promise<boolean>) | undefined
   readonly now?: () => number
+  readonly access?: HostWorkbenchAccess
+  readonly prepareOwnerUrl?: (view: { windowId: string; workbenchId: string; url: string; expiresAt: number }) => Promise<string>
 }
 
 /**
@@ -129,6 +138,7 @@ export function createHostBrowserWindowController(options: HostBrowserWindowCont
   let disposed = false
 
   const expire = (view: ViewRecord) => {
+    if (!['prepared', 'requested', 'redeemed'].includes(view.status)) return
     if (view.status === 'prepared' || view.status === 'requested' || view.status === 'redeemed') {
       view.status = 'expired'
       view.updatedAt = now()
@@ -138,16 +148,21 @@ export function createHostBrowserWindowController(options: HostBrowserWindowCont
       delete view.closeTokenHash
     }
     if (activeByWorkbenchId.get(view.workbenchId) === view.windowId) activeByWorkbenchId.delete(view.workbenchId)
+    options.access?.revoke(view.windowId)
     runtimeMetricsByWindow.delete(view.windowId)
   }
 
   const releaseActive = (view: ViewRecord) => {
     if (activeByWorkbenchId.get(view.workbenchId) === view.windowId) activeByWorkbenchId.delete(view.workbenchId)
+    options.access?.revoke(view.windowId)
   }
 
   const prune = () => {
     const at = now()
     for (const view of views.values()) {
+      if (view.suspendedUntil !== undefined && at >= view.suspendedUntil) {
+        delete view.suspendedUntil; view.status = 'closed'; view.updatedAt = at; releaseActive(view)
+      }
       if (at >= view.expiresAt) expire(view)
       if ((view.status === 'ready' || view.status === 'reclaim-requested')
         && at - view.updatedAt >= BROWSER_HEARTBEAT_TTL_MS) {
@@ -157,6 +172,7 @@ export function createHostBrowserWindowController(options: HostBrowserWindowCont
           ? 'browser-view-reclaim-timeout'
           : 'browser-view-heartbeat-timeout'
         view.updatedAt = at
+        releaseActive(view)
       }
       const lostView = view.status === 'failed' && view.failureCode === 'browser-view-heartbeat-timeout'
       if ((view.status === 'closed' || view.status === 'reclaimed' || view.status === 'expired'
@@ -182,7 +198,7 @@ export function createHostBrowserWindowController(options: HostBrowserWindowCont
     }
   }
 
-  const prepare = (payload: unknown, shared = false): ConnectionRpcHandlerResult => {
+  const prepare = async (payload: unknown, shared = false): Promise<ConnectionRpcHandlerResult> => {
     const body = record(payload)
     if (body === undefined || Object.keys(body).some(key => key !== 'workbenchId') || !validWorkbenchId(body.workbenchId)) {
       return fail('invalid-workbench-id')
@@ -226,13 +242,19 @@ export function createHostBrowserWindowController(options: HostBrowserWindowCont
     view.browserUrl = url.href
     views.set(view.windowId, view)
     if (!shared) activeByWorkbenchId.set(view.workbenchId, view.windowId)
+    if (!shared) options.access?.registerOwner(view.windowId, view.workbenchId, () => { prune(); return activeByWorkbenchId.get(view.workbenchId) === view.windowId && ['prepared', 'requested', 'redeemed', 'ready', 'reclaim-requested'].includes(view.status) }, undefined, () => false)
     tickets.set(hash, view)
-    return ok({ status: 'prepared', windowId: view.windowId, url: url.href, expiresAt: view.expiresAt, shared })
+    if (!shared && options.prepareOwnerUrl) {
+      try { view.browserUrl = await options.prepareOwnerUrl({ windowId: view.windowId, workbenchId: view.workbenchId, url: url.href, expiresAt: view.expiresAt }) }
+      catch { view.status = 'failed'; view.failureCode = 'browser-scoped-transport-unavailable'; releaseActive(view); return fail(view.failureCode) }
+    }
+    return ok({ status: 'prepared', windowId: view.windowId, url: view.browserUrl, expiresAt: view.expiresAt, shared })
   }
 
   const handle = async (endpoint: string, payload: unknown): Promise<ConnectionRpcHandlerResult> => {
     if (disposed) return fail('browser-view-controller-disposed')
     const body = record(payload)
+    prune()
     if (endpoint === 'prepare') return prepare(payload)
     if (endpoint === 'prepare-shared') return prepare(payload, true)
     if (body === undefined) return fail('invalid-request')
@@ -273,12 +295,32 @@ export function createHostBrowserWindowController(options: HostBrowserWindowCont
       const closeToken = randomBytes(32).toString('base64url')
       view.closeTokenHash = ticketDigest(closeToken)
       closeTokens.set(view.closeTokenHash, view)
+      if (!view.shared) options.access?.registerOwner(view.windowId, view.workbenchId, () => { prune(); return activeByWorkbenchId.get(view.workbenchId) === view.windowId && ['redeemed', 'ready', 'reclaim-requested'].includes(view.status) }, closeToken, capability => view.suspendedUntil === undefined && (view.status === 'ready' || view.status === 'reclaim-requested' && capability === 'layout'))
       // The close token is intentionally not derived from the redeem ticket.
       // It is returned only once, after the one-time ticket has been consumed.
       return ok({ status: 'redeemed', view: {
         schemaVersion: 1, windowId: view.windowId, workbenchId: view.workbenchId, mode: 'browser-workbench',
         closeToken,
       } })
+    }
+
+    if (endpoint === 'attach' || endpoint === 'suspend') {
+      if (typeof body.closeToken !== 'string' || typeof body.pageId !== 'string' || !/^[A-Za-z0-9-]{36}$/u.test(body.pageId)) return fail('invalid-view-proof')
+      const view = closeTokens.get(ticketDigest(body.closeToken))
+      if (!view || !['redeemed', 'ready', 'reclaim-requested'].includes(view.status) || activeByWorkbenchId.get(view.workbenchId) !== view.windowId) return fail('browser-view-not-authorized')
+      if (endpoint === 'attach') {
+        if (view.pageId && view.pageId !== body.pageId && view.suspendedUntil === undefined) return fail('browser-view-already-attached')
+        view.pageId = body.pageId; delete view.suspendedUntil; view.updatedAt = now()
+      } else {
+        if (view.pageId !== body.pageId) return fail('browser-view-not-authorized')
+        view.suspendedUntil = now() + 10_000
+        if (body.floating !== undefined) {
+          const floating = decodeFloatingHandoff(body.floating)
+          if (!floating) return fail('invalid-floating-handoff')
+          view.floating = floating; view.floatingReturned = true
+        }
+      }
+      return ok({ status: view.status })
     }
 
     if (endpoint === 'launch') {
@@ -293,18 +335,24 @@ export function createHostBrowserWindowController(options: HostBrowserWindowCont
     }
 
     if (endpoint === 'reclaim') {
-      if (Object.keys(body).some(key => key !== 'windowId') || typeof body.windowId !== 'string'
+      if (Object.keys(body).some(key => !['windowId', 'force'].includes(key)) || typeof body.windowId !== 'string'
         || !/^[A-Za-z0-9-]{36}$/u.test(body.windowId)) return fail('invalid-window-id')
       const view = views.get(body.windowId)
       if (view === undefined) return fail('browser-view-not-found')
       if (view.shared === true) return fail('browser-view-reclaim-not-allowed')
       const at = now()
+      if (body.force === true) {
+        releaseActive(view)
+        view.status = 'reclaimed'; view.updatedAt = at
+        delete view.failureCode
+        return ok({ status: view.status })
+      }
       if (view.status === 'ready' && at - view.updatedAt >= BROWSER_HEARTBEAT_TTL_MS) {
         view.status = 'failed'
         view.failureCode = 'browser-view-heartbeat-timeout'
         view.updatedAt = at
       }
-      if (view.status === 'failed' && view.failureCode === 'browser-view-heartbeat-timeout') {
+      if (view.status === 'failed' && (view.failureCode === 'browser-view-heartbeat-timeout' || view.failureCode === 'browser-view-reclaim-timeout')) {
         view.status = 'reclaimed'
         view.updatedAt = at
         releaseActive(view)
@@ -313,10 +361,6 @@ export function createHostBrowserWindowController(options: HostBrowserWindowCont
         if (view.closeTokenHash !== undefined) closeTokens.delete(view.closeTokenHash)
         delete view.closeTokenHash
         return ok({ status: view.status })
-      }
-      if (view.status === 'failed' && view.failureCode === 'browser-view-reclaim-timeout') {
-        view.status = 'reclaim-requested'
-        delete view.failureCode
       }
       if (view.status !== 'ready' && view.status !== 'reclaim-requested') return fail('browser-view-not-ready')
       view.status = 'reclaim-requested'
@@ -391,11 +435,13 @@ export function createHostBrowserWindowController(options: HostBrowserWindowCont
     }
 
     if (endpoint === 'opened' || endpoint === 'ready' || endpoint === 'heartbeat' || endpoint === 'failed' || endpoint === 'status') {
-      const allowedKeys = ['windowId', 'code']
+      const allowedKeys = ['windowId', 'code', 'closeToken', 'pageId']
       if (Object.keys(body).some(key => !allowedKeys.includes(key))
         || typeof body.windowId !== 'string' || !/^[A-Za-z0-9-]{36}$/u.test(body.windowId)) return fail('invalid-window-id')
       const view = views.get(body.windowId)
       if (view === undefined) return fail('browser-view-not-found')
+      if (options.access && !view.shared && ['ready', 'heartbeat', 'failed'].includes(endpoint)
+        && (typeof body.closeToken !== 'string' || ticketDigest(body.closeToken) !== view.closeTokenHash || view.pageId !== body.pageId)) return fail('browser-view-not-authorized')
       if (now() >= view.expiresAt && view.status !== 'ready' && view.status !== 'reclaim-requested'
         && view.status !== 'reclaimed' && view.status !== 'closed' && view.status !== 'failed') expire(view)
       const at = now()
@@ -430,13 +476,7 @@ export function createHostBrowserWindowController(options: HostBrowserWindowCont
           view.updatedAt = at
           return ok({ status: view.status })
         }
-        if (view.status === 'failed' && view.failureCode === 'browser-view-reclaim-timeout') {
-          view.status = 'reclaim-requested'
-          delete view.failureCode
-          view.updatedAt = at
-          return ok({ status: view.status })
-        }
-        if (view.status === 'ready' || (view.status === 'failed' && view.failureCode === 'browser-view-heartbeat-timeout')) {
+        if (view.status === 'ready' && activeByWorkbenchId.get(view.workbenchId) === view.windowId) {
           view.status = 'ready'
           view.updatedAt = at
           delete view.failureCode
@@ -475,7 +515,7 @@ interface BrowserWindowHostContext {
 interface BrowserWindowWebServer {
   getOrigin(): string
   protocol?: 'http:' | 'https:'
-  renderIndex?(html: string): string
+  renderIndex?(html: string, peer?: HostConnectionHandle['browserPeer']): string
   register?: (route: {
     kind: 'exact'
     path: string
@@ -486,6 +526,7 @@ interface BrowserWindowSettings {
   describe(): readonly { ns: string; value?: { workbenches?: Record<string, { archivedAt?: number }> } }[]
 }
 interface BrowserWindowConnection extends Pick<HostConnectionHandle, 'rpc' | 'authenticatedUrl'> {
+  readonly browserPeer?: HostConnectionHandle['browserPeer']
   authorizeIndex?: (request: { method: string; headers: IncomingMessage['headers']; url: string }, response: ServerResponse) => boolean
   fetch: { register(route: {
     path: string
@@ -607,7 +648,7 @@ export function createWorkbenchDocumentHandler(
     }
     try {
       const source = await readIndex()
-      const rendered = server.renderIndex(source)
+      const rendered = server.renderIndex(source, connection.browserPeer)
       const cleanup = auth.cleanupUrl === undefined ? ''
         : `<script>history.replaceState(null,"",${JSON.stringify(auth.cleanupUrl)})<\/script>`
       const html = `${rendered.replace(/<head(?=\s|>)[^>]*>/i, match => `${match}${cleanup}`)}`
@@ -628,11 +669,11 @@ export function createWorkbenchDocumentHandler(
 }
 
 const BROWSER_WINDOW_RPC_ACTIONS = [
-  'prepare', 'launch', 'redeem', 'opened', 'ready', 'failed', 'status', 'heartbeat', 'reclaim', 'reclaimed', 'metrics',
+  'prepare', 'launch', 'redeem', 'opened', 'ready', 'failed', 'status', 'heartbeat', 'reclaim', 'reclaimed', 'metrics', 'attach', 'suspend',
   'floating-stage', 'floating-read',
 ] as const
 
-const BROWSER_SHARE_ENDPOINTS = ['start', 'stop', 'status', 'presence', 'guest-rename', 'guest-kick'] as const
+const BROWSER_SHARE_ENDPOINTS = ['start', 'stop', 'status', 'presence', 'guest-rename', 'guest-kick', 'reduce'] as const
 
 interface BrowserWindowRpcRequest {
   type?: unknown
@@ -642,9 +683,11 @@ interface BrowserWindowRpcRequest {
 }
 
 function sendRpcResponse(response: ServerResponse, rpcId: string, result: ConnectionRpcHandlerResult): void {
+  const view = result.ok ? record(record(result.value)?.view) : undefined
   response.writeHead(200, {
     'content-type': 'application/json; charset=utf-8',
     'cache-control': 'no-store',
+    ...(typeof view?.closeToken === 'string' ? { 'set-cookie': `bay-browser-access=${view.closeToken}; Path=/api; HttpOnly; SameSite=Strict` } : {}),
   })
   response.end(JSON.stringify({ type: 'server-response', rpcId, result: result.ok
     ? { ok: true, value: result.value }
@@ -706,7 +749,9 @@ export function installWorkbenchBrowserWindowController(ctx: BrowserWindowHostCo
   const connection = ctx.get<BrowserWindowConnection>('connection', false)
   const server = ctx.get<BrowserWindowWebServer>('webServer', false)
   const settings = ctx.get<BrowserWindowSettings>('settings', false)
-  if (connection === undefined || server === undefined || settings === undefined) return undefined
+  const access = ctx.get<HostWorkbenchAccess>(WORKBENCH_ACCESS_SERVICE, false)
+  const native = ctx.get<NonNullable<ReturnType<typeof createGuestNativeTransport>>>(WORKBENCH_NATIVE_SERVICE, false)
+  if (connection === undefined || server === undefined || access === undefined) return undefined
   const openExternalBrowser = process.versions.electron === undefined ? undefined : (url: string): boolean => {
     try {
       const launch = externalBrowserLaunchSpec(url)
@@ -719,13 +764,30 @@ export function installWorkbenchBrowserWindowController(ctx: BrowserWindowHostCo
       return true
     } catch { return false }
   }
+  let ownerGateway: Promise<Awaited<ReturnType<typeof createWorkbenchOwnerGateway>>> | undefined
   const controller = createHostBrowserWindowController({
     origin: server.getOrigin(),
     authenticatedUrl: url => connection.authenticatedUrl(url),
-    lookupWorkbench: workbenchId => settings.describe().some(row =>
-      row.ns === 'workbench-layout' && row.value?.workbenches?.[workbenchId] !== undefined
-      && row.value.workbenches[workbenchId]?.archivedAt === undefined),
+    lookupWorkbench: workbenchId => access.lookup(workbenchId),
+    access,
     openExternalBrowser,
+    prepareOwnerUrl: async (view): Promise<string> => {
+      if (!native) throw new Error('browser-scoped-transport-unavailable')
+      ownerGateway ??= createWorkbenchOwnerGateway({ access, native, upstreamOrigin: server.getOrigin(),
+        handleView: async (action, payload): Promise<ConnectionRpcHandlerResult> => {
+          const result = await controller.handle(action, payload)
+          if (result.ok && ['attach', 'ready', 'suspend', 'reclaimed', 'reclaim', 'failed', 'closed'].includes(action)) native.refresh()
+          return result
+        },
+        handleShare: async (action, payload, actor): Promise<ConnectionRpcHandlerResult> => {
+          const input = record(payload)
+          if (actor.actor !== 'browser-owner' || !input || input.workbenchId !== actor.workbenchId) return fail('share-scope-denied')
+          access.authorize(actor, ['status', 'stop', 'reduce', 'guest-kick'].includes(action) ? 'view' : 'tasks', { workbenchId: actor.workbenchId! })
+          return shareRpc(action, payload)
+        },
+      })
+      return (await (await ownerGateway).prepare(view)).url
+    },
   })
   const shareSessions = createWorkbenchShareSessionManager()
   const presence = createWorkbenchSharePresenceBroker()
@@ -734,6 +796,20 @@ export function installWorkbenchBrowserWindowController(ctx: BrowserWindowHostCo
   const getShareGateway = async (): Promise<WorkbenchShareGatewayV1> => {
     if (shareGateway !== undefined) return shareGateway
     shareGatewayStart ??= createWorkbenchShareGateway({
+      access,
+      ...(native ? { guestHttp: native.handleHttp, guestUpgrade: native.handleUpgrade, revokeGuest: native.revoke, guestDocument: native.renderDocument } : {}),
+      guestPresence: async (payload, actor) => {
+        const input = record(payload)
+        if (!input || input.workbenchId !== actor.workbenchId) return fail('presence-scope-denied')
+        if (input.action !== 'clear') {
+          if (typeof input.sessionId !== 'string' || typeof input.areaId !== 'string') return fail('presence-scope-denied')
+          access.authorize(actor, input.action === 'publish' ? 'message' : 'view', { workbenchId: actor.workbenchId!, sessionId: input.sessionId, areaId: input.areaId })
+        }
+        const normalized = { ...input, participantId: actor.accessId, role: 'guest' }
+        if (input.action === 'read') { delete (normalized as Record<string, unknown>).participantId; delete (normalized as Record<string, unknown>).role }
+        if (input.action === 'clear') delete (normalized as Record<string, unknown>).role
+        return shareRpc('presence', normalized)
+      },
       upstreamOrigin: server.getOrigin(),
       manager: shareSessions,
       prepareView: async workbenchId => {
@@ -761,12 +837,13 @@ export function installWorkbenchBrowserWindowController(ctx: BrowserWindowHostCo
   const shareRpc = async (endpoint: string, payload: unknown): Promise<ConnectionRpcHandlerResult> => {
     const body = record(payload)
     if (endpoint === 'start') {
+      if (!native) return fail('workbench-share-native-access-unavailable')
       const workbenchId = body?.workbenchId
-      if (body === undefined || Object.keys(body).some(key => key !== 'workbenchId') || !validWorkbenchId(workbenchId)
-        || !settings.describe().some(row => row.ns === 'workbench-layout' && row.value?.workbenches?.[workbenchId] !== undefined && row.value.workbenches[workbenchId]?.archivedAt === undefined)) return fail('workbench-unavailable')
+      if (body === undefined || Object.keys(body).some(key => !['workbenchId', 'grant'].includes(key)) || !validWorkbenchId(workbenchId)
+        || !access.lookup(workbenchId)) return fail('workbench-unavailable')
       try {
         const gateway = await getShareGateway()
-        const result = await gateway.startShare(workbenchId)
+        const result = await gateway.startShare(workbenchId, parseWorkbenchGrant(body.grant))
         return ok(result)
       } catch (error) { return fail(error instanceof Error ? error.message : 'workbench-share-start-failed') }
     }
@@ -775,6 +852,11 @@ export function installWorkbenchBrowserWindowController(ctx: BrowserWindowHostCo
       await shareGateway?.stopShare(body.workbenchId)
       presence.clearWorkbench(body.workbenchId)
       return ok({ status: 'stopped' })
+    }
+    if (endpoint === 'reduce') {
+      if (!body || !validWorkbenchId(body.workbenchId)) return fail('invalid-workbench-id')
+      try { shareGateway?.reduceShare(body.workbenchId, parseWorkbenchGrant(body.grant)); return ok({ status: 'reduced' }) }
+      catch (error) { return fail(String(error)) }
     }
     if (endpoint === 'status') {
       if (body !== undefined && Object.keys(body).some(key => key !== 'workbenchId')) return fail('invalid-request')
@@ -912,8 +994,8 @@ export function installWorkbenchBrowserWindowController(ctx: BrowserWindowHostCo
     path: '/api/workbench-window-close', methods: ['POST'], requestBody: 'buffered',
     async fetch(request) {
       try {
-        const payload = await request.json() as unknown
-        const result = await controller.handle('closed', payload)
+        const payload = await request.json() as Record<string, unknown>
+        const result = await controller.handle(payload.action === 'suspend' ? 'suspend' : 'closed', Object.fromEntries(Object.entries(payload).filter(([key]) => key !== 'action')))
         return result.ok
           ? new Response(null, { status: 204, headers: { 'cache-control': 'no-store' } })
           : new Response(null, { status: 400, headers: { 'cache-control': 'no-store' } })
@@ -924,6 +1006,7 @@ export function installWorkbenchBrowserWindowController(ctx: BrowserWindowHostCo
   })
   return () => {
     controller.dispose()
+    void ownerGateway?.then(value => value.close())
     void shareGateway?.close()
     presence.dispose()
     shareSessions.dispose()

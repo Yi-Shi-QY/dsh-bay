@@ -12,6 +12,7 @@ describe('Prepared native Start through the Frame', () => {
   it.each(['accept', 'replace'] as const)('keeps one exact tab through preparation and %s', async action => {
     const layout = defaultLayout()
     if (layout.root.kind !== 'group') throw new Error('Expected Area')
+    layout.root.project = { relativePath: 'app', generation: 1, workspaceId: 'w' }
     layout.root.tabs = [{
       id: 'native-start', editorId: 'workbench.conversation.start', editorScope: 'root',
       lastKnownTitle: '新建对话', state: {},
@@ -53,6 +54,8 @@ describe('Prepared native Start through the Frame', () => {
       editorCatalog: { getSnapshot: () => entries, subscribe: () => () => {} },
       sidebarCompatibility: { getSnapshot: () => undefined, subscribe: () => () => {} },
     } as never} />)
+    expect(owner.workspaceId).toBe('w')
+    expect(owner.sessionId).toBeUndefined()
     await act(async () => { await owner.placeConversation!({ workspaceId: 'w', presentation: 'start' }) })
     expect(owner).toMatchObject({
       instanceId: 'native-start', sessionId: 'created', workspaceId: 'w', bindingGeneration: 1,
@@ -63,7 +66,9 @@ describe('Prepared native Start through the Frame', () => {
     expect(selectSession).not.toHaveBeenCalled()
     const prepared = owner
     if (action === 'replace') {
-      fireEvent.click(view.getByRole('tab', { name: /当前内页：新建对话/ }))
+      const activeTab = view.container.querySelector('[data-workbench-active-tab="true"]')
+      expect(activeTab).toBeTruthy()
+      fireEvent.click(activeTab!)
       fireEvent.click(await view.findByRole('menuitem', { name: '切换为 浏览器' }))
     }
     act(() => {

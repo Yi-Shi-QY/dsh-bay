@@ -282,7 +282,7 @@ export function createBrowserWindowController({ rpc, floating }: BrowserWindowCo
       const generation = nextGeneration(workbenchId)
       publishRequest({ workbenchId, status: 'reclaiming', windowId })
       try {
-        const result = await call('reclaim', { windowId }) as { status?: unknown }
+        const result = await call('reclaim', { windowId, ...(current.status === 'reclaiming' ? { force: true } : {}) }) as { status?: unknown }
         if (result.status === 'reclaimed' && !disposed && generation === generationFor(workbenchId)) {
           await restoreFloating(workbenchId, windowId)
           publishRequest({ workbenchId, status: 'reclaimed', windowId })

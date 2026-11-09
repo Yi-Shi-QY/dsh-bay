@@ -1,4 +1,6 @@
 import { installBayAgentHost } from './host-bay-agent.ts'
+import { installWorkbenchDirectoryHost } from './host-workbench-directory-service.ts'
+import { installWorkbenchNativeAccess } from './host-workbench-native-service.ts'
 import { installLayoutImportJournalRoute } from './host-layout-import-journal.ts'
 import { installFloatingUiSettings } from './host-floating-ui-settings.ts'
 import { installDistributionRoutes } from './host-distribution-route.ts'
@@ -59,6 +61,8 @@ export * from './foundation/workbench-control-plane.ts'
 export * from './foundation/workbench-bay-agent-adapter.ts'
 export * from './foundation/workbench-bay-agent-work.ts'
 export * from './foundation/workbench-superagent-adapter.ts'
+export * from './workbench-complete-contract.ts'
+export * from './workbench-memory-contract.ts'
 
 import { WORKBENCH_CORE_MANIFEST } from './core-manifest.ts'
 import { WORKBENCH_CORE_RUNTIME_SERVICE_NAME, createWorkbenchCoreRuntime } from './core-runtime.ts'
@@ -80,7 +84,7 @@ import { installWorkbenchCreatorSkillProvider } from './workbench-creator-skill.
  */
 export const Config = WorkbenchSettingsSchema.volatile()
 
-export const inject = ['connection', 'pluginManager', 'profileContext', 'pluginPackages', 'credentials', 'sessions', 'sessionController', 'webServer', 'settings', 'skills', 'agentPresets', 'sessionPersistence', 'workspaceRegistry'] as const
+export const inject = ['connection', 'pluginManager', 'profileContext', 'pluginPackages', 'credentials', 'sessions', 'sessionController', 'webServer', 'settings', 'skills', 'agentPresets', 'sessionPersistence', 'workspaceRegistry', 'attachments', 'fileUploads', 'typertGateway', 'remoteAccess', 'tools', 'agents', 'workingDirectory'] as const
 
 interface WorkbenchCoreHostContextV1 {
   baseUrl?: string
@@ -108,7 +112,9 @@ export function apply(ctx: WorkbenchCoreHostContextV1): void {
   settings?.register?.(WORKBENCH_SETTINGS_NAMESPACE, WorkbenchSettingsSchema)
   const disposeCreatorSkill = installWorkbenchCreatorSkillProvider(context.get?.('skills') as never)
   installWorkbenchCoreProfileServices(context as WorkbenchCoreHostContextV1 & { get<T = unknown>(name: string): T | undefined; provide(name: string, value: unknown): unknown })
+  const disposeDirectoryHost = installWorkbenchDirectoryHost(context as never)
   const disposeBayAgent = installBayAgentHost(context as never)
+  const disposeNativeAccess = installWorkbenchNativeAccess(context as never)
   const runtime = createWorkbenchCoreRuntime({ core: WORKBENCH_CORE_MANIFEST })
   context.provide(WORKBENCH_CORE_RUNTIME_SERVICE_NAME, runtime)
   const installHostRoutes = (child: WorkbenchCoreHostContextV1) => {
@@ -155,5 +161,5 @@ export function apply(ctx: WorkbenchCoreHostContextV1): void {
     disposeHostRoutes = installHostRoutes(context)
     installWorkbenchCreatorSkillProvider(context.get?.('skills') as never)
   }
-  context.effect?.(() => () => { disposeCreatorSkill?.(); disposeBayAgent?.(); disposeHostRoutes?.(); runtime.dispose() }, 'workbench-core: runtime')
+  context.effect?.(() => () => { disposeCreatorSkill?.(); disposeNativeAccess?.(); disposeBayAgent?.(); disposeHostRoutes?.(); disposeDirectoryHost?.(); runtime.dispose() }, 'workbench-core: runtime')
 }

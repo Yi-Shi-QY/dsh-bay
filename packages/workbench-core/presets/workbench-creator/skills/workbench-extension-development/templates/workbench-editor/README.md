@@ -2,7 +2,7 @@
 
 ## 17.3 展示位置与实例生命周期
 
-Core 兼容版本为 `0.2.2-alpha.17.6`。模板扩展自身保留独立的 `0.1.0` 版本，不能把它误当成 Core 版本。
+Core 兼容版本为 `0.2.2-alpha.18.0`。模板扩展自身保留独立的 `0.1.0` 版本，不能把它误当成 Core 版本。
 
 - 声明 `presentation.floating: false` 可禁止浮窗；缺少完整绑定及生命周期声明的内页不能在浮窗运行。
 - `owner.instanceId` 是布局内标签 ID，运行时缓存使用 `owner.runtimeIdentity`；不能跨工作台仅按标签 ID 缓存。`owner.presentation` 为 `floating` 或 `area`，位置变化不是新建实例。
@@ -47,7 +47,7 @@ ctx.slots.inject('workbench.editor.session', () => ctx.slots.register({
     scope: 'session',
     label: '示例内页',
     requiredBinding: 'session',
-    binding: { requirement: 'session', unbound: 'pending', sharing: 'area' },
+    binding: { requirement: 'session', unbound: 'pending', sharing: 'independent' },
     state: { schemaVersion: 1, maxBytes: 16 * 1024, restore: 'if-valid', share: 'portable' },
     runtime: { background: 'pause', collapsed: 'dispose', reacquire: 'on-visible' },
   }, extension: {
@@ -55,7 +55,7 @@ ctx.slots.inject('workbench.editor.session', () => ctx.slots.register({
     moduleId: 'workbench.editor-example',
     apiVersion: 1,
     editorIds: ['workbench.example'],
-    coreCompatibility: '0.2.2-alpha.17.6',
+    coreCompatibility: '0.2.2-alpha.18.0',
     dshGeneration: '0.2.2-rc.1',
   } } }),
 }, Editor))
@@ -68,7 +68,7 @@ ctx.slots.inject('workbench.editor.session', () => ctx.slots.register({
 ```js
 scope: 'session'
 requiredBinding: 'session'
-binding: { requirement: 'session', unbound: 'pending', sharing: 'area' }
+binding: { requirement: 'session', unbound: 'pending', sharing: 'independent' }
 ```
 
 `package.json` 中的 `dsh.workbench` 声明也必须与编辑器 ID、模块身份和版本兼容条件一致。这是普通 DSH Bundle / Client Plugin 模板。它不是 Dynamic Cordis Package，也不代表 Catalog 发布或离线分享已经完成。请使用 DSH Plugin Manager 在独立测试 Profile 中安装，并分别记录 build、installed、active 等状态。

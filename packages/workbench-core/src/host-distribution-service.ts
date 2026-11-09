@@ -303,7 +303,7 @@ export function createHostDistributionService(options: HostDistributionOptions) 
       }); return resume(id)
     },
     async cancel(id:string){aborts.get(id)?.abort();await inFlight.get(id);return serialized(id,async()=>{const row=await load(id);if(finished.has(row.state)||await reconcileCommit(row))return publicRow(row);try{await reconcile(row);await rollback(row)}catch(e){row.state='recovery-required';row.blockers=[(e as Error).message];await save(row)}return publicRow(row)})},
-    complete(id:string,document:WorkbenchDocumentV3,consents:Record<string,WorkbenchExtensionConsentV1>,pendingPageIds:string[]=[],_context?:import('./foundation/workbench-context-portability.ts').RestoredPortableWorkbenchContextV1){return serialized(id,async()=>{
+    complete(id:string,document:WorkbenchDocumentV3,consents:Record<string,WorkbenchExtensionConsentV1>,pendingPageIds:string[]=[],_context?:import('./foundation/workbench-context-portability.ts').RestoredPortableWorkbenchContextV1,_orchestration?:import('./foundation/workbench-bay-agent-work.ts').PortableBayAgentOrchestrationV1){return serialized(id,async()=>{
       const row=await load(id);if(row.state==='ready'||row.state==='needs-input')return publicRow(row)
       if(await reconcileCommit(row))return publicRow(row)
       if(row.state!=='awaiting-restore'||row.consentDigest!==approvedDigest(row))throw new Error('请先完成安装和运行验证。')
@@ -362,6 +362,7 @@ export function createHostDistributionService(options: HostDistributionOptions) 
             ...(preview.layout.modelPreference.reasoningEffort === undefined ? {} : { reasoningEffort: preview.layout.modelPreference.reasoningEffort }),
           } }),
           ...(restoredContext === undefined ? {} : { context: restoredContext.context, areaContexts: restoredContext.areaContexts, areaMetadata: restoredContext.areaMetadata }),
+          ...(_orchestration === undefined ? {} : { bayAgentOrchestration: structuredClone(_orchestration) }),
           createdAt:row.createdAt,updatedAt:Date.now(),offlineOrigin:{schemaVersion:1 as const,packageId:row.archiveSha256,archiveSha256:row.archiveSha256}}
         const packageOrigin={packageId:preview.manifest.packageId,version:preview.manifest.version,archiveSha256:row.archiveSha256,completeness:row.mode==='layout-only'?'layout-only' as const:row.mode==='offline-embedded'?'complete-offline' as const:'complete-online' as const,dependencies:row.dependencies.map(d=>({portableId:d.moduleId,version:d.version,digest:d.digest,kind:'static' as const,sourcePolicy:'binary-only' as const,exportPolicy:d.exportPolicy,editorIds:d.editorScopes.map(e=>e.editorId),editorScopes:d.editorScopes,permissions:d.permissions,requiredBy:[],packageName:d.packageName,...d.registryUrl?{registryUrl:d.registryUrl}:{},integrity:d.integrity}))}
         const next:WorkbenchSettingsV4={...value??{version:4,activeWorkbenchId:row.workbenchId,openWorkbenchIds:[],layoutTemplates:{},invalidWorkbenches:{},sessionMarkers:{}},workbenches:{...value?.workbenches,[row.workbenchId]:{...record,packageOrigin}},extensionConsents:{...value?.extensionConsents,...consents}}

@@ -1,3 +1,4 @@
+import { browserSafeUuid } from '../browser-safe-id.ts'
 import type { WorkbenchSettingsScope } from '../client/workbench-settings-contracts.ts'
 import type { LayoutImportJournal, LayoutImportReceiptV2 } from '../layout-import-journal.ts'
 import type { WorkbenchEditorCatalog } from './catalog.ts'
@@ -40,6 +41,7 @@ export function createWorkbenchLayoutPackageService(options: {
     inspect,
     history: () => options.canImport() ? options.journal.list() : Promise.resolve([]),
     import(preview, transactionId, bindings = {}) {
+      if (options.directory.completeRequest) return Promise.reject(new Error('目录型工作台请使用完整工作台包 V5 导入。布局模板只分享内页结构，不含项目目录或历史。'))
       if (!options.canImport()) return Promise.reject(new Error('请在 DSH 桌面端导入工作台。'))
       if (!verified.has(preview)) return Promise.reject(new Error('请先校验分享包。'))
       const existing = pending.get(transactionId)
@@ -52,7 +54,7 @@ export function createWorkbenchLayoutPackageService(options: {
           await options.journal.save({ ...receipt, state: 'completed' }); return { workbenchId: receipt.workbenchId, warnings: preview.warnings }
         }
         if (receipt?.state === 'completed') throw new Error('这个导入事务已完成且工作台已删除，请发起新的副本导入。')
-        receipt ??= { schemaVersion: 2, transactionId, archiveSha256: preview.digest, workbenchId: `workbench-${globalThis.crypto.randomUUID()}`, name: preview.layout.name, createdAt: Date.now(), state: 'prepared' }
+        receipt ??= { schemaVersion: 2, transactionId, archiveSha256: preview.digest, workbenchId: `workbench-${browserSafeUuid()}`, name: preview.layout.name, createdAt: Date.now(), state: 'prepared' }
         receipt = await options.journal.save(receipt)
         const snapshot = options.settings.getSnapshot()
         const value = snapshot.value
@@ -72,6 +74,7 @@ export function createWorkbenchLayoutPackageService(options: {
             areaContexts: restored.context.areaContexts,
             areaMetadata: restored.context.areaMetadata,
           }),
+          ...(restored.orchestration === undefined ? {} : { bayAgentOrchestration: restored.orchestration }),
           createdAt: receipt.createdAt, updatedAt: receipt.createdAt, offlineOrigin: { schemaVersion: 1, packageId: preview.digest, archiveSha256: preview.digest } }
         const result = await options.settings.patch({ operation: 'set', path: value ? ['workbenches', receipt.workbenchId] : [],
           value: value ? imported : { version: 4, activeWorkbenchId: receipt.workbenchId, openWorkbenchIds: [], workbenches: { [receipt.workbenchId]: imported }, layoutTemplates: {}, invalidWorkbenches: {}, sessionMarkers: {} },

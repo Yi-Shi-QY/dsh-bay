@@ -33,7 +33,7 @@ describe('browser Workbench view lifecycle', () => {
     expect(sendBeacon).toHaveBeenCalledOnce()
     expect(sendBeacon.mock.calls[0]?.[0]).toBe('/api/workbench-window-close')
     const body = sendBeacon.mock.calls[0]?.[1] as Blob
-    expect(JSON.parse(await body.text())).toEqual({ closeToken })
+    expect(JSON.parse(await body.text())).toEqual({ action: 'suspend', closeToken, pageId: expect.any(String) })
   })
 
   it('recognizes a handoff before asynchronous validation and fails closed when redemption fails', async () => {
@@ -71,7 +71,7 @@ describe('browser Workbench view lifecycle', () => {
     await vi.advanceTimersByTimeAsync(15_000)
     expect(rpc.call).toHaveBeenCalledOnce()
     expect(rpc.call).toHaveBeenCalledWith('/api', 'workbench-window/heartbeat', {
-      windowId: '00000000-0000-4000-8000-000000000000',
+      windowId: '00000000-0000-4000-8000-000000000000', closeToken: 'B'.repeat(43), pageId: expect.any(String),
     }, expect.any(AbortSignal))
     stop()
     await vi.advanceTimersByTimeAsync(30_000)
@@ -213,7 +213,7 @@ describe('browser Workbench view lifecycle', () => {
     const context = { connection: { rpc } }
     expect(await resolveBrowserWorkbenchView(context as never)).toMatchObject({ status: 'ready', view })
     expect(await reportBrowserWorkbenchReady(context as never, view as never)).toBe(true)
-    expect(rpc.call.mock.calls.map(call => call[1])).toEqual(['workbench-window/status', 'workbench-window/status'])
+    expect(rpc.call.mock.calls.map(call => call[1])).toEqual(['workbench-window/status', 'workbench-window/attach', 'workbench-window/status'])
     expect(window.sessionStorage.getItem('dsh-workbench.browser-view.v1')).not.toBeNull()
   })
 

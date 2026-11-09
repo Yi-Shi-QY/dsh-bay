@@ -1287,6 +1287,7 @@
 }
 
 .group[data-area-collapsed] .bindingControl,
+.group[data-area-collapsed] [data-area-project-trigger],
 .group[data-area-collapsed] .sessionLifecycle {
   display: none;
 }
@@ -2385,9 +2386,13 @@
 
 .pendingBindingBody {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
   min-height: 0;
   place-items: center;
-  align-content: center;
+  align-content: safe center;
   justify-content: center;
   overflow: auto;
   padding: clamp(20px, 4vw, 48px);
@@ -2541,6 +2546,11 @@
   .pendingBindingPanel { grid-template-columns: minmax(0, 1fr); gap: 18px; padding: 18px; }
   .pendingBindingPreview { min-height: 220px; }
   .pendingBindingTitle { font-size: 18px; }
+}
+
+@container workbench-editor (max-width: 760px) {
+  .pendingBindingPanel { grid-template-columns: minmax(0, 1fr); padding: 20px; }
+  .pendingBindingPreview { display: none; }
 }
 
 @container workbench-editor (max-height: 300px) {
@@ -7807,6 +7817,8 @@
 
 @container workbench-area (max-width: 400px) {
   .group:not([data-area-collapsed]) > .areaHeader .bindingControl { flex: 0 0 28px; max-width: 28px; }
+  .group:not([data-area-collapsed]) > .areaHeader [data-area-project-trigger] { flex: 0 0 28px; max-width: 28px; padding: 0; justify-content: center; }
+  .group:not([data-area-collapsed]) > .areaHeader [data-area-project-trigger] > span { display: none; }
   .group:not([data-area-collapsed]) > .areaHeader .bindingChip { width: 28px; padding-inline: 2px; justify-content: center; }
   .group:not([data-area-collapsed]) > .areaHeader .bindingTitle,
   .group:not([data-area-collapsed]) > .areaHeader .bindingRunning,

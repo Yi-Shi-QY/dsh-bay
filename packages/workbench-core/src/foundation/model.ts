@@ -1,3 +1,5 @@
+import { mergeReason, placementReason } from './area-identity.ts'
+
 /** JSON-safe editor state. */
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue }
 
@@ -31,15 +33,18 @@ export interface SplitNode {
 
 /** A stable leaf area whose legacy `tabs` array is kept for wire compatibility.
  *
- * Only `activeTabId` is presented at once. New Workbench V4 durable projections
- * collapse the array to the current tab; the persisted shape retains the
- * original `group`/`tabs` names so V1/V2 layouts remain readable.
+ * Only `activeTabId` is presented at once. Every retained view remains in tabs;
+ * project and task ownership are independent of the currently displayed view.
  */
 export interface GroupNode {
   kind: 'group'
   id: string
   activeTabId?: string
   tabs: TabDocument[]
+  /** Host projection used for immediate operation validation; not a second persistent project source. */
+  project?: import('../workbench-directory-contract.ts').AreaProjectV1
+  projectRequired?: boolean
+  projectSourceAreaId?: string
   areaBinding?: SessionBindingV1
   areaBindingGeneration?: number
 }
@@ -348,11 +353,10 @@ export function retargetSession(
   target: string | SessionBindingV1,
 ): WorkbenchLayoutDocument {
   const binding = typeof target === 'string' ? { sessionId: target } : target
-  const pending = groupsOf(document.root).flatMap(group => group.tabs).find(tab => tab.id === tabId)?.pendingBinding
   return { ...document, root: updateGroups(document.root, item => ({
     ...item,
     tabs: item.tabs.map((tab) => {
-      if ((tab.id !== tabId && (pending === undefined || tab.pendingBinding !== pending)) || tab.editorScope !== 'session') return tab
+      if (tab.id !== tabId || tab.editorScope !== 'session') return tab
       if (tab.pendingBinding !== undefined) return { ...createSessionTab(tab.id, tab.editorId, binding, tab.lastKnownTitle), state: tab.state, ...(tab.pendingDistribution ? {pendingDistribution:tab.pendingDistribution} : {}) }
       const oldBinding = tab.binding ?? (tab.sessionId === undefined ? undefined : { sessionId: tab.sessionId })
       const oldKey = oldBinding === undefined ? undefined : sessionTargetKey(oldBinding)
@@ -473,14 +477,14 @@ function updateGroups(node: LayoutNode, map: (group: GroupNode) => GroupNode): L
   return { ...node, first: updateGroups(node.first, map), second: updateGroups(node.second, map) }
 }
 
-/** Close a tab and collapse empty non-root branches.
+/** Close a view while retaining its Area, project and task ownership.
  * @param document - source layout.
  * @param tabId - target tab id.
  * @returns updated layout.
  */
 export function closeTab(document: WorkbenchLayoutDocument, tabId: string): WorkbenchLayoutDocument {
   if (!tabsOf(document.root).some(tab => tab.id === tabId)) return document
-  const root = collapseEmpty(removeTab(document.root, tabId))
+  const root = removeTab(document.root, tabId)
   const ids = groupsOf(root).map(item => item.id)
   const [fallbackGroupId] = ids
   /* v8 ignore next -- every LayoutNode contains at least one group. */
@@ -493,9 +497,10 @@ function removeTab(node: LayoutNode, tabId: string): LayoutNode {
   if (node.kind === 'split') return { ...node, first: removeTab(node.first, tabId), second: removeTab(node.second, tabId) }
   const tabs = node.tabs.filter(tab => tab.id !== tabId)
   const [firstTab] = tabs
-  if (firstTab === undefined) return { kind: 'group', id: node.id, tabs }
+  const { activeTabId: _active, ...rest } = node
+  if (firstTab === undefined) return { ...rest, tabs }
   const activeTabId = tabs.find(tab => tab.id === node.activeTabId)?.id ?? firstTab.id
-  return { kind: 'group', id: node.id, tabs, activeTabId }
+  return { ...rest, tabs, activeTabId }
 }
 
 function collapseEmpty(node: LayoutNode): LayoutNode {
@@ -564,7 +569,10 @@ export function moveTab(
   const source = groupsOf(document.root).find(row => row.tabs.some(candidate => candidate.id === tabId))
   /* v8 ignore next -- tabsOf() is a flattening of these same groups, so a found tab always has one source group. */
   if (source === undefined) return document
-  if (!groupsOf(document.root).some(group => group.id === targetGroupId)) return document
+  const destination = groupsOf(document.root).find(group => group.id === targetGroupId)
+  if (!destination) return document
+  if (edge === 'center' && tab.editorId === 'workbench.workspace-files' && source.project && destination.project?.relativePath !== source.project.relativePath) return document
+  if (edge === 'center' && source.id !== targetGroupId && placementReason(tab, destination.project, destination.projectRequired === true || source.project !== undefined || destination.project !== undefined)) return document
   if (edge === 'center' && source.id === targetGroupId) {
     const from = source.tabs.findIndex(candidate => candidate.id === tabId)
     const requested = index ?? source.tabs.length
@@ -588,10 +596,9 @@ export function moveTab(
     const horizontal = edge === 'left' || edge === 'right'
     const existingIds = new Set([...groupsOf(document.root).map(item => item.id), ...tabsOf(document.root).map(item => item.id)])
     if (existingIds.has(ids.groupId) || existingIds.has(ids.splitId) || ids.groupId === ids.splitId) return document
-    const empty: GroupNode = { kind: 'group', id: source.id, tabs: [],
-      ...(source.areaBinding === undefined ? {} : { areaBinding: structuredClone(source.areaBinding) }),
-      ...(source.areaBindingGeneration === undefined ? {} : { areaBindingGeneration: source.areaBindingGeneration }) }
-    const inserted = group(ids.groupId, [tab])
+    const { activeTabId: _active, ...emptySource } = source
+    const empty: GroupNode = { ...emptySource, tabs: [] }
+    const inserted = { ...group(ids.groupId, [tab]), projectRequired: source.projectRequired ?? false, projectSourceAreaId: source.projectSourceAreaId ?? source.id, ...(source.project ? { project: structuredClone(source.project) } : {}) }
     const root = mapNode(document.root, source.id, () => ({ kind: 'split', id: ids.splitId, axis: horizontal ? 'horizontal' : 'vertical', ratio: clampRatio(ratio), first: edge === 'left' || edge === 'top' ? inserted : empty, second: edge === 'left' || edge === 'top' ? empty : inserted }))
     return { ...document, root, activeGroupId: ids.groupId }
   }
@@ -612,7 +619,7 @@ export function moveTab(
   const without = closeTab(document, tabId)
   if (edge === 'center') return insertTab(without, targetGroupId, tab, index)
   const horizontal = edge === 'left' || edge === 'right'
-  const newGroup = group(ids.groupId, [tab])
+  const newGroup = { ...group(ids.groupId, [tab]), projectRequired: source.projectRequired ?? false, projectSourceAreaId: source.projectSourceAreaId ?? source.id, ...(source.project ? { project: structuredClone(source.project) } : {}) }
   const root = mapNode(without.root, targetGroupId, target => ({
     kind: 'split', id: ids.splitId, axis: horizontal ? 'horizontal' : 'vertical', ratio: clampRatio(ratio),
     first: edge === 'left' || edge === 'top' ? newGroup : target,
@@ -645,11 +652,16 @@ export function duplicateTab(
   if (tabsOf(document.root).some(tab => tab.id === newTabId)) return document
   const original = tabsOf(document.root).find(tab => tab.id === tabId)
   if (original === undefined) return document
+  const source = groupsOf(document.root).find(area => area.tabs.some(tab => tab.id === tabId))!
+  const destination = groupsOf(document.root).find(area => area.id === targetGroupId)
+  if (!destination || edge === 'center' && placementReason(original, destination.project, destination.projectRequired === true || source.project !== undefined || destination.project !== undefined)) return document
+  if (edge === 'center' && original.editorId === 'workbench.workspace-files' && source.project?.relativePath !== destination.project?.relativePath) return document
   const copy: TabDocument = { ...structuredClone(original), id: newTabId }
   const added = addTab(document, targetGroupId, copy)
   if (edge === 'center') return added
   const previousActiveTabId = groupsOf(document.root).find(group => group.id === targetGroupId)?.activeTabId
-  const moved = moveTab(added, newTabId, targetGroupId, edge, ids, index, ratio)
+  let moved = moveTab(added, newTabId, targetGroupId, edge, ids, index, ratio)
+  moved = { ...moved, root: mapNode(moved.root, ids.groupId, node => ({ ...(node as GroupNode), projectRequired: source.projectRequired ?? false, projectSourceAreaId: source.projectSourceAreaId ?? source.id, ...(source.project ? { project: structuredClone(source.project) } : {}) })) }
   if (previousActiveTabId === undefined) return moved
   return {
     ...moved,
@@ -674,9 +686,7 @@ export function mergeGroup(
   const source = groupsOf(document.root).find(group => group.id === sourceGroupId)
   const target = groupsOf(document.root).find(group => group.id === targetGroupId)
   if (source === undefined || target === undefined) return document
-  // Session-scoped tabs in one composite Area must share exactly one binding.
-  // Refuse a merge that would combine two different Sessions; callers can
-  // surface the disabled action and let the user create a separate Area.
+  // Multiple conversations may share an Area; their project must match.
   if (!canMergeGroups(document, sourceGroupId, targetGroupId)) return document
   // Preserve the module that was visible before the Area was merged.  The
   // source group's tab order is module history, not presentation order; the
@@ -684,28 +694,17 @@ export function mergeGroup(
   // old Tool Details page) and must never win merely because it happens to be
   // last in that array.
   const sourceActiveTabId = source.activeTabId ?? source.tabs.at(-1)?.id
-  let next = document
-  for (const tab of source.tabs) next = closeTab(next, tab.id)
+  const removeArea = (node: LayoutNode): LayoutNode | undefined => {
+    if (node.kind === 'group') return node.id === sourceGroupId ? undefined : node
+    const first = removeArea(node.first), second = removeArea(node.second)
+    return first && second ? { ...node, first, second } : first ?? second
+  }
+  let next = { ...document, root: removeArea(document.root)!, activeGroupId: targetGroupId }
   for (const tab of source.tabs) next = insertTab(next, targetGroupId, tab)
-  // Pending pages adopt the destination Area's one explicit conversation.
-  // Without this normalization an otherwise valid merge writes an unreadable
-  // v3 document (bound Area mixed with unbound session modules).
-  const binding = target.areaBinding ?? source.areaBinding
-    ?? [...target.tabs, ...source.tabs].find(tab => tab.binding)?.binding
-  if (binding) next = { ...next, root: mapNode(next.root, targetGroupId, node => {
-    const area = node as GroupNode
-    return { ...area, areaBinding: binding, tabs: area.tabs.map(tab => tab.editorScope === 'session' && tab.pendingBinding
-      ? { ...createSessionTab(tab.id, tab.editorId, binding, tab.lastKnownTitle, tab.state),
-        ...(tab.pendingDistribution ? { pendingDistribution: tab.pendingDistribution } : {}) } : tab) }
-  }) }
   return sourceActiveTabId === undefined ? next : activate(next, targetGroupId, sourceActiveTabId)
 }
 
-function bindingKey(binding: SessionBindingV1): string {
-  return `${binding.workspaceId ?? ''}\u0000${binding.sessionId}`
-}
-
-/** Whether merging two Areas preserves the shared Session binding invariant. */
+/** Bound conversations must belong to the same project. Host checks empty Areas too. */
 export function canMergeGroups(
   document: WorkbenchLayoutDocument,
   sourceGroupId: string,
@@ -716,12 +715,7 @@ export function canMergeGroups(
   const source = groups.find(group => group.id === sourceGroupId)
   const target = groups.find(group => group.id === targetGroupId)
   if (source === undefined || target === undefined) return false
-  const keys = new Set<string>()
-  for (const group of [source, target]) {
-    if (group.areaBinding !== undefined) keys.add(bindingKey(group.areaBinding))
-    for (const tab of group.tabs) if (tab.editorScope === 'session' && tab.binding !== undefined) keys.add(bindingKey(tab.binding))
-  }
-  return keys.size <= 1
+  return mergeReason(source, target) === undefined
 }
 
 /** Exchange the complete editor histories of two stable areas.
@@ -742,22 +736,8 @@ export function swapGroups(
   return {
     ...document,
     root: updateGroups(document.root, (candidate) => {
-      if (candidate.id === firstGroupId) {
-        const { activeTabId: _activeTabId, ...area } = candidate
-        return {
-          ...area,
-          tabs: structuredClone(second.tabs),
-          ...(second.activeTabId === undefined ? {} : { activeTabId: second.activeTabId }),
-        }
-      }
-      if (candidate.id === secondGroupId) {
-        const { activeTabId: _activeTabId, ...area } = candidate
-        return {
-          ...area,
-          tabs: structuredClone(first.tabs),
-          ...(first.activeTabId === undefined ? {} : { activeTabId: first.activeTabId }),
-        }
-      }
+      if (candidate.id === firstGroupId) return structuredClone(second)
+      if (candidate.id === secondGroupId) return structuredClone(first)
       return candidate
     }),
   }
@@ -851,7 +831,8 @@ export function validateLayout(value: unknown, account = 'ungrouped'): Workbench
       ids.add(tab.id)
     }
     const sessionTabs = node.tabs.filter(tab => tab.editorScope === 'session')
-    if (node.areaBinding !== undefined && sessionTabs.some(tab => tab.binding?.sessionId !== node.areaBinding!.sessionId || tab.binding?.workspaceId !== node.areaBinding!.workspaceId)) return false
+    // V18 Areas contain multiple independent conversations. A legacy areaBinding
+    // is retained as display metadata only and never constrains its modules.
     if (node.areaBindingGeneration !== undefined && (!Number.isInteger(node.areaBindingGeneration) || node.areaBindingGeneration < 0)) return false
     return node.activeTabId === undefined || node.tabs.some(tab => tab.id === node.activeTabId)
   }

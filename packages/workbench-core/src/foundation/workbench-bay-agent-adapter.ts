@@ -41,7 +41,7 @@ export interface WorkbenchBayAgentPromptContextV1 {
     contextRevision: number
     human: AreaContextV1['human']
     agent: AreaContextV1['agent']
-    binding?: SessionBindingV1
+    project?: WorkbenchControlPlaneAreaV1['project']
   }
   workItem?: WorkbenchBayAgentWorkItemV1
 }
@@ -53,13 +53,14 @@ export interface BuildWorkbenchBayAgentPromptContextInputV1 {
   capturedAt?: number
 }
 
-/** A lease for a single execution attempt against one Area binding and Context. */
+/** A lease for one execution attempt against its owning Area project and Context. */
 export interface WorkbenchBayAgentExecutionLeaseV1 {
   moduleInstanceId?: string
   workbenchId: string
   areaId: string
   sessionId?: string
   areaGeneration: number
+  projectGeneration?: number
   workbenchContextRevision: number
   areaContextRevision: number
 }
@@ -133,7 +134,7 @@ function projectPromptArea(area: WorkbenchControlPlaneAreaV1): NonNullable<Workb
     contextRevision: area.context.revision,
     human: structuredClone(area.context.human),
     agent: structuredClone(area.context.agent),
-    ...(area.binding === undefined ? {} : { binding: structuredClone(area.binding) }),
+    ...(area.project === undefined ? {} : { project: structuredClone(area.project) }),
   }
 }
 
@@ -181,11 +182,11 @@ export function renderWorkbenchBayAgentPromptContext(context: WorkbenchBayAgentP
       `Area ownership: ${context.area.ownership}`,
       `Area generation: ${context.area.generation}`,
       `Area Context revision: ${context.area.contextRevision}`,
-      ...(context.area.binding === undefined
+      ...(context.area.project === undefined
         ? ['Session binding: none']
         : [
-            `Session ID: ${context.area.binding.sessionId}`,
-            `Workspace ID: ${renderText(context.area.binding.workspaceId)}`,
+            `Project: ${context.area.project.relativePath}`,
+            `Project revision: ${context.area.project.generation}`,
           ]),
       '',
       '### Area human context',
@@ -244,6 +245,7 @@ export function captureWorkbenchBayAgentExecutionLease(
     areaId,
     ...(area.binding === undefined ? {} : { sessionId: area.binding.sessionId }),
     areaGeneration: area.generation,
+    ...(area.project ? { projectGeneration: area.project.generation } : {}),
     workbenchContextRevision: snapshot.context.revision,
     areaContextRevision: area.context.revision,
   }
@@ -256,8 +258,11 @@ export function workbenchBayAgentExecutionStaleReason(
   if (snapshot.workbenchId !== lease.workbenchId) return 'workbench-replaced'
   const area = snapshot.areas.find(candidate => candidate.areaId === lease.areaId)
   if (area === undefined) return 'area-missing'
+  if (lease.projectGeneration !== area.project?.generation) return 'area-generation-changed'
   if (!lease.moduleInstanceId && area.generation !== lease.areaGeneration) return 'area-generation-changed'
-  const currentSessionId = lease.moduleInstanceId ? area.modules.find(row => row.moduleInstanceId === lease.moduleInstanceId)?.binding?.sessionId : area.binding?.sessionId
+  const currentSessionId = snapshot.sessions !== undefined && lease.sessionId
+    ? snapshot.sessions.find(row => row.sessionId === lease.sessionId && row.areaId === lease.areaId)?.sessionId
+    : lease.moduleInstanceId ? snapshot.areas.flatMap(row => row.modules).find(row => row.moduleInstanceId === lease.moduleInstanceId)?.binding?.sessionId : area.binding?.sessionId
   if (currentSessionId !== lease.sessionId) return 'session-changed'
   if (snapshot.context.revision !== lease.workbenchContextRevision
     || area.context.revision !== lease.areaContextRevision) return 'context-advanced'

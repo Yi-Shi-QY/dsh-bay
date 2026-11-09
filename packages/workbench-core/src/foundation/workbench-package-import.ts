@@ -1113,6 +1113,7 @@ export async function importWorkbenchPackageIntoSettings(
       ...(report.sessions === undefined ? {} : { sessions: report.sessions }),
       ...(options.sessionTemplateBindings === undefined ? {} : { templateBindings: options.sessionTemplateBindings }),
       ...(report.projection.context === undefined ? {} : { context: report.projection.context }),
+      ...(report.projection.orchestration === undefined ? {} : { bayAgentOrchestration: report.projection.orchestration }),
       ...(packageOrigin === undefined ? {} : { packageOrigin }),
     })
   } catch (error) {

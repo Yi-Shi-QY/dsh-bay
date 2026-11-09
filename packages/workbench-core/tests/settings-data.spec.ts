@@ -61,7 +61,14 @@ describe('settings data scope and persistence', () => {
     expect(source.getSnapshot().value?.workbenches).toEqual(before)
   })
   it('limits browser directory reads and writes to its target', async () => {
-    const { source, writes } = mutableSettings()
+    const initial = settingsFixture()
+    initial.extensionConsents = {
+      '@example/ins::example.ins': {
+        packageName: '@example/ins', moduleId: 'example.ins', apiVersion: 1,
+        editorIds: ['example.ins.page'], contractFingerprint: 'a'.repeat(32), allowedAt: 10, allowed: true,
+      },
+    }
+    const { source, writes } = mutableSettings(initial)
     const { directory } = createProjectNeutralFrameSettings(source, { workbenchId: 'a' })
     expect(directory.getSnapshot().rows.map(row => row.workbenchId)).toEqual(['a'])
     expect(directory.getDocument?.('b')).toBeUndefined()
@@ -70,7 +77,8 @@ describe('settings data scope and persistence', () => {
     for (const result of await Promise.all([directory.updateMetadata('b', { name: 'bad', description: '' }), directory.remove('a'), directory.setPinned('a', true), directory.setGlobalEditorVisible!('example.notes', false)])) expect(result.status).toBe('unavailable')
     expect(writes).toEqual([])
     const scoped = scopeSettingsSnapshot(source.getSnapshot(), { mode: 'browser-workbench', workbenchId: 'a' })
-    expect(Object.keys(scoped.value!.workbenches)).toEqual(['a']); expect(scoped.base).toBeUndefined(); expect(scoped.value!.extensionConsents).toBeUndefined()
+    expect(Object.keys(scoped.value!.workbenches)).toEqual(['a']); expect(scoped.base).toBeUndefined()
+    expect(scoped.value!.extensionConsents?.['@example/ins::example.ins']).toMatchObject({ allowed: true })
   })
   it('rechecks the selected target at the operation boundary', async () => {
     const { source } = mutableSettings()

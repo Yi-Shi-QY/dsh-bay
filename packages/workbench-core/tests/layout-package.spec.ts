@@ -30,6 +30,19 @@ async function alter(bytes: Uint8Array, transform: (manifest: any, layout: any) 
   return encodeDeterministicZip([{ path: 'manifest.json', content: encode(manifest) }, { path: 'workbench.json', content }])
 }
 describe('layout sharing manifest v3 / portable layout v2', () => {
+  it('restores distinct sources independently while mapping multiple views of one source once', async () => {
+    const record = structuredClone(settingsFixture().workbenches.a!)
+    const area = areasOf(record.document.root)[0]!
+    area.moduleHistory = ['one', 'two', 'one'].map((sessionId, index) => ({ moduleInstanceId: 'view-' + index, editorId: 'workbench.conversation', editorScope: 'session', binding: { sessionId }, lastKnownTitle: 'Conversation', state: {} }))
+    area.activeModuleInstanceId = 'view-0'
+    const projected = projectLayoutPackage(record, [])
+    const checked = await inspectLayoutPackage(await buildLayoutPackage(projected))
+    const bindings = areasOf(checked.layout.document.root)[0]!.moduleHistory.map(page => page.pendingBinding)
+    expect(bindings[0]).toBe(bindings[2]); expect(bindings[0]).not.toBe(bindings[1])
+    const restored = restoreLayoutPackage(checked.layout, [], { [bindings[0]!]: { sessionId: 'local-one' }, [bindings[1]!]: { sessionId: 'local-two' } })
+    expect(areasOf(restored.document.root)[0]!.moduleHistory.map(page => page.binding?.sessionId)).toEqual(['local-one', 'local-two', 'local-one'])
+    expect(areasOf(restored.document.root)[0]!.areaBinding).toBeUndefined()
+  })
   it('exports backgrounds without Bay Main or runtime identities and restores a fresh local Workbench', async () => {
     const record = structuredClone(settingsFixture().workbenches.a!)
     record.bayAgentSession = { sessionId: 'private-bay-main', workspaceId: 'private-main-project', createdAt: 1, updatedAt: 2 }
@@ -49,6 +62,17 @@ describe('layout sharing manifest v3 / portable layout v2', () => {
     const record = { ...settingsFixture().workbenches.a!, layoutLocked: true }
     const projected = projectLayoutPackage(record, [descriptor])
     expect(projected).not.toHaveProperty('layoutLocked')
+  })
+  it('exports only detached Bay Agent orchestration history', async () => {
+    const record = structuredClone(settingsFixture().workbenches.a!)
+    record.bayAgentOrchestration = { schemaVersion: 1, currentEventSeq: 1, events: [{ schemaVersion: 1, eventId: 'event-1', seq: 1, kind: 'assignment.report', createdAt: 1, source: 'runtime', payload: { workItemId: 'work-item-1', assignmentId: 'assignment-1', summary: 'ready' } }], checkpoint: { schemaVersion: 1, compactedThroughSeq: 0, compactedAt: 1, retainedEventCount: 1, countsByKind: {}, summary: 'none' } }
+    const projected = projectLayoutPackage(record, [descriptor])
+    const bytes = await buildLayoutPackage(projected)
+    const files = decodeDeterministicZip(bytes)
+    expect(files.some(file => file.path === 'orchestration.json')).toBe(true)
+    const payload = files.map(file => new TextDecoder().decode(file.content)).join('\n')
+    expect((await inspectLayoutPackage(bytes)).layout.orchestration?.events[0]?.payload).toMatchObject({ workItemId: 'work-item-1', assignmentId: 'assignment-1' })
+    expect(restoreLayoutPackage(projected, [descriptor]).orchestration?.currentEventSeq).toBe(1)
   })
   it('exports human Context and restores it with fresh local Area ids and user ownership', () => {
     const record = structuredClone(settingsFixture().workbenches.a!)
@@ -72,13 +96,15 @@ describe('layout sharing manifest v3 / portable layout v2', () => {
     const record = structuredClone(settingsFixture().workbenches.a!)
     const context = createWorkbenchContext(); context.human.goal = '完整包目标'; record.context = context
     const areaContext = createAreaContext(); areaContext.human.objective = '完整包区域目标'; record.areaContexts = { 'area-a': areaContext }
+    record.bayAgentOrchestration = { schemaVersion: 1, currentEventSeq: 1, events: [{ schemaVersion: 1, eventId: 'event-1', seq: 1, kind: 'work-item.created', createdAt: 1, source: 'bay-agent', payload: { workItemId: 'work-item-1' } }] }
     const packageValue = await buildWorkbenchPackage({
       packageId: 'local.a', name: record.name, description: record.description, version: '0.0.0-test', createdAt: new Date(record.createdAt).toISOString(),
       document: record.document, inventory: buildWorkbenchInventory(record.document, [descriptor]), editors: [descriptor],
       compatibility: { dsh: { minimum: WORKBENCH_DSH_GENERATION }, targets: ['web'] },
-      workbenchContext: record.context, areaContexts: record.areaContexts, contextPolicy: 'human',
+      workbenchContext: record.context, areaContexts: record.areaContexts, bayAgentOrchestration: record.bayAgentOrchestration, contextPolicy: 'human',
     })
     expect(packageValue.manifest.contextPath).toBe('context.json')
+    expect(packageValue.manifest.orchestrationPath).toBe('orchestration.json')
     expect(packageValue.files.some(file => file.path === 'context/工作台整体背景说明.md')).toBe(true)
     expect(packageValue.files.some(file => file.path === 'context/areas/area-1-区域说明.md')).toBe(true)
     const decoded = await decodeWorkbenchPackageArchive(await (async () => {
@@ -128,7 +154,7 @@ describe('layout sharing manifest v3 / portable layout v2', () => {
   })
   it('rebinds only explicitly selected recipient-local sessions', () => {
     const layout = fixture()
-    const restored = restoreLayoutPackage(layout, [descriptor], { [layout.document.activeAreaId]: { sessionId: 'recipient' } })
+    const restored = restoreLayoutPackage(layout, [descriptor], { 'binding-1': { sessionId: 'recipient' } })
     const page = areasOf(restored.document.root)[0]!.moduleHistory[1]!
     expect(page.binding).toEqual({ sessionId: 'recipient' }); expect(page.pendingBinding).toBeUndefined()
     expect(areasOf(restored.document.root)[0]!.moduleHistory[0]!.binding).toBeUndefined()

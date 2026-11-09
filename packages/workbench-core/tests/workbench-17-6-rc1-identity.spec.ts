@@ -8,7 +8,7 @@ function json(relative: string) {
   return JSON.parse(source) as Record<string, any>
 }
 
-describe('Workbench 17.6 rc1 identity', () => {
+describe('Workbench 18.0 rc1 identity', () => {
   it('uses dsh-bay for the installable package and native Bundle entry', () => {
     const root = json('package.json'), core = json('packages/workbench-core/package.json')
     expect(WORKBENCH_PACKAGE_NAME).toBe('dsh-bay')
@@ -26,7 +26,7 @@ describe('Workbench 17.6 rc1 identity', () => {
     const root = json('package.json')
     const core = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as Record<string, any>
     const provenance = json('provenance/dsh-0.2.2-rc.1.json')
-    expect(WORKBENCH_CORE_VERSION).toBe('0.2.2-alpha.17.6')
+    expect(WORKBENCH_CORE_VERSION).toBe('0.2.2-alpha.18.0')
     expect(WORKBENCH_DSH_GENERATION).toBe('0.2.2-rc.1')
     expect(WORKBENCH_UPSTREAM_COMMIT).toBe('66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db')
     expect(root.devDependencies['@deepseek-ai/dsh']).toBe(WORKBENCH_DSH_GENERATION)

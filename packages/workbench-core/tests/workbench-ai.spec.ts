@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { buildWorkbenchAiPrompt, createRemoteWorkbenchAiDraftGenerator } from '../src/foundation/workbench-ai.ts'
+import { buildWorkbenchAiPrompt, createRemoteWorkbenchAiDraftGenerator, parseWorkbenchAiDraftInput } from '../src/foundation/workbench-ai.ts'
 import type { WorkbenchControlPlaneSnapshotV1 } from '../src/foundation/workbench-control-plane.ts'
 
 const snapshot: WorkbenchControlPlaneSnapshotV1 = {
@@ -12,34 +12,67 @@ const snapshot: WorkbenchControlPlaneSnapshotV1 = {
 }
 
 describe('Workbench AI draft prompt', () => {
-  it('includes Workbench, Area, page, extension, and user facts without a Session', () => {
-    const prompt = buildWorkbenchAiPrompt(snapshot, [{ id: 'workbench.conversation', scope: 'session', label: 'Conversation' }], { extensions: [{ packageName: 'example.plugin' }] }, { scope: 'workbench', currentValue: 'user goal supplement' })
-    expect(prompt).toContain('deliver a verifiable workbench')
-    expect(prompt).toContain('organize sources')
+  it('includes the current description and all pages in all Workbench Areas', () => {
+    const other = { ...snapshot.areas[0]!, areaId: 'other', label: 'Design', modules: [{ moduleInstanceId: 'page-2', editorId: 'example.notes', scope: 'root' as const, title: 'Design notes', available: true }] }
+    const prompt = buildWorkbenchAiPrompt({ ...snapshot, areas: [...snapshot.areas, other] }, { workbenchId: snapshot.workbenchId, scope: 'workbench', currentValue: 'user goal supplement' })
+    expect(prompt).toContain('AI Workbench')
+    expect(prompt).toContain('real draft generation')
+    expect(prompt).toContain('Research')
+    expect(prompt).toContain('Source chat')
+    expect(prompt).toContain('Design notes')
     expect(prompt).toContain('workbench.conversation')
-    expect(prompt).toContain('example.plugin')
     expect(prompt).toContain('user goal supplement')
+    expect(prompt).not.toContain('session-area')
+    expect(prompt).not.toContain('deliver a verifiable workbench')
   })
 
   it('scopes an Area draft to the selected Area instead of sending other Areas', () => {
     const secondArea = structuredClone(snapshot.areas[0]!)
     secondArea.areaId = 'area-other'; secondArea.label = 'Other'; secondArea.context.human.objective = 'other objective'
     const scopedSnapshot = { ...snapshot, areas: [...snapshot.areas, secondArea] }
-    const prompt = buildWorkbenchAiPrompt(scopedSnapshot, [], undefined, { scope: 'area', areaId: 'area-research', currentValue: 'area supplement' })
+    const prompt = buildWorkbenchAiPrompt(scopedSnapshot, { workbenchId: snapshot.workbenchId, scope: 'area', areaId: 'area-research', currentValue: 'area supplement' })
     expect(prompt).toContain('area supplement')
-    expect(prompt).toContain('organize sources')
+    expect(prompt).toContain('Source chat')
     expect(prompt).not.toContain('other objective')
-    expect(prompt).toContain('area-only')
+    expect(prompt).not.toContain('Other')
+    expect(prompt).not.toContain('real draft generation')
+    expect(prompt).not.toContain('AI Workbench')
   })
 
-  it('rejects invalid scope and area identity before making a request', () => {
-    expect(() => buildWorkbenchAiPrompt(snapshot, [], undefined, { scope: 'area', currentValue: '' })).toThrow()
-    expect(() => buildWorkbenchAiPrompt(snapshot, [], undefined, { scope: 'workbench', areaId: 'area-research', currentValue: '' })).toThrow()
-    expect(() => buildWorkbenchAiPrompt(snapshot, [], undefined, { scope: 'area', areaId: 'missing', currentValue: '' })).toThrow()
+  it('uses only unsaved name, description and current draft during creation', () => {
+    const prompt = buildWorkbenchAiPrompt(snapshot, { scope: 'create', name: '新名称', description: '新简介', currentValue: '已写的目标' })
+    for (const fact of ['新名称', '新简介', '已写的目标']) expect(prompt).toContain(fact)
+    for (const foreign of ['AI Workbench', 'Research', 'Source chat', 'real draft generation']) expect(prompt).not.toContain(foreign)
+  })
+
+  it('validates scope, identity and model selection before making a request', () => {
+    expect(() => parseWorkbenchAiDraftInput({ scope: 'area', workbenchId: 'wb-ai', currentValue: '' })).toThrow()
+    expect(() => parseWorkbenchAiDraftInput({ scope: 'workbench', workbenchId: 'wb-ai', areaId: 'area-research', currentValue: '' })).toThrow()
+    expect(() => parseWorkbenchAiDraftInput({ scope: 'create', name: '', description: '' })).toThrow()
+    expect(() => parseWorkbenchAiDraftInput({ scope: 'create', name: 'new', description: '', workbenchId: 'wb-ai' })).toThrow()
+    expect(() => parseWorkbenchAiDraftInput({ scope: 'workbench', workbenchId: 'wb-ai', selection: { provider: 3, model: 'm' } })).toThrow()
+    expect(() => buildWorkbenchAiPrompt(snapshot, { workbenchId: 'wb-ai', scope: 'area', areaId: 'missing', currentValue: '' })).toThrow()
+  })
+
+  it('handles empty Areas without inventing pages and excludes archived Areas', () => {
+    const empty = { ...snapshot, areas: [{ ...snapshot.areas[0]!, modules: [] }] }
+    expect(buildWorkbenchAiPrompt(empty, { scope: 'area', workbenchId: 'wb-ai', areaId: 'area-research', currentValue: '' })).toContain('"pages": []')
+    const archived = { ...snapshot, areas: [{ ...snapshot.areas[0]!, archived: true }] }
+    expect(buildWorkbenchAiPrompt(archived, { scope: 'workbench', workbenchId: 'wb-ai', currentValue: '' })).not.toContain('Source chat')
+    expect(() => buildWorkbenchAiPrompt(archived, { scope: 'area', workbenchId: 'wb-ai', areaId: 'area-research', currentValue: '' })).toThrow()
   })
 })
 
 describe('Remote Workbench AI draft client', () => {
+  it('sends creation form values without looking up the active Workbench model', async () => {
+    const fetcher = vi.fn(async (_url: string, init: RequestInit) => {
+      expect(JSON.parse(String(init.body))).toEqual({ scope: 'create', name: '新工作台', description: '新简介', currentValue: '' })
+      return Response.json({ draft: '# New' })
+    })
+    const getSelection = vi.fn()
+    await createRemoteWorkbenchAiDraftGenerator({ route: '/draft', fetcher, getSelection }).generateContextDraft({ scope: 'create', name: '新工作台', description: '新简介', currentValue: '' })
+    expect(getSelection).not.toHaveBeenCalled()
+  })
   it('posts one-shot input to the dedicated route and returns the draft', async () => {
     const fetcher = vi.fn(async (_url: string, init: RequestInit) => {
       expect(JSON.parse(String(init.body))).toEqual({ workbenchId: 'wb-ai', scope: 'area', areaId: 'area-research', currentValue: 'seed', selection: { provider: 'p', model: 'm' } })

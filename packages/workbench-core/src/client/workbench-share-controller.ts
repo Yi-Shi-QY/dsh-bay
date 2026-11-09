@@ -1,6 +1,9 @@
 import type { ClientConnectionRpc, ConnectionRpcResult } from '@deepseek-ai/dsh-client-connection/client'
+import type { WorkbenchGrant } from '../workbench-access-contract.ts'
 
 export interface WorkbenchShareSessionSnapshotV1 {
+  readonly grant?: WorkbenchGrant
+  readonly grantRevision?: number
   readonly workbenchId: string
   readonly bindHost: string
   readonly port: number
@@ -46,7 +49,8 @@ export interface WorkbenchShareSnapshotV1 {
 export interface WorkbenchShareControllerV1 {
   getSnapshot(): WorkbenchShareSnapshotV1
   subscribe(listener: () => void): () => void
-  start(workbenchId: string): Promise<{ readonly status: 'started' | 'already-active'; readonly url: string }>
+  start(workbenchId: string, grant?: WorkbenchGrant): Promise<{ readonly status: 'started' | 'already-active'; readonly url: string }>
+  reduce?(workbenchId: string, grant: WorkbenchGrant): Promise<void>
   stop(workbenchId: string): Promise<void>
   refresh(workbenchId: string): Promise<WorkbenchShareSessionSnapshotV1 | undefined>
   renameGuest(workbenchId: string, leaseId: string, nickname: string): Promise<void>
@@ -62,7 +66,7 @@ function unwrap<T>(result: ConnectionRpcResult<unknown>): T {
 
 /** Browser-side adapter for Host share-session management. It has no page or
  * Workbench rendering knowledge; guest pages never receive this adapter. */
-export function createWorkbenchShareController(options: { readonly rpc?: ClientConnectionRpc } = {}): WorkbenchShareControllerV1 {
+export function createWorkbenchShareController(options: { readonly rpc?: ClientConnectionRpc; readonly chooseGrant?: (workbenchId: string) => Promise<WorkbenchGrant | undefined> } = {}): WorkbenchShareControllerV1 {
   const listeners = new Set<() => void>()
   let rpc = options.rpc
   let disposed = false
@@ -87,8 +91,10 @@ export function createWorkbenchShareController(options: { readonly rpc?: ClientC
   return {
     getSnapshot: () => snapshot,
     subscribe(listener) { listeners.add(listener); return () => { listeners.delete(listener) } },
-    async start(workbenchId) {
-      const result = await call<{ status: 'started' | 'already-active'; url: string }>('start', { workbenchId })
+    async start(workbenchId, input) {
+      const grant = input ?? (snapshot.links[workbenchId] ? undefined : await options.chooseGrant?.(workbenchId))
+      if (!snapshot.links[workbenchId] && options.chooseGrant && !grant) throw new Error('已取消分享。')
+      const result = await call<{ status: 'started' | 'already-active'; url: string }>('start', { workbenchId, ...(grant ? { grant } : {}) })
       const status = await call<{ sessions?: unknown }>('status', { workbenchId })
       const session = Array.isArray(status.sessions) ? (status.sessions as WorkbenchShareSessionSnapshotV1[]).map(normalizeSession).find(row => row.workbenchId === workbenchId) : undefined
       publish({ ...snapshot, supported: true, links: { ...snapshot.links, [workbenchId]: result.url }, sessions: session === undefined ? snapshot.sessions : [...snapshot.sessions.filter(row => row.workbenchId !== workbenchId), session] })
@@ -101,6 +107,7 @@ export function createWorkbenchShareController(options: { readonly rpc?: ClientC
       replaceSession(workbenchId, undefined)
       publish({ ...snapshot, supported: true, links })
     },
+    async reduce(workbenchId, grant) { await call('reduce', { workbenchId, grant }); await this.refresh(workbenchId) },
     async refresh(workbenchId) {
       const result = await call<{ sessions?: unknown }>('status', { workbenchId })
       const rows = Array.isArray(result.sessions) ? (result.sessions as WorkbenchShareSessionSnapshotV1[]).map(normalizeSession) : []

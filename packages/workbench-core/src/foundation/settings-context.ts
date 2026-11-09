@@ -22,9 +22,13 @@ export function settingsTargetWritable(context: WorkbenchSettingsContextV1, id: 
 export function scopeSettingsSnapshot(snapshot: SettingsScopeSnapshot<WorkbenchSettingsV4>, context: WorkbenchSettingsContextV1): SettingsScopeSnapshot<WorkbenchSettingsV4> {
   if (context.mode === 'desktop' || snapshot.value === undefined) return snapshot
   const record = snapshot.value.workbenches[context.workbenchId]
+  const backgroundAi = record?.backgroundAi ?? snapshot.value.backgroundAi
   return { status: snapshot.status, revision: snapshot.revision, writable: snapshot.writable, mode: snapshot.mode,
     value: { version: 4, activeWorkbenchId: context.workbenchId, openWorkbenchIds: record ? [context.workbenchId] : [],
-      workbenches: record ? { [context.workbenchId]: record } : {}, invalidWorkbenches: {}, layoutTemplates: {}, sessionMarkers: {} } }
+      workbenches: record ? { [context.workbenchId]: record } : {}, invalidWorkbenches: {}, layoutTemplates: {}, sessionMarkers: {},
+      ...(snapshot.value.globalHiddenEditorIds === undefined ? {} : { globalHiddenEditorIds: [...snapshot.value.globalHiddenEditorIds] }),
+      ...(snapshot.value.extensionConsents === undefined ? {} : { extensionConsents: structuredClone(snapshot.value.extensionConsents) }),
+      ...(backgroundAi ? { backgroundAi } : {}) } }
 }
 
 export interface SettingsViewMemory {

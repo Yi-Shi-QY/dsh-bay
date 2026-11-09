@@ -10,6 +10,7 @@
   "include": [
     "src/*.ts",
     "src/foundation/model.ts",
+    "src/foundation/area-identity.ts",
     "src/foundation/document-v3.ts",
     "src/foundation/persistence.ts",
     "src/foundation/catalog.ts",
@@ -28,6 +29,7 @@
     "src/foundation/workbench-bay-agent-work.ts",
     "src/foundation/workbench-superagent-adapter.ts",
     "src/foundation/workbench-ai.ts",
+    "src/foundation/background-ai-preferences.ts",
     "src/foundation/workbench-package-trust.ts"
   ],
   "exclude": [

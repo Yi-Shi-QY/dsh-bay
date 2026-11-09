@@ -437,9 +437,9 @@ export function createWorkbenchNativeConversationEditors(ctx: Context) {
         if (mountedRef.current) setPlacement({
           phase: 'failed', workspaceId,
           message: code === 'area-already-bound'
-            ? '当前区域的其他内页正在使用已有对话，请在新区域中开始。'
+            ? '目标内页已发生变化，请重新打开新建对话入口。'
             : code === 'placement-stale'
-              ? '当前区域已发生变化，请重新选择工作区。'
+              ? '目标内页或项目已发生变化，请重试。'
               : '无法准备此工作区对话，请重试。',
         })
         throw reason
@@ -471,7 +471,10 @@ export function createWorkbenchNativeConversationEditors(ctx: Context) {
       }
       return <PreparedStart owner={owner} reference={retained.reference} renderer={renderer} placement={placement} />
     }
-    return <StartSurface owner={owner} renderer={renderer} placement={placement} />
+    return <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
+      {owner.workspaceId ? <button type="button" disabled={placement.phase === 'placing'} onClick={() => { void selectWorkspace(owner.workspaceId!).catch(() => {}) }}>在区域项目中新建对话</button> : null}
+      <StartSurface owner={owner} renderer={renderer} placement={placement} />
+    </div>
   }
 
   function Content({ owner, reference, view, nativeRenderer }: {

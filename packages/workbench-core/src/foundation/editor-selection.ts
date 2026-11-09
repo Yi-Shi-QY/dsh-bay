@@ -16,9 +16,6 @@ export function createFloatingEditorTab(editor: WorkbenchEditorCatalogRow, id: s
 export function prepareFloatingTabForArea(tab: TabDocument, target: GroupNode, allTabs: readonly TabDocument[]): TabDocument {
   if (tab.editorScope === 'root' && tab.pendingBinding) throw new Error('请先为此内页选择来源对话，再放入区域。')
   if (!tab.pendingBinding) return tab
-  const binding = target.areaBinding ?? target.tabs.find(row => row.binding)?.binding
-  if (binding) return { ...createSessionTab(tab.id, tab.editorId, binding, tab.lastKnownTitle, tab.state),
-    ...(tab.pendingDistribution ? { pendingDistribution: tab.pendingDistribution } : {}) }
   const pending = createPendingSessionTab({ id: tab.editorId, label: tab.lastKnownTitle, scope: tab.editorScope }, tab.id, target, allTabs, tab.state)
   return { ...pending, ...(tab.pendingDistribution ? { pendingDistribution: tab.pendingDistribution } : {}) }
 }
@@ -52,7 +49,7 @@ export function selectableWorkbenchEditors(editors: readonly WorkbenchEditorCata
       && editor.id === 'workbench.conversation.start' && editor.scope === 'session'))
 }
 
-/** Pending identifiers are unique across the layout, and shared only within one Area. */
+/** Each pending page owns its selection; another page cannot resolve its binding. */
 export function createPendingSessionTab(
   editor: WorkbenchEditorCatalogRow,
   id: string,
@@ -61,14 +58,12 @@ export function createPendingSessionTab(
   state: JsonValue = {},
 ): TabDocument {
   if (editor.scope !== 'session') throw new Error('Only Session editors require a binding')
-  let pendingBinding = group.tabs.find(tab => tab.pendingBinding !== undefined)?.pendingBinding
-  if (pendingBinding === undefined) {
-    const used = new Set(allTabs.map(tab => tab.pendingBinding))
-    for (let index = 1; index <= 999; index++) {
-      const candidate = `binding-${index}`
-      if (!used.has(candidate)) { pendingBinding = candidate; break }
-    }
+  let pendingBinding: string | undefined
+  const used = new Set([...allTabs, ...group.tabs].map(tab => tab.pendingBinding))
+  for (let index = 1; index <= 999; index++) {
+    const candidate = `binding-${index}`
+    if (!used.has(candidate)) { pendingBinding = candidate; break }
   }
-  if (pendingBinding === undefined) throw new Error('待绑定区域已达上限，请先绑定已有区域。')
+  if (pendingBinding === undefined) throw new Error('待绑定内页已达上限，请先绑定已有内页。')
   return { id, editorId: editor.id, editorScope: 'session', pendingBinding, lastKnownTitle: editor.label, state: structuredClone(state) }
 }

@@ -62,7 +62,7 @@ const obj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'o
 const only = (v: object, allowed: string[]) => Object.keys(v).every(k => allowed.includes(k))
 const strings = (v: unknown): v is string[] => Array.isArray(v) && v.length <= 256 && v.every(x => typeof x === 'string' && x.length > 0 && x.length <= 512) && new Set(v).size === v.length
 export function safeRuntimePath(path: string): boolean {
-  if (path === 'context.json' || path === 'context/工作台整体背景说明.md' || /^context\/areas\/[A-Za-z0-9._:-]{1,128}-区域说明\.md$/u.test(path)) return true
+  if (path === 'context.json' || path === 'orchestration.json' || path === 'context/工作台整体背景说明.md' || /^context\/areas\/[A-Za-z0-9._:-]{1,128}-区域说明\.md$/u.test(path)) return true
   return path.length <= 240 && path.split('/').every(p => /^[a-zA-Z0-9@_+.-]+$/u.test(p) && p !== '.' && p !== '..' && !p.endsWith('.') && !/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:[.]|$)/iu.test(p))
     && !path.split('/').some(p => ['node_modules', '.git', '.env'].includes(p) || p.endsWith('.map'))
 }
@@ -82,7 +82,8 @@ export async function buildWorkbenchPackageV4(input: {
     { path: 'context/工作台整体背景说明.md', content: new TextEncoder().encode(renderPortableWorkbenchContextMarkdown(input.layout.context)) },
     ...Object.keys(input.layout.context.areas).sort().map(areaKey => ({ path: `context/areas/${areaKey}-区域说明.md`, content: new TextEncoder().encode(renderPortableAreaContextMarkdown(input.layout.context!, areaKey)) })),
   ]
-  const files = [{ path: 'workbench.json', content: enc(input.layout) }, ...contextFiles, ...(input.artifacts ?? [])]
+  const orchestrationFiles = input.layout.orchestration === undefined ? [] : [{ path: 'orchestration.json', content: enc(input.layout.orchestration) }]
+  const files = [{ path: 'workbench.json', content: enc(input.layout) }, ...contextFiles, ...orchestrationFiles, ...(input.artifacts ?? [])]
   const dependencies = input.dependencies ?? []
   const manifest: WorkbenchPackageManifestV4 = { schemaVersion: 4, format: 'dsh-workbench-package', mode: input.mode,
     packageId: await sha256Hex(enc({ layout: input.layout, dependencies, mode: input.mode })), version: WORKBENCH_CORE_VERSION, name: input.layout.name, createdAt: new Date().toISOString(),
@@ -149,13 +150,17 @@ export async function inspectWorkbenchPackageV4(bytes: Uint8Array): Promise<Work
   if (manifest.dependencies.some(d => d.requires.some(p => !packages.has(p)))) throw new Error('工作台依赖闭包不完整。')
   orderedDistributionDependencies(manifest.dependencies)
   if (canonicalJson([...new Set(manifest.dependencies.flatMap(d => d.permissions))].sort()) !== canonicalJson(manifest.permissions)) throw new Error('权限清单与依赖不一致。')
-  const layoutForCount = json(byPath.get('workbench.json') ?? new Uint8Array()) as { context?: { areas?: Record<string, unknown> } }
-  const contextFileCount = manifest.compatibility.portableLayout === 3 ? 2 + Object.keys(layoutForCount.context?.areas ?? {}).length : 0
+  const layoutForCount = json(byPath.get('workbench.json') ?? new Uint8Array()) as { context?: { areas?: Record<string, unknown> }; orchestration?: unknown }
+  const contextFileCount = (manifest.compatibility.portableLayout === 3 ? 2 + Object.keys(layoutForCount.context?.areas ?? {}).length : 0) + (layoutForCount.orchestration === undefined ? 0 : 1)
   if (manifest.mode === 'layout-only' && (manifest.dependencies.length || files.length !== 2 + contextFileCount || manifest.publisher)) throw new Error('布局分享不能包含可执行制品。')
   if (manifest.mode === 'online-reference' && files.length !== 3 + contextFileCount) throw new Error('在线引用不能包含隐式制品。')
   if (manifest.mode === 'offline-embedded' && files.length !== 3 + manifest.dependencies.length + contextFileCount) throw new Error('离线包包含依赖锁之外的制品。')
   const layout = json(byPath.get('workbench.json')!)
   validatePortableLayout(layout)
+  if (layout.orchestration !== undefined) {
+    const orchestration = json(byPath.get('orchestration.json') ?? new Uint8Array())
+    if (canonicalJson(orchestration) !== canonicalJson(layout.orchestration)) throw new Error('orchestration.json 与 workbench.json 不一致')
+  } else if (byPath.has('orchestration.json')) throw new Error('orchestration.json 未声明')
   if (manifest.compatibility.portableLayout === 2 && layout.context !== undefined) throw new Error('布局版本与 Context 不一致')
   if (manifest.compatibility.portableLayout === 3) {
     if (layout.context === undefined) throw new Error('布局版本缺少 Context')

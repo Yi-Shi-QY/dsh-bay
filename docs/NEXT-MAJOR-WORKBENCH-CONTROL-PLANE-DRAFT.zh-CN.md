@@ -2,6 +2,8 @@
 
 状态：产品契约与实验版进度草稿（2026-11-07 更新；未提交）
 
+2026-11-09 更新：18.0 实施以 [重构计划书](./V18-REFACTOR-PLAN.zh-CN.md)为准；当前布局、区域生命周期、插件来源、任务续用及旧提示残余见 [区域/会话解耦核查与更新方案](./V18-AREA-SESSION-DECOUPLING-AUDIT.zh-CN.md)。本文保留早期讨论记录，区域级单 Session 绑定和旧包迁移描述不再作为实现依据。
+
 目标版本：下一个大版本
 
 ## 1. 目标
@@ -17,7 +19,7 @@
 | 对象 | 作用 |
 | --- | --- |
 | Workbench | 整个工作台，保存长期目标、全局约束和工作台级背景 |
-| Area | 稳定的工作上下文，保存内页组合、Session 绑定和区域背景 |
+| Area | 稳定的工作分工与项目目录关联，保存区域背景；内页分别引用具体 Session 或资源 |
 | Work Item | 一项需要完成、暂停、重试、交接或结束的工作 |
 | Session | 实际进行推理和工具调用的 Agent 会话 |
 | Assignment | 一个 Work Item 当前的一次执行绑定，可重启或更换 Session |
@@ -118,15 +120,26 @@ Worker 默认只能通过结构化报告提供事实和建议，不能直接修�
 UI 只依赖一个可注入的生成接口：
 
 ```ts
-generateBackground({
-  scope: 'workbench' | 'area',
-  currentText,
-  workbenchId,
-  areaId?,
-}): Promise<string>
+generateContextDraft(input:
+  | { scope: 'create'; name: string; description: string; currentValue: string }
+  | { scope: 'workbench'; workbenchId: string; currentValue: string }
+  | { scope: 'area'; workbenchId: string; areaId: string; currentValue: string }
+): Promise<string>
 ```
 
-生成结果先填入可编辑草稿，涉及 `human` 区段时由人类点击保存后应用。创建入口先准备 Workbench 身份，再通过该工作台的 Main Session 生成；已有工作台和区域的编辑入口也使用该会话和已配置模型。生成器读取真实工作台结构及内页声明；无模型或生成失败时显示错误，不伪造模型结果。独立差异预览尚未实现。
+三个入口共享独立单轮模型服务，不向 Bay Agent Main Session 发消息，也不启动它的 Agent loop。Bay Agent 主动生成背景时调用同一服务；工具调用和结果仍可记录在它自己的会话中。
+
+- 创建工作台：只使用表单中当前填写的名称、简介和已有草稿。不提前创建工作台或 Main Session，用户点击“创建并打开”时才保存。
+- 编辑工作台背景：读取当前工作台名称、简介以及全部未归档区域的全部内页名称和类型，结合当前草稿生成整体背景。
+- 编辑区域背景：只读取目标区域的全部内页名称和类型，结合当前草稿生成区域背景；不携带其他区域、全局简介或全局内页目录。
+
+内页清单包含当前区域的全部内页，不限于正在显示的标签；不自动读取对话记录、文件正文或插件内部数据。空区域不虚构已有能力。生成结果先填入可编辑草稿，由人类点击保存后写入 `human` 区段；无模型或生成失败时显示错误并保留原草稿。独立差异预览尚未实现。
+
+「工作台设置 → 交互偏好 → 背景 AI 辅助填写」提供独立的模型、思考强度、共用系统提示词和三种场景提示词。默认跟随 DSH 默认模型，界面显示当前具体模型；三个入口统一使用此配置，不读取 Bay Agent 主会话的模型设置。显式 API 请求可覆盖当次模型。完整请求由共用系统提示词、当前入口提示词、用户草稿和按上述范围读取的事实构成，修改提示词不扩大事实读取范围。
+
+配置保存于当前 Profile 的 `WorkbenchSettingsV4.backgroundAi`，适用于本实例所有工作台。旧配置缺失时使用内置默认；无效配置不影响工作台布局恢复。保存后下一次生成读取最新配置，进行中的请求保持原配置；取消编辑不写入，恢复默认先呈现为草稿，点击保存才生效。未保存时离开页面或关闭设置有保护，并发更新采用 revision 检查避免覆盖其他窗口。
+
+该配置属于本机生成偏好，不随工作台包导出或导入；接收方使用自己的模型和提示词。已经保存的工作台背景与区域背景仍随包传递，既有背景的导入导出行为不变。
 
 ### 4.4 注入时机
 
@@ -286,7 +299,7 @@ Bay Agent 使用现有浮动工作区内的系统聊天页签，复用 DSH 原�
 - 模块验证、安装和恢复状态；
 - 最近决策和 Context 变化。
 
-Bay Agent 默认读取 Workbench Context、Area 摘要、Work Item、Assignment、Worker 报告和与当前决策相关的模块状态。它不默认读取所有 Session transcript、终端历史或插件内部状态。
+Bay Agent 默认读取 Workbench Context、Area 摘要、Work Item、Assignment、Worker 报告和与当前决策相关的模块状态。现在这些编排事实通过 Orchestration Context Engine 形成有限当前投影，并附带最近报告、阻塞、决策和事件摘要；需要追溯因果时调用有界的 `bay_history`，不默认读取所有 Session transcript、终端历史或插件内部状态。
 
 Worker 事件先归类为：
 
@@ -301,7 +314,7 @@ failed
 
 进度不制造 Attention；阻塞、失败、输入要求、异常停止和背景写回冲突提示处理。`ready` 显示为待验收，显式 accept 后才为 `completed`。原生授权必须在对应 Worker 对话处理。
 
-Main 由 Host 自动创建和恢复，身份持久化到工作台本机 Settings；浏览器仅展示快照。当前实际 Runtime 是通过 Adapter 接入的 DSH Session Controller，创建独立原生 Worker 会话。Main 工具包括 `bay_inspect`、`bay_create_area`、`bay_dispatch`、`bay_work`、`bay_context` 和 `bay_message`，Worker 使用 `bay_report`。
+Main 由 Host 自动创建和恢复，身份持久化到工作台本机 Settings；浏览器仅展示快照。当前实际 Runtime 是通过 Adapter 接入的 DSH Session Controller，创建独立原生 Worker 会话。Main 工具包括 `bay_inspect`、`bay_history`、`bay_create_area`、`bay_dispatch`、`bay_work`、`bay_context` 和 `bay_message`，Worker 使用 `bay_report`。编排事件与物化状态一起原子保存，旧 V1 journal 没有事件字段时按空账本恢复。
 
 ## 10. 权限边界
 
@@ -352,6 +365,9 @@ Main 由 Host 自动创建和恢复，身份持久化到工作台本机 Settings
 
 当前进度：主链路已接入 Host 与现有浮动工作区中的原生聊天。生命周期、状态机和隔离 Profile 浏览器验证进入实验包验收；真实模型连续自主执行还需配置 Provider 后验证。
 
+### 阶段 6.5：Orchestration Context Engine
+
+交付编排事件账本、当前投影、有限 `bay_history` 回查、Runtime 事件去重、Context patch 结果记录和重启重建。账本拆为 NDJSON，并带 compaction checkpoint；外部 Runtime 使用正式事件信封；可迁移的审计投影进入工作台包。Bay Agent 默认读取当前投影与最近事件摘要，需要因果历史时再回查事件；Session transcript 仍由原生 Session 持有。
 ### 阶段 7：Attention 和恢复
 
 交付 Attention Queue、结果聚合、阻塞和失败处理、重启恢复、过期 mutation 拒绝和系统健康面板。
@@ -368,8 +384,9 @@ Main 由 Host 自动创建和恢复，身份持久化到工作台本机 Settings
 | Read Plane | 第一版 | Workbench、Area、内页、Context、Work Item、Assignment 和 Attention 快照 | 更细查询与上下文预算 |
 | Control Plane Mutation | 第一版 | Area 创建、独立 Worker 内页、模式选择、ensureEditor、Context patch、作用域与迟到结果校验 | 完整 claim/delegate/archive/restore API、审计界面 |
 | 包格式和模块集成 | 第一版 | Context JSON/Markdown、策略、Area key 映射、ownership 降级、本机 Main 与运行状态隔离 | 导入差异预览、package schema 3、全部容器插件工具聚合到 Bay |
-| Bay Agent 聊天与 Main | 已接入 | 现有浮动工作区系统页签、自动持久 Main、原生聊天输入框 | 长会话压缩、费用治理与交互打磨 |
+| Bay Agent 聊天与 Main | 已接入 | 现有浮动工作区系统页签、自动持久 Main、原生聊天输入框、Bay 专属 preset、原生 Session compaction 和工具结果裁剪 | Worker preset 能力检查、费用治理与交互打磨 |
 | Work Item / Assignment | 已接入 | 自有 ID、DSH 原生 Runtime Adapter、先保存后派发、独立 Worker、显式报告和验收 | 官方 HTTP Adapter、并发预算、细化暂停/接管策略 |
+| Orchestration Context Engine | 实验闭环已完成 | 编排事件账本、当前投影、`bay_history` 有界回查、Runtime 回调去重、Context patch 结果记录、旧 V1 journal 兼容和重启重建、NDJSON、compaction checkpoint、正式 Runtime 事件信封、编排历史包导入导出 | 可配置上下文预算、真实 Runtime outbox/断线恢复、长时间真实模型实测 |
 | Attention / 恢复 | 第一版 | Host journal、报告转交 Main、恢复新尝试、原生授权保留、重启观察不重发 | outbox 故障注入、系统健康面板 |
 
 本轮优先完成可安装实验包和基础验收。现有插件发现、自动集成和内页声明保留；所有容器插件能力统一映射为 Bay 可调用工具仍需后续工作，不声称本轮全部接通。IM 接入留在后续版本。
@@ -436,7 +453,10 @@ Session、Workspace、凭据、transcript、绝对路径、窗口句柄和运行
 10. Bay Agent 的默认模型、上下文预算和并发上限；
 11. 包导出默认是否包含 `agent` handoff，以及是否提供仅布局导出；
 12. 导入后的 Area ownership 是否一律为 `user-owned`，以及用户委托入口如何设计；
-13. Context-aware package schema、Markdown 投影文件和旧版本降级的兼容策略。
+13. Context-aware package schema、Markdown 投影文件和旧版本降级的兼容策略；
+14. 编排事件账本继续使用同一 JSON 数组，还是迁移为 `state.json + events.ndjson`；
+15. 事件压缩是否只由规则 projection/checkpoint 完成，还是允许模型生成摘要；
+16. `bay_history` 的默认事件条数、最大字节预算和跨 Workbench 查询边界。
 
 当前建议先确定 Context 字段、包导出策略和 ownership 导入规则，再继续设计 Bay Agent prompt 和更复杂的 UI。
 
@@ -453,3 +473,33 @@ Session、Workspace、凭据、transcript、绝对路径、窗口句柄和运行
 7. 工作台包只携带选定背景与布局，不迁移本机 Main、Worker、运行中 Assignment、Attention 或 journal。导入后的新 Workbench 自动拥有新的本地 Main。
 
 实验包和证据存放于 `releases/alpha17.5-bay-agent-host-private/`。隔离 Profile 不含模型凭据，真实模型自动分解任务、多 Worker 连续执行和 AI 背景生成仍需配置模型后验收。源码测试中的模拟 Session/报告验证适配契约，不等同于模型实跑。官方 Superagent HTTP 客户端和 IM 接入仍属于后续切片。
+
+## 17. Orchestration Context Engine 落地记录（alpha17.6 工作树）
+
+本轮在现有 Bay Agent 主线中加入 `BayAgentOrchestrationEventV1` 和 `BayAgentOrchestrationProjectionV1`。Controller 对 Work Item、Assignment、Worker 报告、Attention、Context patch、接受和恢复动作记录事件；Host 将物化状态、NDJSON 事件账本和 checkpoint 分开保存，旧 V1 journal 会在首次保存时迁移。
+
+Bay Agent 的 system prompt 和 `bay_inspect` 使用当前投影；新增 `bay_history` 支持按 Work Item、Assignment、`afterSeq` 和 limit 有界回查。Runtime 回调使用幂等键去重，Context patch 仍受原有 ownership/revision/CAS 约束，事件只记录结果，不成为写入旁路。
+
+专项测试覆盖事件序号、重复 Runtime 回调、过滤与 limit、旧 journal 迁移、重启 projection 恢复、NDJSON、长历史压缩、正式 Runtime 事件信封和包导入导出。压缩后只保留最近 128 条事件并返回 checkpoint 边界；工作台包中的 `orchestration.json` 只包含脱敏审计投影，不恢复本机运行态。
+
+## 18. 真实模型实测反馈：区域项目绑定（2026-11-09，讨论中）
+
+用户在另一台机器实测提出：Area 应绑定项目文件夹，同区域允许多个不同 Session 的对话内页，内页仍精确绑定一个对话。当前代码中的显式 Area Session 绑定、整区域重绑、同 Session 合并限制与 Bay Agent 追加独立 Worker 的路径存在语义冲突；Worker 通用标题及每次 Assignment 新建对话也需要配套处理。
+
+已完成静态代码影响梳理并形成[区域项目绑定与多对话编排讨论稿](./AREA-PROJECT-BINDING-PROPOSAL.zh-CN.md)。该项已在 alpha18.0 工作树实施：区域按项目目录归属，内页按来源 Session 绑定，任务续用与插件来源均不再依赖区域代表会话；同项目多区域和有内容区域换项目按 18.0 计划执行。
+
+2026-11-09 用户已确认任务继续策略：同一任务优先续用原对话，新任务另建；原对话失效或需要隔离时允许另建。实现需要区分任务、执行尝试和对话身份，保留重复请求幂等、原生输入等待及旧执行迟到报告的校验；具体规则与验收场景已同步到讨论稿。
+
+## 19. 18.0 工作台根目录与区域子目录（2026-11-09，讨论中）
+
+用户进一步提出：创建工作台时选位置新建工作台文件夹，区域选择或新建根内文件夹，区域对话默认使用该目录作为项目。该方向为区域项目绑定增加工作台级文件归属，也将工作文件携带和导入落盘纳入包设计。
+
+已形成[18.0 工作台目录架构讨论稿](./V18-WORKBENCH-DIRECTORY-ARCHITECTURE.zh-CN.md)，并在 alpha18.0 工作树完成根目录登记、区域相对路径、Host 统一目录/持久服务和原生 Session 迁移适配器。已有任务续用决策继续适用；真实模型长时间运行和跨平台实机迁移仍待验收。
+
+用户随后明确两项核心要求：完整包导入后恢复整个目录、工作文件、对话和资源关系，接收方无需逐个重绑即可继续工作；Bay Agent 使用工作台根目录作为项目，并在其中维护专属持久记忆，记忆随包迁移。18.0 必须交付完整历史/附件/子会话迁移、Main 历史和记忆恢复及实际续聊验证，不能以对话模板或仅恢复审计历史作为完整包验收。原生 DSH 已有完整会话导出和持久化读写基础；工作台级导入、引用映射与恢复仍需实现和验证。
+
+## 18.0 主线补充：原生压缩与 Worker 能力提示
+
+Bay Main 的原生 compaction 已通过真实 Session 级集成测试：压缩事件写入 DSH Session Persistence，恢复后仍可继续对话。Bay 编排 checkpoint、Session compaction 和 Workbench Context projection 继续保持独立边界。
+
+Worker 模式能力摘要已经进入任务派发面板。面板只提示当前 preset 是否具备自动压缩；能力未知或缺少压缩时仍保留用户选择并允许创建任务。

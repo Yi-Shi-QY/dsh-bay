@@ -33,7 +33,31 @@ function directory(overrides: Record<string, unknown> = {}) {
   }
 }
 
+function expectDirectoryCreateInput(input: { name?: unknown; folderName?: unknown; parentPath?: unknown; requestId?: unknown }) {
+  expect(input.folderName).toBe(input.name)
+  expect(input.parentPath).toBe('')
+  expect(typeof input.requestId).toBe('string')
+}
+
 describe('Workbench Home', () => {
+  it('requires a parent folder and passes the selected location and reviewed folder name to creation', async () => {
+    const pickParentDirectory = vi.fn(async () => 'C:\\Projects')
+    const d = directory({ pickParentDirectory })
+    const view = render(<WorkbenchHome directory={d as never} onOpenWorkbench={vi.fn()} onCreated={vi.fn()} />)
+    fireEvent.click(view.getByRole('button', { name: '创建工作台', exact: true }))
+    fireEvent.click(view.getByRole('menuitem', { name: /新建空白工作台/ }))
+    fireEvent.change(view.getByLabelText('名称'), { target: { value: '运营工作台' } })
+    expect((view.getByRole('button', { name: '创建并打开' }) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(view.getByRole('button', { name: '选择文件夹' }))
+    await waitFor(() => expect((view.getByLabelText('存放位置') as HTMLInputElement).value).toBe('C:\\Projects'))
+    fireEvent.change(view.getByLabelText('文件夹名称'), { target: { value: 'Social' } })
+    expect(view.getByText('C:\\Projects\\Social')).toBeDefined()
+    fireEvent.click(view.getByRole('button', { name: '创建并打开' }))
+    await waitFor(() => expect(d.create).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      name: '运营工作台', parentPath: 'C:\\Projects', folderName: 'Social', requestId: expect.any(String),
+    })))
+  })
+
   it('creates only empty preset Areas without offering or submitting editor choices', async () => {
     const d = directory()
     const onCreated = vi.fn()
@@ -50,7 +74,8 @@ describe('Workbench Home', () => {
     expect(view.queryByRole('button', { name: '下一步' })).toBeNull()
     fireEvent.click(view.getByRole('button', { name: '创建并打开' }))
     await waitFor(() => expect(onCreated).toHaveBeenCalledWith('created'))
-    expect(d.create).toHaveBeenCalledWith({ name: '研究工作台', description: '', layoutPresetId: 'left-stack' })
+    expect(d.create).toHaveBeenCalledWith(expect.objectContaining({ description: '', layoutPresetId: 'left-stack' }))
+    expectDirectoryCreateInput(d.create.mock.calls[0]![0])
   })
 
   it('imports from the compact menu without creating a workbench or showing a layout heading', async () => {
@@ -135,7 +160,8 @@ describe('Workbench Home', () => {
     expect(within(dialog).getByText('左右双栏')).toBeDefined()
     fireEvent.click(within(dialog).getByRole('button', { name: '创建并打开' }))
     await waitFor(() => expect(onCreated).toHaveBeenCalledWith('created'))
-    expect(d.create).toHaveBeenLastCalledWith({ layoutPresetId: 'columns', name: '团队空间', description: '共同研究' })
+    expect(d.create).toHaveBeenLastCalledWith(expect.objectContaining({ layoutPresetId: 'columns' }))
+    expectDirectoryCreateInput(d.create.mock.calls.at(-1)![0])
     expect(view.queryByRole('dialog')).toBeNull()
   })
 
@@ -163,7 +189,8 @@ describe('Workbench Home', () => {
     fireEvent.change(view.getByLabelText('名称'), { target: { value: '试用工作台' } })
     fireEvent.click(view.getByRole('button', { name: '创建并打开' }))
     await waitFor(() => expect(onCreated).toHaveBeenCalledWith('created'))
-    expect(d.create).toHaveBeenCalledWith({ name: '试用工作台', description: '', layoutPresetId: 'single' })
+    expect(d.create).toHaveBeenCalledWith(expect.objectContaining({ description: '', layoutPresetId: 'single' }))
+    expectDirectoryCreateInput(d.create.mock.calls[0]![0])
   })
 
   it('cancels the naming dialog without creating a workbench', () => {
@@ -188,7 +215,7 @@ describe('Workbench Home', () => {
     expect(d.create).not.toHaveBeenCalled()
   })
 
-  it('creates a temporary layout for a real draft, then saves reviewed metadata and background', async () => {
+  it('generates from current form values and creates a Workbench only when confirmed', async () => {
     const d = directory()
     d.updateMetadata = vi.fn(async () => ({ status: 'committed' as const, revision: 3 }))
     d.updateWorkbenchBackground = vi.fn(async () => ({ status: 'committed' as const, revision: 4 }))
@@ -202,15 +229,20 @@ describe('Workbench Home', () => {
     fireEvent.change(view.getByLabelText('名称'), { target: { value: '初始名称' } })
     fireEvent.change(view.getByLabelText('简介（可选）'), { target: { value: '初始简介' } })
     fireEvent.click(view.getByRole('button', { name: 'AI 辅助生成背景草稿' }))
-    await waitFor(() => expect(generateDraft).toHaveBeenCalledWith({ workbenchId: 'created', scope: 'workbench', currentValue: '' }))
+    await waitFor(() => expect(generateDraft).toHaveBeenCalledWith({ scope: 'create', name: '初始名称', description: '初始简介', currentValue: '' }))
+    expect(d.create).not.toHaveBeenCalled()
     expect((view.getByLabelText('工作台背景（可选）') as HTMLTextAreaElement).value).toBe('# 基于区域事实的目标\n\n- 先完成研究')
     fireEvent.change(view.getByLabelText('名称'), { target: { value: '最终名称' } })
     fireEvent.change(view.getByLabelText('简介（可选）'), { target: { value: '最终简介' } })
+    fireEvent.click(view.getByRole('button', { name: 'AI 辅助生成背景草稿' }))
+    await waitFor(() => expect(generateDraft).toHaveBeenLastCalledWith({ scope: 'create', name: '最终名称', description: '最终简介', currentValue: '# 基于区域事实的目标\n\n- 先完成研究' }))
+    expect(d.create).not.toHaveBeenCalled()
     fireEvent.click(view.getByRole('button', { name: '创建并打开' }))
     await waitFor(() => expect(onCreated).toHaveBeenCalledWith('created'))
-    expect(d.create).toHaveBeenCalledWith({ name: '初始名称', description: '初始简介', layoutPresetId: 'columns' })
-    expect(d.updateMetadata).toHaveBeenCalledWith('created', { name: '最终名称', description: '最终简介' })
-    expect(d.updateWorkbenchBackground).toHaveBeenCalledWith('created', '# 基于区域事实的目标\n\n- 先完成研究')
+    expect(d.create).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ layoutPresetId: 'columns', background: expect.any(String) }))
+    expectDirectoryCreateInput(d.create.mock.calls[0]![0])
+    expect(d.updateMetadata).not.toHaveBeenCalled()
+    expect(d.updateWorkbenchBackground).not.toHaveBeenCalled()
   })
 
   it('does not persist a failed generated response as a background draft', async () => {
@@ -226,6 +258,7 @@ describe('Workbench Home', () => {
     expect((await view.findByRole('alert')).textContent).toContain('DSH Bay Agent response timeout')
     expect((view.getByLabelText('工作台背景（可选）') as HTMLTextAreaElement).value).toBe('')
     expect(d.updateWorkbenchBackground).not.toHaveBeenCalled()
+    expect(d.create).not.toHaveBeenCalled()
   })
 
   it('opens cards and promotes sharing actions to Home', async () => {

@@ -13,7 +13,7 @@ describe('Workbench LAN share session manager', () => {
     expect(manager.findByToken(first.token)).toBeDefined()
     const second = manager.start('workbench-a', '192.168.1.5', 4321, 'http://example/workbench')
     expect(second).toMatchObject({ ok: true, status: 'already-active' })
-    expect(manager.getSnapshot()).toEqual([{ workbenchId: 'workbench-a', bindHost: '192.168.1.5', port: 4321, createdAt: expect.any(Number), guestCount: 0 }])
+    expect(manager.getSnapshot()).toEqual([{ workbenchId: 'workbench-a', bindHost: '192.168.1.5', port: 4321, createdAt: expect.any(Number), guestCount: 0, grant: { template: 'collaborate', capabilities: ['view', 'message'] }, grantRevision: 1 }])
     expect(JSON.stringify(manager.getSnapshot())).not.toContain(first.token)
     manager.dispose()
     expect(manager.findByToken(first.token)).toBeUndefined()

@@ -28,6 +28,8 @@ export interface ConversationAreaServices {
   createWorkspaceSession(workspaceId: string, options: {
     requestId: string
     agentPreset?: string
+    workbenchId?: string
+    areaId?: string
   }): Promise<{
     target: SessionBindingV1
     reusedBlank: false
@@ -62,15 +64,12 @@ export class ConversationAreaCoordinator {
         }
         const document = this.repository.getWorkbench(intent.claim.workbenchId)?.document
         const area = document === undefined ? undefined : areasOf(document.root).find(item => item.areaId === intent.claim.areaId)
-        const start = area?.moduleHistory.find(item => item.moduleInstanceId === area.activeModuleInstanceId)
+        const start = area?.moduleHistory.find(item => item.moduleInstanceId === intent.startModuleInstanceId)
         if (start?.moduleInstanceId !== intent.startModuleInstanceId || start.editorId !== 'workbench.conversation.start') {
           return { status: 'stale', reason: 'area-replaced' }
         }
         if (start.binding?.workspaceId === intent.workspaceId) {
           return { status: 'bound', target: start.binding, reusedBlank: false }
-        }
-        if (area?.moduleHistory.some(item => item.moduleInstanceId !== start.moduleInstanceId && item.binding !== undefined)) {
-          return { status: 'failed', code: 'area-already-bound', message: '当前区域的其他内页正在使用已有对话，请在新区域中开始。' }
         }
       }
       const workspaceId = intent.type === 'create-in-workspace'
@@ -78,6 +77,8 @@ export class ConversationAreaCoordinator {
         : (await this.services.createWorkspace({ path: intent.path })).workspaceId
       const connection = await this.services.createWorkspaceSession(workspaceId, {
         requestId: intent.claim.requestId,
+        workbenchId: intent.claim.workbenchId,
+        areaId: intent.claim.areaId,
         ...(intent.type === 'create-in-workspace' && intent.agentPreset !== undefined
           ? { agentPreset: intent.agentPreset }
           : {}),

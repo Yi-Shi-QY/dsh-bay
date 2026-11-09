@@ -20,14 +20,12 @@ it('rejects portable projections carrying local paths on every supported platfor
   for(const path of ['/mnt/private','/opt/team/file','~/private','file:///private','C:/private'])expect(portableStateSafe({schemaVersion:1,path})).toBe(false)
   expect(portableStateSafe({schemaVersion:1,relative:'assets/icon.svg'})).toBe(true)
 })
-it('explicitly converts 17.1 layout content to V4 without installing embedded extensions',async()=>{
+it('rejects retired layout migration before inspecting or installing extensions',async()=>{
   const layout=projectLayoutPackage(settingsFixture().workbenches.a!,[])
   const inspect=vi.fn(async(bytes:Uint8Array)=>inspectWorkbenchPackageV4(bytes))
   const service=createDistributionPackageService({client:{inspect},canImport:()=>true} as any)
-  const result=await service.inspectLegacy(await buildLayoutPackage(layout)) as any
-  expect(result.manifest.mode).toBe('layout-only');expect(result.manifest.dependencies).toEqual([])
-  expect(result.layout.document).toEqual(layout.document)
-  expect(result.layout.warnings.join(' ')).toContain('不会自动安装')
+  await expect(service.inspectLegacy(await buildLayoutPackage(layout))).rejects.toThrow('18.0 不支持旧工作台格式')
+  expect(inspect).not.toHaveBeenCalled()
 })
 it('awaited inventory refresh waits for the newest overlapping read',async()=>{
   const pending:((value:any)=>void)[]=[]

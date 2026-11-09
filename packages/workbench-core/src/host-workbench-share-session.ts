@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto'
+import { COLLABORATION_GRANT, parseWorkbenchGrant, isGrantReduction, type WorkbenchGrant } from './workbench-access-contract.ts'
 
 const SHARE_TOKEN_BYTES = 32
 const LEASE_TOKEN_BYTES = 32
@@ -21,6 +22,7 @@ export interface WorkbenchShareViewLeaseV1 {
   readonly cookieHash: string
   nativeView?: { readonly windowId: string; readonly closeToken: string }
   ownerCookie?: string
+  accessToken?: string
 }
 
 export interface WorkbenchShareSessionV1 {
@@ -30,6 +32,8 @@ export interface WorkbenchShareSessionV1 {
   readonly port: number
   readonly createdAt: number
   readonly leases: Map<string, WorkbenchShareViewLeaseV1>
+  grant: WorkbenchGrant
+  grantRevision: number
 }
 
 export interface WorkbenchShareSessionManagerOptionsV1 {
@@ -158,7 +162,7 @@ export function createWorkbenchShareSessionManager(options: WorkbenchShareSessio
     return lease
   }
 
-  const start = (workbenchId: string, bindHost: string, port: number, url: string) => {
+  const start = (workbenchId: string, bindHost: string, port: number, url: string, grant: WorkbenchGrant = COLLABORATION_GRANT) => {
     if (disposed) return { ok: false as const, error: 'workbench-share-manager-disposed' }
     if (!validId(workbenchId)) return { ok: false as const, error: 'invalid-workbench-id' }
     const existing = byWorkbench.get(workbenchId)
@@ -168,6 +172,7 @@ export function createWorkbenchShareSessionManager(options: WorkbenchShareSessio
     const raw = token(randomToken)
     const session: WorkbenchShareSessionV1 = {
       shareTokenHash: digest(raw), workbenchId, bindHost, port, createdAt: now(), leases: new Map(),
+      grant: parseWorkbenchGrant(grant), grantRevision: 1,
     }
     sessions.set(session.shareTokenHash, session)
     byWorkbench.set(workbenchId, session)
@@ -224,6 +229,12 @@ export function createWorkbenchShareSessionManager(options: WorkbenchShareSessio
     setNickname,
     revokeLease,
     stop,
+    reduce(workbenchId: string, input: WorkbenchGrant) {
+      const session = byWorkbench.get(workbenchId), next = parseWorkbenchGrant(input)
+      if (!session || !isGrantReduction(session.grant, next)) throw new Error('扩大权限需要重新建立分享。')
+      session.grant = next; session.grantRevision++
+      return session
+    },
     getSession(workbenchId: string) { return byWorkbench.get(workbenchId) },
     getSnapshot() {
       return [...sessions.values()].map(session => ({
@@ -231,6 +242,7 @@ export function createWorkbenchShareSessionManager(options: WorkbenchShareSessio
         bindHost: session.bindHost,
         port: session.port,
         createdAt: session.createdAt,
+        grant: session.grant, grantRevision: session.grantRevision,
         guestCount: session.leases.size,
         ...(session.leases.size === 0 ? {} : { guests: [...session.leases.values()].map(lease => ({
           leaseId: lease.leaseId,

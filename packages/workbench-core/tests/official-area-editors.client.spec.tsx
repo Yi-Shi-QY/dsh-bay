@@ -129,135 +129,28 @@ describe('official Area editor interactions', () => {
     },
   )
 
-  it('keeps the native workspace tree ordering and opens files through the DSH resource service', async () => {
-    const claim = { kind: 'text', contentId: 'dsh-resource://file/session/session-test/src/file.ts', title: 'file.ts' }
-    const resource = { getSnapshot: () => ({ status: 'loading', value: undefined, failure: undefined }), subscribe: () => () => {} }
-    const nativeBody = { component: ({ useSession }: { useSession: (selector: (value: { label: string }) => string) => string }) => <div data-native-file-body="">原生文件预览 {useSession(value => value.label)}</div>, options: { key: '@deepseek-ai/dsh-client-ui-sidebar-documentpreview' } }
-    const sidebarRightTabs = { claim: vi.fn(() => claim), get: vi.fn(() => ({ id: '@deepseek-ai/dsh-client-ui-sidebar-documentpreview' })) }
-    const list = vi.fn(async (_sessionId: string, path: string) => path === 'C:/workspace'
-      ? { ok: true as const, value: { path: '', truncated: true, entries: [
-        { name: 'z.txt', type: 'file' as const },
-        { name: 'src', type: 'directory' as const },
-        { name: 'socket', type: 'other' as const },
-      ] } }
-      : { ok: true as const, value: { path: 'src', truncated: false, entries: [{ name: 'file.ts', type: 'file' as const }] } })
-    const sessionSnapshot = { byId: { 'session-test': { cwd: 'C:/workspace' } } }
-    const session = snapshotStore({ label: '当前 Area' })
-    let resolveReady!: () => void
-    const ready = new Promise<void>(resolve => { resolveReady = resolve })
-    const reference = { sessionId: 'session-test', binding: {}, ready, release: vi.fn() }
-    const currentBinding = snapshotStore({
-      key: 'session-test', hooks: { session }, keyedHooks: {}, props: {},
+  it('lists and previews project files without retaining or creating a Session', async () => {
+    const fetcher = vi.fn(async (_url, options) => {
+      const input = JSON.parse(options.body)
+      expect(input.workbenchId).toBe('wb')
+      expect(input.areaId).toBe('files-area')
+      return Response.json({ value: input.action === 'project-preview'
+        ? { text: 'const verified = true', truncated: false }
+        : { project: 'app', entries: input.relativePath ? [{ name: 'file.ts', relativePath: 'src/file.ts', kind: 'file' }]
+          : [{ name: 'src', relativePath: 'src', kind: 'directory' }, { name: 'external-link', relativePath: 'external-link', kind: 'unavailable' }] } })
     })
-    const absentBinding = snapshotStore({
-      key: undefined, hooks: { session: undefined },
-      keyedHooks: {}, props: {},
-    })
-    const bindingSource = vi.fn((target: unknown) => target === reference ? currentBinding : absentBinding)
-    const retain = vi.fn((_id: string, _options: { source: string; signal: AbortSignal }) => reference)
-    const ctx = {
-      sessions: { retain, list: { getSnapshot: () => sessionSnapshot, subscribe: () => () => {} } },
-      remote: { workspaceFiles: { list } },
-      sidebarRightTabs,
-      resources: { source: vi.fn(() => resource), pin: vi.fn() },
-      locale: { getSnapshot: () => ({ revision: 0 }), subscribe: () => () => {}, bind: () => () => '' },
-      slots: {
-        _host: { root: snapshotStore({ hooks: {}, keyedHooks: {}, props: {} }), scope: () => ({ bindingSource }) },
-        spec: (key: string) => key === 'sidebar.right.pane.tab' ? { kind: 'keyed', scope: 'session' } : undefined,
-        entries: (key: string) => key === 'sidebar.right.pane.tab' ? [nativeBody] : [],
-        entriesOfSlot: (key: string) => key === 'sidebar.right.pane.tab' ? [nativeBody] : [],
-        getVersion: () => 0,
-        subscribe: () => () => {},
-      },
-    }
-    const files = createWorkbenchOfficialAreaEditors(ctx as never).files
-    const view = render(files({ ...owner(), areaId: 'files-area', areaClaim: 'files-claim' } as never))
-
-    expect(screen.getByRole('status').textContent).toContain('正在连接 DSH 文件预览')
-    await act(async () => { resolveReady(); await ready })
-    await waitFor(() => expect(screen.getByRole('button', { name: /src/ })).toBeTruthy())
-    const rows = screen.getAllByRole('button')
-    expect(rows.map(row => row.textContent?.trim()).join('|')).toContain('▸ src|· socket|z.txt')
-    expect(screen.getByRole('button', { name: /socket/ })).toMatchObject({ disabled: true })
-    expect(screen.getByRole('button', { name: 'z.txt' })).toMatchObject({ disabled: false })
-    fireEvent.click(screen.getByRole('button', { name: /src/ }))
-    await waitFor(() => expect(screen.getByRole('button', { name: /file.ts/ })).toBeTruthy())
-    fireEvent.click(screen.getByRole('button', { name: /file.ts/ }))
-    expect(sidebarRightTabs.claim).toHaveBeenCalledWith('dsh-resource://file/session/session-test/src/file.ts')
-    expect((ctx.resources as { pin: ReturnType<typeof vi.fn> }).pin).toHaveBeenCalled()
-    expect(screen.getByText('原生文件预览 当前 Area')).toBeTruthy()
-    expect(bindingSource).toHaveBeenCalledWith(reference)
-    expect(retain).toHaveBeenCalledWith('session-test', expect.objectContaining({ source: 'workbenchArea' }))
-    expect(screen.getByText(/列表已截断/)).toBeTruthy()
-    act(() => currentBinding.set({ ...currentBinding.getSnapshot(), hooks: { session: snapshotStore({ label: '更新后的原生来源' }) } }))
-    expect(screen.getByText('原生文件预览 更新后的原生来源')).toBeTruthy()
-    view.rerender(files({ ...owner(), areaId: 'files-area', areaClaim: 'replacement-claim' } as never))
-    expect(reference.release).toHaveBeenCalledTimes(1)
-    expect(retain.mock.calls[0]?.[1]?.signal.aborted).toBe(true)
-    expect(screen.queryByText('原生文件预览 更新后的原生来源')).toBeNull()
-    await waitFor(() => expect(retain).toHaveBeenCalledTimes(2))
-    view.unmount()
-    expect(reference.release).toHaveBeenCalledTimes(2)
-    expect(retain.mock.calls[1]?.[1]?.signal.aborted).toBe(true)
-  })
-
-  it('renders the DSH Files entry when the official native registration is present', async () => {
-    const address = 'dsh-resource://file/session/session-test/src/file.ts'
-    const claim = { kind: 'text', contentId: address, title: 'file.ts' }
-    const pin = vi.fn()
-    const openResource = vi.fn()
-    const openNativeTab = vi.fn()
-    const close = vi.fn()
-    const nativeBody = {
-      component: ({ useTabInfo }: { useTabInfo: () => { tab: { title: string; actions: { openResource: (value: string) => void; openTab: (kind: string, options?: Record<string, unknown>) => void; close: () => void } } } }) => {
-        const tab = useTabInfo().tab
-        return <section data-testid="native-files-body"><strong>{tab.title}</strong><button type="button" onClick={() => { openResource(tab.actions); tab.actions.openResource(address) }}>Open file</button><button type="button" onClick={() => tab.actions.openTab('browser', { params: { url: 'https://example.com' } })}>Open tab</button><button type="button" onClick={() => tab.actions.close()}>Close</button></section>
-      },
-      options: { key: '@deepseek-ai/dsh-client-ui-sidebar-files' },
-    }
-    const sidebarRightTabs = {
-      claim: vi.fn(() => claim),
-      get: vi.fn(() => ({ id: '@deepseek-ai/dsh-client-ui-sidebar-files' })),
-    }
-    const session = snapshotStore({ label: 'Native Area' })
-    const reference = {
-      sessionId: 'session-test', binding: {}, ready: Promise.resolve(), release: vi.fn(),
-    }
-    const currentBinding = snapshotStore({ key: 'session-test', hooks: { session }, keyedHooks: {}, props: {} })
-    const bindingSource = vi.fn(() => currentBinding)
-    const ctx = {
-      sessions: { retain: vi.fn(() => reference), list: { getSnapshot: () => ({ byId: {} }), subscribe: () => () => {} } },
-      sidebarRightTabs,
-      resources: { pin, source: vi.fn() },
-      locale: { getSnapshot: () => ({ revision: 0 }), subscribe: () => () => {}, bind: () => () => '' },
-      slots: {
-        _host: { root: snapshotStore({ hooks: {}, keyedHooks: {}, props: {} }), scope: () => ({ bindingSource }) },
-        spec: (key: string) => key === 'sidebar.right.pane.tab' ? { kind: 'keyed', scope: 'session' } : undefined,
-        entries: (key: string) => key === 'sidebar.right.pane.tab' ? [nativeBody] : [],
-        entriesOfSlot: (key: string) => key === 'sidebar.right.pane.tab' ? [nativeBody] : [],
-        getVersion: () => 0,
-        subscribe: () => () => {},
-      },
-    }
-    const files = createWorkbenchOfficialAreaEditors(ctx as never).files
-    const view = render(files({ ...owner(), close, openNativeTab, areaId: 'native-files-area', areaClaim: 'native-files-claim' } as never))
-    await waitFor(() => expect(screen.getByTestId('native-files-body')).toBeTruthy())
-    expect(screen.getByText('工作区文件')).toBeTruthy()
-    expect(screen.queryByText('正在连接 DSH 文件预览')).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: 'Open file' }))
-    expect(openNativeTab).toHaveBeenCalledWith('documentpreview', {
-      nativeContentId: address,
-      resourceAddress: address,
-    })
-    expect(sidebarRightTabs.claim).not.toHaveBeenCalled()
-    expect(pin).not.toHaveBeenCalled()
-    expect(screen.getAllByTestId('native-files-body')).toHaveLength(1)
-    fireEvent.click(screen.getAllByRole('button', { name: 'Open tab' })[0]!)
-    expect(openNativeTab).toHaveBeenCalledWith('browser', { params: { url: 'https://example.com' } })
-    fireEvent.click(screen.getAllByRole('button', { name: 'Close' })[0]!)
-    expect(close).toHaveBeenCalledTimes(1)
-    view.unmount()
-    expect(reference.release).toHaveBeenCalledTimes(1)
+    vi.stubGlobal('fetch', fetcher)
+    const retain = vi.fn()
+    try {
+      const files = createWorkbenchOfficialAreaEditors({ sessions: { retain } } as never).files
+      const view = render(files({ ...owner(), workbenchId: 'wb', areaId: 'files-area' } as never))
+      fireEvent.click(await screen.findByRole('button', { name: /src/ }))
+      fireEvent.click(await screen.findByRole('button', { name: /file.ts/ }))
+      await screen.findByText('const verified = true')
+      expect(retain).not.toHaveBeenCalled()
+      expect(fetcher.mock.calls.map(call => JSON.parse(call[1].body).action)).toEqual(['project-entries', 'project-entries', 'project-preview'])
+      view.unmount()
+    } finally { vi.unstubAllGlobals() }
   })
 
   it('keeps shell selection, recovery, and cleanup retry on the DSH terminal service', async () => {

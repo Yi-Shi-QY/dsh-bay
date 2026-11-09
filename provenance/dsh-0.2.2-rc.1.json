@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "candidateId": "dsh-bay-0.2.2-alpha.17.6-dsh-0.2.2-rc.1",
+  "candidateId": "dsh-bay-0.2.2-alpha.18.0-dsh-0.2.2-rc.1",
   "product": "DSH Bay / 湾域",
-  "workbenchVersion": "0.2.2-alpha.17.6",
+  "workbenchVersion": "0.2.2-alpha.18.0",
   "dshGeneration": "0.2.2-rc.1",
   "upstream": {
     "repository": "https://github.com/deepseek-ai/deepseek-harness.git",
@@ -35,7 +35,7 @@
     "conversationMigration": "deferred"
   },
   "digests": {
-    "lockfile": "ee94ed20de35198b93c3cd9f1e68aeebd1265c13517e6cf57cb5b7a5fc0a66df",
+    "lockfile": "70e204a47dd2c10e231ec10992429502d3e3a8821e38900d7d920c06540ddb42",
     "patch": "8becd2d0305576e49b0181e6ee9ecba22ce3bb2ab4d59522a9d39893dc2befe1"
   },
   "validation": {
@@ -45,7 +45,7 @@
     "typecheck": "passed",
     "distributionAcceptance": {
       "status": "passed-private-archive-only",
-      "path": "releases/alpha17.6-rc1-private/dsh-bay-0.2.2-alpha.17.6.tgz",
+      "path": "releases/alpha17.6-rc1-private/dsh-bay-0.2.2-alpha.18.0.tgz",
       "sha256": "2ca262e151b702b2fd3c51f3aede773e9744b4913c38f2fe48b36366f8524c77",
       "archiveFiles": 278,
       "manifestVersionMatched": true,

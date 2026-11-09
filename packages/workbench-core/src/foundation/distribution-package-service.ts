@@ -87,7 +87,7 @@ export function createDistributionPackageService(options:{client:DistributionCli
       consents[`${d.packageName}::${d.moduleId}`]={packageName:d.packageName,moduleId:d.moduleId,apiVersion:1,editorIds:d.editorScopes.map(e=>e.editorId),contractFingerprint:access.contractFingerprint,allowedAt:Date.now(),allowed:true}
     }
     const restored=restoreLayoutPackage(row.layout,row.mode==='layout-only'?await catalog():editors,bindings,row.mode!=='layout-only',true)
-    return options.client.complete(row.transactionId,restored.document,consents,restored.pendingPageIds,restored.context)
+    return options.client.complete(row.transactionId,restored.document,consents,restored.pendingPageIds,restored.context,restored.orchestration)
   }
   return {
     async prepareExport(id:string,mode:WorkbenchPackageModeV4,prepareArtifacts=false){
@@ -103,13 +103,9 @@ export function createDistributionPackageService(options:{client:DistributionCli
       const bytes=await options.client.prepare({layout,mode,prepareArtifacts,...record.packageOrigin?{derivedFrom:{packageId:record.packageOrigin.packageId,version:record.packageOrigin.version,archiveSha256:record.packageOrigin.archiveSha256}}:{}})
       return {bytes,preview:await inspectWorkbenchPackageV4(bytes)}
     },
-    async inspect(bytes:Uint8Array){if(!options.canImport())throw new Error('请在接收方 DSH 桌面导入。');return options.client.inspect(bytes)},
+    async inspect(bytes:Uint8Array){if(options.directory.completeRequest)throw new Error('目录型工作台请使用完整工作台包 V5 导入。');if(!options.canImport())throw new Error('请在接收方 DSH 桌面导入。');return options.client.inspect(bytes)},
     async inspectLegacy(bytes:Uint8Array){
-      if(!options.canImport())throw new Error('请在接收方 DSH 桌面导入。')
-      const preview=await inspectLayoutPackage(bytes)
-      const layout=structuredClone(preview.layout)
-      layout.warnings=[...new Set([...layout.warnings,'兼容导入仅提取布局；旧包扩展不会自动安装。无法核对身份的配置保存在 Host，等待精确匹配和授权。'])]
-      return options.client.inspect(await buildWorkbenchPackageV4({layout,mode:'layout-only',derivedFrom:{packageId:preview.digest,version:'legacy-layout',archiveSha256:preview.digest.toLowerCase()}}))
+      throw new Error('18.0 不支持旧工作台格式，原文件未修改。请使用 18.0 完整工作台包。')
     },
     async confirm(row:DistributionImportStatus,bindings:Readonly<Record<string,SessionBindingV1>>={}){if(!options.canImport())throw new Error('只能在接收方桌面确认。');return restore(await options.client.consent(row.transactionId,row.archiveSha256),bindings)},
     async resume(id:string,bindings:Readonly<Record<string,SessionBindingV1>>={}){if(!options.canImport())throw new Error('请在接收方桌面继续。');return restore(await options.client.resume(id),bindings)},

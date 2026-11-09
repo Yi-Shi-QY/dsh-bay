@@ -1,19 +1,60 @@
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { WorkbenchControlPlaneSnapshotV1 } from './workbench-control-plane.ts'
 import type { WorkbenchAiSelectionV1 } from './persistence.ts'
+import { backgroundAiPreferencesOf, type BackgroundAiPreferencesV1 } from './background-ai-preferences.ts'
 
-export type WorkbenchAiDraftScopeV1 = 'workbench' | 'area'
-
-export interface WorkbenchAiDraftInputV1 {
-  workbenchId: string
-  scope: WorkbenchAiDraftScopeV1
-  areaId?: string
+interface WorkbenchAiDraftBaseV1 {
   currentValue: string
   selection?: WorkbenchAiSelectionV1
 }
 
+export type WorkbenchAiDraftInputV1 = WorkbenchAiDraftBaseV1 & (
+  | { scope: 'create'; name: string; description: string; workbenchId?: never; areaId?: never }
+  | { scope: 'workbench'; workbenchId: string; areaId?: never }
+  | { scope: 'area'; workbenchId: string; areaId: string }
+)
+export type WorkbenchAiDraftScopeV1 = WorkbenchAiDraftInputV1['scope']
+export type WorkbenchCreationDraftInputV1 = Extract<WorkbenchAiDraftInputV1, { scope: 'create' }>
+
 export interface WorkbenchAiDraftGeneratorV1 {
   generateContextDraft(input: WorkbenchAiDraftInputV1): Promise<string>
+}
+
+/** Validate the HTTP boundary before looking up a Workbench or contacting a model. */
+export function parseWorkbenchAiDraftInput(value: unknown): WorkbenchAiDraftInputV1 {
+  const row = record(value)
+  const currentValue = text(row.currentValue ?? '', '背景草稿', 20_000)
+  let selection: WorkbenchAiSelectionV1 | undefined
+  if (row.selection !== undefined) {
+    const model = record(row.selection)
+    selection = {
+      provider: text(model.provider, '模型提供方', 512, true),
+      model: text(model.model, '模型名称', 512, true),
+      ...(model.reasoningEffort === undefined ? {} : { reasoningEffort: text(model.reasoningEffort, '推理强度', 128, true) }),
+    }
+  }
+  const base = { currentValue, ...(selection === undefined ? {} : { selection }) }
+  if (row.scope === 'create') {
+    if (row.workbenchId !== undefined || row.areaId !== undefined) throw new Error('新建工作台草稿只能使用当前填写的名称和简介')
+    return { ...base, scope: 'create', name: text(row.name, '工作台名称', 160, true), description: text(row.description, '工作台简介', 4_000) }
+  }
+  if (row.scope !== 'workbench' && row.scope !== 'area') throw new Error('无效的背景生成范围')
+  const workbenchId = text(row.workbenchId, '工作台标识', 512, true)
+  if (row.scope === 'workbench') {
+    if (row.areaId !== undefined) throw new Error('工作台背景草稿不能携带区域范围')
+    return { ...base, scope: 'workbench', workbenchId }
+  }
+  return { ...base, scope: 'area', workbenchId, areaId: text(row.areaId, '区域标识', 512, true) }
+}
+
+function record(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('无效的背景生成请求')
+  return value as Record<string, unknown>
+}
+
+function text(value: unknown, label: string, max: number, required = false): string {
+  if (typeof value !== 'string' || value.length > max || required && !value.trim()) throw new Error(`${label}无效`)
+  return value
 }
 
 /**
@@ -22,45 +63,35 @@ export interface WorkbenchAiDraftGeneratorV1 {
  * agent loop.
  */
 export function buildWorkbenchAiPrompt(
-  snapshot: WorkbenchControlPlaneSnapshotV1,
-  editors: readonly unknown[],
-  extensions: unknown,
-  input: Pick<WorkbenchAiDraftInputV1, 'scope' | 'areaId' | 'currentValue'>,
+  snapshot: WorkbenchControlPlaneSnapshotV1 | undefined,
+  input: WorkbenchAiDraftInputV1,
+  preferences?: BackgroundAiPreferencesV1,
 ): string {
-  if (input.scope === 'area' && input.areaId === undefined) throw new Error('区域范围缺少 areaId，无法生成区域背景草稿')
-  if (input.scope === 'workbench' && input.areaId !== undefined) throw new Error('工作台背景草稿不能携带区域范围')
-  const area = input.scope === 'area' ? snapshot.areas.find(row => row.areaId === input.areaId) : undefined
-  if (input.scope === 'area' && area === undefined) throw new Error('区域不存在，无法生成区域背景草稿')
-  const areaFacts = (area === undefined ? snapshot.areas : [area]).map(row => ({
-    areaId: row.areaId,
-    label: row.label,
-    ownership: row.ownership,
-    context: row.context,
-    modules: row.modules.map(module => ({
-      moduleInstanceId: module.moduleInstanceId,
-      editorId: module.editorId,
-      scope: module.scope,
-      title: module.title,
-      available: module.available,
-      binding: module.binding,
-    })),
-  }))
+  const request = parseWorkbenchAiDraftInput(input)
+  const configured = backgroundAiPreferencesOf(preferences)
+  let facts: unknown
+  if (request.scope === 'create') {
+    facts = { name: request.name, description: request.description }
+  } else {
+    if (!snapshot || snapshot.workbenchId !== request.workbenchId) throw new Error('工作台不存在，无法生成背景草稿')
+    const areas = request.scope === 'area'
+      ? snapshot.areas.filter(area => area.areaId === request.areaId && !area.archived)
+      : snapshot.areas.filter(area => !area.archived)
+    if (request.scope === 'area' && areas.length !== 1) throw new Error('区域不存在或已归档，无法生成区域背景草稿')
+    const areaFacts = areas.map(area => ({
+      label: area.label,
+      pages: area.modules.map(module => ({ title: module.title, editorId: module.editorId, scope: module.scope })),
+    }))
+    if (request.scope === 'workbench') {
+      facts = { name: snapshot.name, description: snapshot.description, areas: areaFacts }
+    } else {
+      facts = { area: areaFacts[0] }
+    }
+  }
   return [
-    '你是 DSH Bay 的背景说明生成器，负责生成可直接编辑的 Markdown 背景草稿。',
-    input.scope === 'workbench'
-      ? '当前生成范围是整个工作台。请严格依据下面提供的真实工作台、区域、容器内页和扩展信息，不得虚构不存在的区域、内页、插件、能力或约束。'
-      : '当前生成范围只有下面标记的一个区域。只输出这个区域的背景说明；不要输出工作台整体背景，不要输出其他区域，不要把工作台目标改写成区域目标。严格依据当前区域和必要的工作台名称信息，不得虚构不存在的内页、插件、能力或约束。',
-    input.scope === 'workbench'
-      ? '输出工作台背景：全局目标、约束、协作规则、成功标准，以及 Bay Agent 应如何组织区域和会话。'
-      : '输出区域背景：区域职责、输入、边界、协作关系、产出和成功标准。',
-    '只输出 Markdown 正文，不要解释生成过程，不要包裹代码围栏。',
-    `用户当前输入：\n${input.currentValue.trim() || '（空）'}`,
-    `工作台事实：\n${safeJson(input.scope === 'workbench'
-      ? { workbenchId: snapshot.workbenchId, name: snapshot.name, description: snapshot.description, context: snapshot.context }
-      : { workbenchId: snapshot.workbenchId, name: snapshot.name, description: snapshot.description, generationScope: 'area-only', targetAreaId: input.areaId })}`,
-    `区域与内页事实：\n${safeJson(areaFacts)}`,
-    `当前可用内页声明：\n${safeJson(editors)}`,
-    `当前扩展插件信息：\n${safeJson(extensions)}`,
+    configured.prompts[request.scope],
+    `用户当前草稿：\n${request.currentValue.trim() || '（空）'}`,
+    `本次生成依据：\n${safeJson(facts)}`,
   ].join('\n\n')
 }
 
@@ -89,17 +120,15 @@ export function createRemoteWorkbenchAiDraftGenerator(
   const fetcher = options.fetcher ?? fetch
   return {
     async generateContextDraft(input) {
-      const selection = input.selection ?? options.getSelection?.(input.workbenchId)
+      const request = parseWorkbenchAiDraftInput(input)
+      const selection = request.selection ?? (request.scope === 'create' ? undefined : options.getSelection?.(request.workbenchId))
       const response = await fetcher(options.route, {
         method: 'POST',
         credentials: 'same-origin',
         cache: 'no-store',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          workbenchId: input.workbenchId,
-          scope: input.scope,
-          ...(input.areaId === undefined ? {} : { areaId: input.areaId }),
-          currentValue: input.currentValue,
+          ...request,
           ...(selection === undefined ? {} : { selection }),
         }),
       })

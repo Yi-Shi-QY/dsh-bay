@@ -1,3 +1,4 @@
+import { browserSafeUuid } from '../browser-safe-id.ts'
 import type {
   SlotPortableValue,
   SlotPortabilityContextV1,
@@ -24,6 +25,7 @@ import type {
 import type { WorkbenchAiSelectionV1, WorkbenchPackageOriginV1, WorkbenchSettingsV4 } from './persistence.ts'
 import type { WorkbenchPackageSignatureV1 } from './workbench-package-trust.ts'
 import { projectPortableWorkbenchContext, renderPortableAreaContextMarkdown, renderPortableWorkbenchContextMarkdown, restorePortableWorkbenchContext, validatePortableWorkbenchContext, type PortableWorkbenchContextV1, type WorkbenchContextExportPolicyV1 } from './workbench-context-portability.ts'
+import { validatePortableBayAgentOrchestration, type PortableBayAgentOrchestrationV1 } from './workbench-bay-agent-work.ts'
 import type { AreaContextV1, WorkbenchContextV1 } from './workbench-context.ts'
 import type { WorkbenchAreaMetadataV1 } from './persistence.ts'
 
@@ -56,6 +58,7 @@ export interface PortableWorkbenchV1 {
     label?: string
     reasoningEffort?: string
   }
+  orchestration?: PortableBayAgentOrchestrationV1
 }
 
 function workbenchAiFromPortable(value: PortableWorkbenchV1['modelPreference']): WorkbenchAiSelectionV1 | undefined {
@@ -145,6 +148,7 @@ export interface WorkbenchPackageManifestV1 {
   contextPath?: 'context.json'
   contextPolicy?: WorkbenchContextExportPolicyV1
   contextDigest?: string
+  orchestrationPath?: 'orchestration.json'
   previewPath?: 'preview.svg'
   previewDocumentPath?: 'preview.json'
   signaturePath?: 'signature.json'
@@ -257,6 +261,7 @@ export interface WorkbenchPackageBuildInputV1 {
   publisher?: WorkbenchPackageManifestV1['publisher']
   agentPreset?: PortableWorkbenchV1['agentPreset']
   modelPreference?: PortableWorkbenchV1['modelPreference']
+  bayAgentOrchestration?: PortableBayAgentOrchestrationV1
   workbenchContext?: WorkbenchContextV1
   areaContexts?: Readonly<Record<string, AreaContextV1>>
   areaMetadata?: Readonly<Record<string, WorkbenchAreaMetadataV1>>
@@ -629,6 +634,7 @@ export function projectWorkbenchForSharing(input: WorkbenchPackageBuildInputV1):
     ...(context === undefined ? {} : { context }),
     ...(input.agentPreset === undefined ? {} : { agentPreset: structuredClone(input.agentPreset) }),
     ...(input.modelPreference === undefined ? {} : { modelPreference: structuredClone(input.modelPreference) }),
+    ...(input.bayAgentOrchestration === undefined ? {} : { orchestration: structuredClone(input.bayAgentOrchestration) }),
   }
 }
 
@@ -887,9 +893,10 @@ export function prepareImportedWorkbenchSettings(
     templateBindings?: WorkbenchSessionTemplateBindingsV1
     packageOrigin?: WorkbenchPackageOriginV1
     context?: PortableWorkbenchContextV1
+    bayAgentOrchestration?: PortableBayAgentOrchestrationV1
   } = {},
 ): WorkbenchImportSettingsResultV1 {
-  const workbenchId = options.workbenchId ?? `workbench-${globalThis.crypto.randomUUID()}`
+  const workbenchId = options.workbenchId ?? `workbench-${browserSafeUuid()}`
   const importPrefix = options.prefix ?? 'imported-workbench'
   const imported = importPortableWorkbench(projection, {
     prefix: importPrefix,
@@ -917,6 +924,7 @@ export function prepareImportedWorkbenchSettings(
     createdAt: now,
     updatedAt: now,
     ...(options.packageOrigin === undefined ? {} : { packageOrigin: structuredClone(options.packageOrigin) }),
+    ...(options.bayAgentOrchestration === undefined ? {} : { bayAgentOrchestration: structuredClone(options.bayAgentOrchestration) }),
   }
   return {
     workbenchId,
@@ -1219,6 +1227,7 @@ export async function buildWorkbenchPackage(input: WorkbenchPackageBuildInputV1)
       files.push(packageFile(`context/areas/${areaKey}-区域说明.md`, utf8(renderPortableAreaContextMarkdown(projection.context, areaKey))))
     }
   }
+  if (projection.orchestration !== undefined) files.push(packageFile('orchestration.json', utf8(canonicalJson(projection.orchestration))))
   const contextDigest = projection.context === undefined ? undefined : await sha256Hex(utf8(canonicalJson(projection.context)))
   if (input.previewSvg !== undefined) files.push(packageFile('preview.svg', utf8(input.previewSvg)))
   if (input.preview !== undefined) files.push(packageFile('preview.json', utf8(canonicalJson(input.preview))))
@@ -1290,6 +1299,7 @@ export async function buildWorkbenchPackage(input: WorkbenchPackageBuildInputV1)
       distributionMode: input.distributionMode ?? (dependencySnapshot?.completeness === 'complete-offline' ? 'offline-embedded' : 'online-reference'),
       workbenchPath: 'workbench.json', dependencyLockPath: 'dependencies.lock.json', npmDependenciesPath: 'dependencies.npm.json', sessionsPath: 'sessions.json',
       ...(projection.context === undefined ? {} : { contextPath: 'context.json' as const, contextPolicy: projection.context.policy }),
+      ...(projection.orchestration === undefined ? {} : { orchestrationPath: 'orchestration.json' as const }),
       ...(contextDigest === undefined ? {} : { contextDigest }),
       ...(input.previewSvg === undefined ? {} : { previewPath: 'preview.svg' as const }),
       ...(input.preview === undefined ? {} : { previewDocumentPath: 'preview.json' as const }),
@@ -1329,6 +1339,9 @@ function validProjection(value: unknown): value is PortableWorkbenchV1 {
   if (value.modelPreference !== undefined && (!isRecord(value.modelPreference)
     || Object.keys(value.modelPreference).some(key => !['provider', 'model', 'label', 'reasoningEffort'].includes(key))
     || Object.values(value.modelPreference).some(item => item !== undefined && (typeof item !== 'string' || item.length > 256)))) return false
+  if (value.orchestration !== undefined) {
+    try { validatePortableBayAgentOrchestration(value.orchestration) } catch { return false }
+  }
   const areaKeys = new Set<string>()
   const visit = (node: unknown): boolean => {
     if (!isRecord(node) || typeof node.key !== 'string') return false
@@ -1431,6 +1444,9 @@ export async function validateWorkbenchPackage(
     if (manifest.contextPath !== undefined && manifest.contextPath !== 'context.json') errors.push('manifest.contextPath is invalid')
     if (manifest.contextPolicy !== undefined && manifest.contextPolicy !== 'human' && manifest.contextPolicy !== 'handoff') errors.push('manifest.contextPolicy is invalid')
     if (manifest.contextDigest !== undefined && (typeof manifest.contextDigest !== 'string' || !/^[A-Fa-f0-9]{64}$/u.test(manifest.contextDigest))) errors.push('manifest.contextDigest is invalid')
+    if (manifest.orchestrationPath !== undefined && manifest.orchestrationPath !== 'orchestration.json') errors.push('manifest.orchestrationPath is invalid')
+    if (manifest.orchestrationPath !== undefined && !byPath.has('orchestration.json')) errors.push('orchestration.json is missing')
+    if (manifest.orchestrationPath === undefined && byPath.has('orchestration.json')) errors.push('orchestration.json requires manifest.orchestrationPath')
     if (manifest.contextPath !== undefined && !byPath.has('context.json')) errors.push('context.json is missing')
     if (manifest.contextPath === undefined && byPath.has('context.json')) errors.push('context.json requires manifest.contextPath')
     if (manifest.signaturePath !== undefined && manifest.signaturePath !== 'signature.json') errors.push('manifest.signaturePath is invalid')
@@ -1468,6 +1484,14 @@ export async function validateWorkbenchPackage(
           if (areaMarkdown === undefined || new TextDecoder('utf-8', { fatal: true }).decode(areaMarkdown.content) !== renderPortableAreaContextMarkdown(context, areaKey)) errors.push(`Area Context Markdown projection is missing or stale: ${areaKey}`)
         }
       } catch { errors.push('context.json is invalid') }
+    }
+    const orchestrationFile = byPath.get('orchestration.json')
+    if (orchestrationFile !== undefined) {
+      try {
+        const orchestration = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(orchestrationFile.content)) as unknown
+        validatePortableBayAgentOrchestration(orchestration)
+        if (decodedProjection?.orchestration === undefined || canonicalJson(decodedProjection.orchestration) !== canonicalJson(orchestration)) errors.push('orchestration.json does not match workbench.json')
+      } catch { errors.push('orchestration.json is invalid') }
     }
     const lock = byPath.get('dependencies.lock.json')
     if (lock !== undefined) {

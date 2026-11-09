@@ -3,7 +3,7 @@ import { createFloatingEditorTab, prepareFloatingTabForArea } from '../src/found
 import { addTab, createSessionTab, group, mergeGroup, type WorkbenchLayoutDocument } from '../src/foundation/model.ts'
 import { migrateDocumentV2ToV3, validateWorkbenchDocumentV3 } from '../src/foundation/document-v3.ts'
 
-it.each([false, true])('preserves a readable document when merging pending and bound Areas (reverse=%s)', reverse => {
+it.each([false, true])('preserves a readable document when merging Areas without inferring a shared Session (reverse=%s)', reverse => {
   const binding = { sessionId: 'session', workspaceId: 'workspace' }
   const pending = { id: 'pending', editorId: 'workbench.conversation', editorScope: 'session' as const,
     pendingBinding: 'binding-1', lastKnownTitle: 'Conversation', state: { keep: true } }
@@ -13,7 +13,9 @@ it.each([false, true])('preserves a readable document when merging pending and b
   expect(validateWorkbenchDocumentV3(migrateDocumentV2ToV3(layout))).toBeDefined()
   const merged = mergeGroup(layout, reverse ? 'bound-area' : 'pending-area', reverse ? 'pending-area' : 'bound-area')
   expect(validateWorkbenchDocumentV3(migrateDocumentV2ToV3(merged))).toBeDefined()
-  expect(merged.root.kind === 'group' && merged.root.tabs.find(t => t.id === 'pending')).toMatchObject({ id: 'pending', binding, state: { keep: true } })
+  const pendingTab = merged.root.kind === 'group' && merged.root.tabs.find(t => t.id === 'pending')
+  expect(pendingTab).toMatchObject({ id: 'pending', state: { keep: true } })
+  expect(pendingTab?.binding).toBeUndefined()
 })
 
 it('translates floating pending IDs before durable placement without changing the source', () => {
@@ -27,5 +29,5 @@ it('translates floating pending IDs before durable placement without changing th
   const another = prepareFloatingTabForArea({ ...temporary, id: 'another' }, group('other'), [placed])
   expect(another.pendingBinding).toBe('binding-2')
   const bound = prepareFloatingTabForArea(temporary, { ...group('bound'), areaBinding: { sessionId: 'session' } }, [])
-  expect(bound.pendingBinding).toBeUndefined(); expect(bound.sessionId).toBe('session')
+  expect(bound.pendingBinding).toBe('binding-1'); expect(bound.sessionId).toBeUndefined()
 })

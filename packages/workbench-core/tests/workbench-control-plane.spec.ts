@@ -114,7 +114,8 @@ describe('Workbench Control Plane', () => {
     const unavailable = await plane.ensureEditor({ workbenchId: 'a', areaId: area.value.areaId, editorId: 'workbench.unknown' })
     expect(unavailable).toEqual({ status: 'rejected', reason: 'editor-not-found' })
     const read = plane.getArea(area.value.areaId, 'a')
-    expect(read.binding).toEqual({ workspaceId: 'workspace-1', sessionId: 'session-1' })
+    expect(read.binding).toBeUndefined()
+    expect(read.modules[0]?.binding).toEqual({ workspaceId: 'workspace-1', sessionId: 'session-1' })
     expect(read.modules.map(module => module.editorId)).toEqual(['workbench.conversation', 'workbench.workspace-files'])
   })
 

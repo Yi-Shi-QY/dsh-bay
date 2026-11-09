@@ -559,8 +559,8 @@ export function NativeSidebarAreaEditor({
 
   if (sessionId === undefined || areaId === undefined || claim === undefined) {
     return <section data-workbench-official-area-state="missing-session" style={{ padding: 20 }}>
-      <strong>此原生内页需要绑定 DSH 对话</strong>
-      <p>请先为当前区域绑定工作区对话，然后重新打开此内页。</p>
+      <strong>此内页需要来源对话</strong>
+      <p>请选择此内页的来源对话。</p>
     </section>
   }
   if (!resourceReady) return <section data-workbench-native-resource-state="waiting" style={{ display: 'flex', minWidth: 0, minHeight: 0, height: '100%', flexDirection: 'column' }}>{fallback}</section>

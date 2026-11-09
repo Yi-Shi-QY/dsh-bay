@@ -1,5 +1,6 @@
 import { createElement, useEffect, useSyncExternalStore, type ComponentType, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
 import { originalWorkbenchAutomaticEntry } from './native-automatic-isolation.tsx'
+import { createNativeComposerOwnership } from './native-composer-ownership.ts'
 import type { Context } from '@deepseek-ai/cordis'
 import type { SessionReference } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { SidebarRightTabInfo } from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
@@ -166,6 +167,7 @@ export function createWorkbenchNativeAreaSlotRenderer(
   let live = true
   const adapted = new Map<StoredEntry, StoredEntry>()
   const adaptedAreaEntries = new Map<StoredEntry, StoredEntry>()
+  const composerOwnership = createNativeComposerOwnership()
   const adaptedAgentPresetEntries = new Map<StoredEntry, StoredEntry>()
   // `isLive` is the renderer's authorization check for nested renderSlot
   // calls. Entries adapted through special Browser/Terminal/Agent seams do
@@ -269,7 +271,8 @@ export function createWorkbenchNativeAreaSlotRenderer(
         const value = sourceForReference.getSnapshot()
         if (value !== previous) {
           previous = value
-          projectedValue = { ...value, ctx, props: { ...areaStandard, ...value.props } }
+          const sessionContext = (value as StandardSourceBinding & { readonly ctx?: Context }).ctx ?? ctx
+          projectedValue = { ...value, ctx: sessionContext, props: { ...areaStandard, ...value.props } }
         }
         return projectedValue
       },
@@ -531,6 +534,17 @@ export function createWorkbenchNativeAreaSlotRenderer(
    */
   function adaptAreaEntry(entry: StoredEntry, slot: string): StoredEntry {
     entry = originalWorkbenchAutomaticEntry(entry)
+    if (slot === 'conversation.composer.bar' && entry.inject) {
+      const cached = adaptedAreaEntries.get(entry)
+      if (cached) return cached
+      const inject = entry.inject
+      const value: StoredEntry = { ...copy(entry), inject: ((...args: never[]) => {
+        const original = inject(...args)
+        return { ...original, keyboard: composerOwnership.keyboard(original.keyboard) }
+      }) as StoredEntry['inject'] }
+      adaptedAreaEntries.set(entry, value)
+      return value
+    }
     const isTerminal = entry.options.key === '@deepseek-ai/dsh-client-ui-sidebar-terminal'
     const isBrowser = entry.options.key === '@deepseek-ai/dsh-client-ui-sidebar-browser'
     // DSH 0.2 registers session-scoped conversation entries with `id`, while
@@ -963,6 +977,7 @@ export function createWorkbenchNativeAreaSlotRenderer(
     dispose() {
       if (!live) return
       live = false
+      composerOwnership.dispose()
       clearStores()
       roots.clear(); adapted.clear(); adaptedAreaEntries.clear(); adaptedAgentPresetEntries.clear(); denied.clear(); factoryCopies.clear(); factoryOrigins.clear()
     },

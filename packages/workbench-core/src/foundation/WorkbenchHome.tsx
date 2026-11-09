@@ -23,7 +23,7 @@ export interface WorkbenchHomeProps {
   windowController?: WorkbenchWindowControllerV1
   onOpenWorkbench: (workbenchId: string) => Promise<void>
   onCreated: (workbenchId: string) => void
-  generateContextDraft?: (input: { workbenchId: string; scope: 'workbench'; currentValue: string }) => Promise<string>
+  generateContextDraft?: (input: import('./workbench-ai.ts').WorkbenchCreationDraftInputV1) => Promise<string>
 }
 
 export function WorkbenchHome({ directory, editors = [], navigate, windowController, onOpenWorkbench, onCreated, generateContextDraft }: WorkbenchHomeProps) {

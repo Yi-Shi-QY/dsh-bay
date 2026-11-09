@@ -1,5 +1,9 @@
-import { describe, expect, it, vi } from 'vitest'
+import { fileAccessFixture } from './helpers/file-access.ts'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createHostBrowserWindowController, createWorkbenchDocumentHandler, externalBrowserLaunchSpec, installWorkbenchBrowserWindowController } from '../src/host-browser-window-controller.ts'
+
+const cleanup: (() => Promise<void>)[] = []
+afterEach(async () => { for (const dispose of cleanup.splice(0)) await dispose() })
 
 function setup(now = () => 1_000) {
   const controller = createHostBrowserWindowController({
@@ -122,10 +126,10 @@ describe('Host browser Workbench window controller', () => {
     now += 60 * 60_000
     expect(value(await controller.handle('status', { windowId: prepared.windowId })))
       .toEqual({ status: 'failed', code: 'browser-view-heartbeat-timeout' })
-    expect(value(await controller.handle('heartbeat', { windowId: prepared.windowId }))).toEqual({ status: 'ready' })
+    expect(value(await controller.handle('heartbeat', { windowId: prepared.windowId }))).toEqual({ status: 'failed', code: 'browser-view-heartbeat-timeout' })
     now += 60 * 60_000
-    expect(value(await controller.handle('heartbeat', { windowId: prepared.windowId }))).toEqual({ status: 'ready' })
-    expect(value(await controller.handle('status', { windowId: prepared.windowId }))).toEqual({ status: 'ready' })
+    expect(value(await controller.handle('heartbeat', { windowId: prepared.windowId }))).toEqual({ status: 'failed', code: 'browser-view-heartbeat-timeout' })
+    expect(value(await controller.handle('status', { windowId: prepared.windowId }))).toEqual({ status: 'failed', code: 'browser-view-heartbeat-timeout' })
     expect(value(await controller.handle('closed', { closeToken: redeemed.view.closeToken }))).toEqual({ status: 'closed' })
     controller.dispose()
   })
@@ -244,25 +248,25 @@ describe('Host browser Workbench window controller', () => {
       },
       fetch: { register: vi.fn((route: typeof closeRoute) => { closeRoute = route; return unregisterFetch }) },
     }
+    const fixture = await fileAccessFixture(); cleanup.push(fixture.dispose)
     const context = {
       get: (name: string) => name === 'connection' ? connection
         : name === 'webServer' ? { getOrigin: () => 'http://127.0.0.1:4200' }
-          : name === 'settings' ? { describe: () => [{ ns: 'workbench-layout', value: { workbenches: { 'workbench-a': {} } } }] }
+          : name === 'workbenchNativeAccess' ? {} : name === 'workbenchAccessHost' ? fixture.access
             : undefined,
     }
     const dispose = installWorkbenchBrowserWindowController(context as never)
     expect(closeRoute?.path).toBe('/api/workbench-window-close')
     const prepared = value<{ url: string }>(await rpcHandler!('workbench-window/prepare', { workbenchId: 'workbench-a' }))
-    const ticket = new URL(prepared.url).searchParams.get('workbench')!
-    const redeemed = value<{ view: { closeToken: string } }>(await rpcHandler!('workbench-window/redeem', { ticket }))
+    expect(new URL(prepared.url).port).not.toBe('4200')
     const response = await closeRoute!.fetch(new Request('http://127.0.0.1:4200/api/workbench-window-close', {
       method: 'POST', headers: { 'content-type': 'text/plain;charset=UTF-8' },
-      body: JSON.stringify({ closeToken: redeemed.view.closeToken }),
+      body: JSON.stringify({ closeToken: 'unissued-close-receipt' }),
     }))
-    expect(response.status).toBe(204)
+    expect(response.status).toBe(400)
     await dispose?.()
     expect(unregisterRpc).toHaveBeenCalledOnce()
-    expect(unregisterFetch).toHaveBeenCalledTimes(7)
+    expect(unregisterFetch).toHaveBeenCalledTimes(8)
   })
 
   it('registers desktop WebServer RPC routes with Connection response envelopes', async () => {
@@ -276,13 +280,14 @@ describe('Host browser Workbench window controller', () => {
       },
       fetch: { register: vi.fn(() => vi.fn(async () => {})) },
     }
+    const fixture = await fileAccessFixture(); cleanup.push(fixture.dispose)
     const context = {
       get: (name: string) => name === 'connection' ? connection
         : name === 'webServer' ? {
           getOrigin: () => 'http://127.0.0.1:4200',
           register: (route: typeof desktopRoutes[number]) => { desktopRoutes.push(route); return vi.fn() },
         }
-          : name === 'settings' ? { describe: () => [{ ns: 'workbench-layout', value: { workbenches: { 'workbench-a': {} } } }] }
+          : name === 'workbenchNativeAccess' ? {} : name === 'workbenchAccessHost' ? fixture.access
             : undefined,
     }
     const dispose = installWorkbenchBrowserWindowController(context as never)

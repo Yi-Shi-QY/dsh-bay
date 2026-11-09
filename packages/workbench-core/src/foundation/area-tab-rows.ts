@@ -9,7 +9,7 @@ export type WorkbenchAreaTabStatus = 'ready' | 'unbound' | 'missing' | 'paused' 
 /** Only the actual conversation editor follows this Session; resource tabs keep their own semantics. */
 export function conversationTabBinding(tab: TabDocument, areaBinding?: SessionBindingV1): SessionBindingV1 | undefined {
   if (tab.editorId !== 'workbench.conversation' || tab.editorScope !== 'session' || tab.pendingBinding !== undefined) return undefined
-  return tab.binding ?? (tab.sessionId ? { sessionId: tab.sessionId } : areaBinding)
+  return tab.binding ?? (tab.sessionId ? { sessionId: tab.sessionId } : undefined)
 }
 
 export function conversationTabUnavailable(binding: SessionBindingV1, facts: Omit<SessionTargetResolverSnapshot, 'markersByWorkspace'>): string | undefined {
@@ -147,7 +147,7 @@ function statusFor(
   if (editor === undefined) return 'missing'
   if (tab.pendingBinding !== undefined) return 'unbound'
   if (tab.editorScope === 'session'
-    && (tab.binding?.sessionId ?? tab.sessionId ?? areaBinding?.sessionId) === undefined) return 'unbound'
+    && (tab.binding?.sessionId ?? tab.sessionId) === undefined) return 'unbound'
   if (paused) return 'paused'
   return 'ready'
 }

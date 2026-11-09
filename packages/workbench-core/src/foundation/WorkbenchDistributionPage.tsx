@@ -5,6 +5,7 @@ import type { DistributionImportStatus } from '../distribution-contract.ts'
 import type { WorkbenchPackageModeV4 } from './workbench-package-v4.ts'
 import type { DistributionPackageService } from './distribution-package-service.ts'
 import { areasOf } from './document-v3.ts'
+import { layoutBindingSources } from './workbench-layout-package.ts'
 import type {SessionBindingV1} from './model.ts'
 import { WORKBENCH_CORE_VERSION } from '../release-compatibility.ts'
 import css from './WorkbenchSettings.module.css'
@@ -59,13 +60,11 @@ export function WorkbenchDistributionPage(props:SettingsPageProps & {distributio
     </>:null}
     {tab==='import'?<>
       <label className={css.form}>工作台包<input aria-label="工作台包文件" type="file" accept=".zip,.wbpkg" disabled={actions.states.inspect?.busy} onChange={e=>{const f=e.target.files?.[0];if(!f)return;setRow(undefined);setConfirmed(false);setBindings({});const gen=++generation.current;void actions.run('inspect',async()=>{if(f.size>128*1024*1024)throw new Error('包超过 128MB 限制。');const bytes=new Uint8Array(await f.arrayBuffer());const next=await (legacy?service.inspectLegacy(bytes):service.inspect(bytes));if(gen===generation.current)setRow(next)})}}/></label>{actions.feedback('inspect')}
-      <button aria-pressed={legacy} onClick={()=>{setLegacy(!legacy);setRow(undefined);generation.current++}}>{legacy?'返回新版导入':'导入 17.1 或更早的布局包'}</button>
-      {legacy?<p role="status">请选择旧布局包。仅转换布局与可迁移配置；旧包扩展不会安装。无法核对扩展身份的配置将保留待恢复。</p>:null}
       {row?<div className={css.detail}><h4>{row.name} · {labels[row.mode]}</h4><p role="status">{states[row.state]}</p><p>包摘要：{row.archiveSha256}</p>{row.keyId?<p>发布者指纹：{row.keyId}。首次接收请与房主核对；签名不代表代码安全保证。</p>:null}
         {row.dependencies.map(d=><div className={css.row} key={d.packageName}><div><strong>{d.packageName} {d.version}</strong><p>{row.installed.includes(d.packageName)?'已安装':row.reused.includes(d.packageName)||row.plannedReuse?.includes(d.packageName)?'复用现有插件':'安装或核验插件'} · {d.host?'包含可在本机执行的 Host 代码':'客户端运行代码'}</p><p>声明权限：{d.permissions.join('、')||'无额外声明'}。Workbench 授权不构成执行沙箱。</p></div></div>)}
         {row.layout?<LayoutDiagram node={row.layout.document.root} editors={props.editors}/>:null}
         {row.layout?.warnings.map((warning,index)=><p role="status" key={index}>{warning}</p>)}
-        {row.layout?areasOf(row.layout.document.root).filter(a=>a.moduleHistory.some(p=>p.pendingBinding)).map((area,index)=><label className={css.form} key={area.areaId}>区域 {index+1} 本机会话<select aria-label={'区域 '+(index+1)+' 资源重绑定'} value={bindings[area.areaId]?.sessionId??''} onChange={event=>{const session=sessions.byId[event.target.value as keyof typeof sessions.byId];setBindings(current=>{const next={...current};if(session)next[area.areaId]={sessionId:session.id};else delete next[area.areaId];return next})}}><option value="">稍后绑定（不创建会话）</option>{sessions.ids.map(id=>sessions.byId[id]?<option key={id} value={id}>{sessions.byId[id]!.displayTitle}</option>:null)}</select></label>):null}
+        {row.layout?layoutBindingSources(row.layout).map((source,index)=><label className={css.form} key={source.key}>来源对话 {index+1}<select aria-label={'来源对话 '+(index+1)} value={bindings[source.key]?.sessionId??''} onChange={event=>{const session=sessions.byId[event.target.value as keyof typeof sessions.byId];setBindings(current=>{const next={...current};if(session)next[source.key]={sessionId:session.id};else delete next[source.key];return next})}}><option value="">稍后绑定（不创建会话）</option>{sessions.ids.map(id=>sessions.byId[id]?<option key={id} value={id}>{sessions.byId[id]!.displayTitle}</option>:null)}</select></label>):null}
         {row.pendingPageIds?.length?<><p role="status">{row.pendingPageIds.length} 个内页配置已保留在 Host，尚未执行。补齐并授权精确匹配的扩展后恢复。</p><button disabled={actions.states.restore?.busy} onClick={()=>void actions.run('restore',()=>executeImport(()=>service.restorePending(row)))}>恢复待处理配置</button>{actions.feedback('restore')}</>:null}
         {row.blockers.map((b,i)=><p role="alert" key={i}>{b}</p>)}
         {row.state==='checked'?<><label><input type="checkbox" checked={confirmed} onChange={e=>setConfirmed(e.target.checked)}/>我已核对来源与指纹，同意本次扩展安装、启用及 Workbench 使用授权</label><button className={css.primaryButton} disabled={!confirmed||!!row.blockers.length||actions.states.commit?.busy} onClick={()=>void actions.run('commit',async()=>{await executeImport(()=>service.confirm(row,bindings))})}>确认导入</button>{actions.feedback('commit')}</>:null}

@@ -1,10 +1,12 @@
+import { browserSafeUuid } from '../browser-safe-id.ts'
 import { WorkbenchBayAgentTasks } from './WorkbenchBayAgentTasks.tsx'
+import { placementReason } from './area-identity.ts'
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent, type RefObject } from 'react'
 import { IconCloseOutlineMedium, IconPlusOutlineMedium, IconEllipsisOutlineMedium } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { FloatingWorkspaceRuntime, FloatingRect, FloatingInstance } from '../client/floating-workspace-runtime.ts'
 import { clampFloatingRect, defaultFloatingRect } from '../client/floating-workspace-runtime.ts'
 import { RetainedEditorTarget } from './FloatingWorkspaceContext.tsx'
-import { MemoizedEditor, WorkbenchFloatingMenu, type WorkbenchFrameProps, type AreaContentCommandHandlersV1 } from './WorkbenchFrame.tsx'
+import { MemoizedEditor, PendingSessionBindingPicker, WorkbenchFloatingMenu, type WorkbenchFrameProps, type AreaContentCommandHandlersV1 } from './WorkbenchFrame.tsx'
 import { WorkbenchEditorPicker } from './WorkbenchEditorPicker.tsx'
 import { WorkbenchEditorIcon } from './WorkbenchEditorIcon.tsx'
 import type { WorkbenchEditorCatalogRow } from './catalog.ts'
@@ -28,8 +30,8 @@ import frameCss from './WorkbenchFrame.module.css'
 import accentFrameCss from './SessionAccentFrame.module.css'
 import type { BayAgentControllerV1 } from './workbench-bay-agent-work.ts'
 
-const uid = () => 'floating-' + globalThis.crypto.randomUUID()
-const EMPTY_BAY_AGENT_SNAPSHOT = { workbenchId: '', areas: [], workItems: [], assignments: [], attention: [] } as const
+const uid = () => 'floating-' + browserSafeUuid()
+const EMPTY_BAY_AGENT_SNAPSHOT = { workbenchId: '', areas: [], workItems: [], assignments: [], attention: [], orchestration: { workbenchId: '', currentEventSeq: 0, activeWorkItems: [], activeAssignments: [], openAttention: [], recentReports: [], recentBlockers: [], recentDecisions: [], recentEvents: [] } } as const
 export function FloatingWorkspaceIcon({ size = 24, className }: { size?: number; className?: string } = {}) {
   return <svg className={className} width={size} height={size} style={{ width: size, height: size, display: 'block', flex: '0 0 auto' }} viewBox="0 0 1024 1024" fill="none" aria-hidden="true">
     <path d="M814 377 784 317 751 273 697 224 638 190 593 174 530 163 446 167 377 186 319 215 267 255 225 302 190 362 168 427 161 481 166 551 187 619 225 608 204 537 201 478 213 414 238 356 269 311 312 269 355 240 405 218 469 204 523 203 555 207 602 220 643 239 673 258 723 304 761 359 775 389 787 428 828 428Z" fill="var(--dsw-alias-label-link, #0b4596)" />
@@ -97,7 +99,9 @@ export function WorkbenchFloatingWorkspace(props: Props) {
   const [bayRetry, setBayRetry] = useState(0)
   const [bayError, setBayError] = useState('')
   const [size, setSize] = useState({ width: 900, height: 600 })
-  const [menu, setMenu] = useState<'add' | 'window' | 'pin' | 'tabs' | 'binding'>()
+  const [menu, setMenu] = useState<'add' | 'window' | 'pin' | 'tabs'>()
+  const [bindingTabId, setBindingTabId] = useState<string>()
+  const openBindingPicker = (id: string) => { setMenu(undefined); setBindingTabId(id) }
   const [tabQuery, setTabQuery] = useState('')
   const [drop, setDrop] = useState<{ areaId: string; edge: DropEdge; rect: DOMRect; reason?: string | undefined }>()
   const gesture = useRef<() => void>()
@@ -153,7 +157,7 @@ export function WorkbenchFloatingWorkspace(props: Props) {
   }
   const sourceMarker = markerFor(binding ?? (sessionId ? { sessionId } : undefined))
   const launcherMarker = markerFor(props.selectedAreaBinding)
-  const menuTitle = menu === 'add' ? '添加内页' : menu === 'window' ? '浮动工作区' : menu === 'pin' ? '放入区域' : menu === 'tabs' ? '临时内页' : menu === 'binding' ? '绑定来源对话' : undefined
+  const menuTitle = menu === 'add' ? '添加内页' : menu === 'window' ? '浮动工作区' : menu === 'pin' ? '放入区域' : menu === 'tabs' ? '临时内页' : undefined
   const notice = (error: string) => runtime.patch(workbenchId, { error })
   const pinReason = (tab: TabDocument, areaId: string, edge: DropEdge) => {
     if (tab.id === 'bay-agent-main') return 'Bay Agent 主控页签保留在浮动工作区。'
@@ -161,8 +165,9 @@ export function WorkbenchFloatingWorkspace(props: Props) {
     if (runtime.canUseEditor?.(workbenchId, tab.editorId) === false) return '内页授权已变化'
     const group = groupsOf(props.layout.root).find(row => row.id === areaId)
     if (!group) return '目标区域已不存在'
-    const binding = group.areaBinding?.sessionId ?? group.tabs.find(row => row.sessionId)?.sessionId
-    if (edge === 'center' && binding && tab.sessionId && binding !== tab.sessionId) return '对话不同，请通过“放入区域”菜单新建分屏'
+    const project = frame.workbenchDirectory?.getAreaProjects?.(workbenchId)[areaId] ?? group.project
+    const reason = placementReason(tab, project, frame.workbenchDirectory?.getAreaProjects !== undefined || group.project !== undefined)
+    if (edge === 'center' && reason) return reason
     const element = [...(canvasRef.current?.querySelectorAll<HTMLElement>('[data-workbench-group]') ?? [])].find(el => el.dataset.workbenchGroup === areaId)
     const bounds = element?.getBoundingClientRect()
     if (edge !== 'center' && bounds) {
@@ -184,8 +189,9 @@ export function WorkbenchFloatingWorkspace(props: Props) {
       if (runtime.validBinding?.(binding) === false) return
       const tab = createSessionTab(id, row.tab.editorId, binding, row.tab.lastKnownTitle, row.tab.state)
       runtime.update(id, { ...tab, editorScope: row.tab.editorScope, bindingGeneration: (row.tab.bindingGeneration ?? 0) + 1 }, workbenchId)
-      setMenu(undefined)
-    } finally { row.busy = false; runtime.invalidate() }
+      setMenu(undefined); setBindingTabId(undefined)
+    } catch (error) { notice(error instanceof Error ? error.message : String(error)) }
+    finally { row.busy = false; runtime.invalidate() }
   }
   const open = (editor: WorkbenchEditorCatalogRow, binding?: SessionBindingV1, options?: Record<string, unknown>) => {
     if (!runtime.enabled || runtime.hasControl?.(workbenchId) === false || runtime.canUseEditor?.(workbenchId, editor.id) === false || !editor.declaration || editor.declaration.presentation?.floating === false) { notice('此内页未获授权或暂不支持浮动工作区'); return false }
@@ -336,7 +342,7 @@ export function WorkbenchFloatingWorkspace(props: Props) {
   const pin = async (id: string, areaId: string, edge: DropEdge) => {
     if (id === 'bay-agent-main') { notice('Bay Agent 主控页签始终保留在浮动工作区。'); return }
     setMenu(undefined)
-    try { if (!await runtime.transfer(id, tab => props.pin(tab, areaId, edge), workbenchId)) notice('未能放入区域，请检查连接、保存状态及会话绑定。临时内容仍保留。') }
+    try { if (!await runtime.transfer(id, tab => props.pin(tab, areaId, edge), workbenchId)) notice('未能放入区域，请检查连接、保存状态及目标区域项目。临时内容仍保留。') }
     catch (error) { notice(error instanceof Error ? error.message : '放入区域失败，内容仍保留') }
   }
   const closeTab = async (id: string) => {
@@ -379,7 +385,7 @@ export function WorkbenchFloatingWorkspace(props: Props) {
         const updated = tabsOf(next.root)[0]; if (updated) runtime.update(tab.id, updated, workbenchId)
         return true
       },
-      openBindingPicker: () => { if (tab.id !== 'bay-agent-main') { activate(tab.id); setMenu('binding') } },
+      openBindingPicker: () => { if (tab.id !== 'bay-agent-main') { activate(tab.id); openBindingPicker(tab.id) } },
       placeConversation: async input => {
         if (tab.id === 'bay-agent-main') throw new Error('Bay Agent 使用工作台持久主控会话。')
         const create = frame.createWorkspaceSession
@@ -436,13 +442,24 @@ export function WorkbenchFloatingWorkspace(props: Props) {
           {sourceMarker ? <span className={frameCss.markerLabel} aria-hidden="true">{sourceMarker.label}</span> : <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><path d="M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-8l-5 3v-3H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z" /></svg>}
           <span>{sessionTitle}</span>
         </span>
+        {active.tab.id !== 'bay-agent-main' && (active.tab.editorScope === 'session' || active.tab.pendingBinding || active.tab.binding) ? <PendingSessionBindingPicker
+          key={active.tab.id} sessionRows={sessions} sessionIds={Object.keys(sessions)} workspaces={workspaces}
+          sessionMarkers={{}} sessionMarkersByWorkspace={props.sessionMarkers ?? {}} archivedSessionIds={archived}
+          triggerLabel={sessionId ? '更换对话' : '选择对话'} disabled={active.busy}
+          open={visible && space.expanded && bindingTabId === active.tab.id}
+          setOpen={open => { if (open) openBindingPicker(active.tab.id); else setBindingTabId(undefined) }}
+          onSelect={binding => { void bind(active.tab.id, binding.sessionId) }}
+        /> : null}
       </div> : null}
       {space.error ? <div className={css.error} role="status">{space.error}<button type="button" title="关闭提示" aria-label="关闭提示" onClick={() => runtime.patch(workbenchId, { error: undefined })}>关闭提示</button></div> : null}
       <div className={css.content}>{rows.map(renderRow)}{!rows.length ? <div className={css.empty}><FloatingWorkspaceIcon size={44} /><p>临时查看，随时放入区域</p><button onClick={() => setMenu('add')}><IconPlusOutlineMedium size={16} /> 添加内页</button><small>临时标签仅在本次运行中保留</small></div> : null}</div>
-      {menu ? <div className={css.menu} role={menu === 'binding' ? 'dialog' : 'menu'} aria-label="浮动工作区操作" data-floating-menu-view={menu}>
+      {menu ? <div className={css.menu} role="menu" aria-label="浮动工作区操作" data-floating-menu-view={menu}>
         <div className={css.menuHeader}><strong>{menuTitle}</strong><button type="button" className={css.menuClose} aria-label="关闭浮窗菜单" title="关闭菜单" onClick={() => setMenu(undefined)}><IconCloseOutlineMedium size={14} /></button></div>
-        {menu === 'add' ? <WorkbenchEditorPicker editors={chooser} mode="add" unavailable={unavailable} onSelect={editor => { setMenu(undefined); open(editor, runtime.focusedWorkbenchId === workbenchId ? runtime.focusedBinding : undefined) }} /> : null}
-        {menu === 'window' ? <><button disabled={!active || active.busy || active.tab.id === 'bay-agent-main'} onClick={() => setMenu('pin')}>放入区域</button><button onClick={() => { setTabQuery(''); setMenu('tabs') }}>全部临时内页</button><button disabled={!active || active.tab.id === 'bay-agent-main'} onClick={() => setMenu('binding')}>选择来源对话</button><button onClick={() => { runtime.patch(workbenchId, { rect: defaultFloatingRect(size.width, size.height), launcher: { x: size.width - 54, y: size.height - 54 }, maximized: false }, true); setMenu(undefined) }}>重置位置</button></> : null}
+        {menu === 'add' ? <WorkbenchEditorPicker editors={chooser} mode="add" unavailable={unavailable} onSelect={editor => {
+          setMenu(undefined)
+          if (open(editor) && runtime.find(runtime.workspace(workbenchId).activeId ?? '', workbenchId)?.tab.pendingBinding) setBindingTabId(runtime.workspace(workbenchId).activeId)
+        }} /> : null}
+        {menu === 'window' ? <><button disabled={!active || active.busy || active.tab.id === 'bay-agent-main'} onClick={() => setMenu('pin')}>放入区域</button><button onClick={() => { setTabQuery(''); setMenu('tabs') }}>全部临时内页</button><button disabled={!active || active.tab.id === 'bay-agent-main'} onClick={() => { if (active) openBindingPicker(active.tab.id) }}>选择来源对话</button><button onClick={() => { runtime.patch(workbenchId, { rect: defaultFloatingRect(size.width, size.height), launcher: { x: size.width - 54, y: size.height - 54 }, maximized: false }, true); setMenu(undefined) }}>重置位置</button></> : null}
         {menu === 'pin' && active ? groupsOf(props.layout.root).map((group, i) => <div key={group.id}><strong>区域 {i + 1}</strong>{(['center', 'left', 'right', 'top', 'bottom'] as const).map((edge, j) => { const reason = pinReason(active.tab, group.id, edge); return <button key={edge} disabled={active.busy || !!reason} title={reason} onClick={() => void pin(active.tab.id, group.id, edge)}>{['加入标签', '左侧分屏', '右侧分屏', '上方分屏', '下方分屏'][j]}</button> })}</div>) : null}
         {menu === 'tabs' ? <>
           <input className={css.tabSearch} autoFocus aria-label="搜索临时内页" placeholder="搜索名称、模式、项目或路径" value={tabQuery} onChange={event => setTabQuery(event.target.value)} />
@@ -453,7 +470,6 @@ export function WorkbenchFloatingWorkspace(props: Props) {
           </button></WorkbenchTabTooltip>)}
           {!tabRows.some(({ summary }) => summary.information?.searchText.includes(tabQuery.trim().toLocaleLowerCase('zh-CN'))) ? <p>没有匹配的内页</p> : null}
         </> : null}
-        {menu === 'binding' && active && active.tab.id !== 'bay-agent-main' ? <><p>选择已有对话</p>{Object.values(sessions).filter(row => !archived.includes(row.id)).map(row => <button key={row.id} onClick={() => bind(active.tab.id, row.id)}>{row.displayTitle ?? row.id}</button>)}</> : null}
       </div> : null}
       {!space.maximized ? ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'].map(edge => <div key={edge} className={css.resize + ' ' + css[edge]} data-floating-resize={edge} onPointerDown={e => pointerGesture(e, edge)} />) : null}
     </div>

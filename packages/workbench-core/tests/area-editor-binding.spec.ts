@@ -58,7 +58,7 @@ describe('Core Area binding to Conversation Suite', () => {
   })
 
   it('replaces the active Start occurrence instead of appending a second tab', async () => {
-    const { repository, areaId } = fixture(true)
+    const { repository, areaId, module } = fixture(true)
     const startId = repository.getWorkbench('main')!.document.root.kind === 'area'
       ? repository.getWorkbench('main')!.document.root.activeModuleInstanceId
       : undefined
@@ -86,6 +86,23 @@ describe('Core Area binding to Conversation Suite', () => {
     })
   })
 
+  it('finishes asynchronous creation in its claimed page even after focus moves', async () => {
+    const { repository, areaId } = fixture(true)
+    const pending = Promise.withResolvers<{ target: { sessionId: string; workspaceId: string }; reusedBlank: false }>()
+    const coordinator = new ConversationAreaCoordinator(repository, { createWorkspaceSession: () => pending.promise, connectWorkspace: vi.fn(), createWorkspace: vi.fn() })
+    const preparing = coordinator.execute({ type: 'create-in-workspace', workspaceId: 'workspace', presentation: 'start', startModuleInstanceId: 'start', claim: repository.claimArea('main', areaId, 'async-target') })
+    const document = repository.getWorkbench('main')!.document
+    if (document.root.kind !== 'area') throw new Error('Expected Area')
+    repository.replaceDocument('main', { ...document, root: { ...document.root, activeModuleInstanceId: 'other', moduleHistory: [...document.root.moduleHistory,
+      { moduleInstanceId: 'other', editorId: 'workbench.conversation', editorScope: 'session', binding: { sessionId: 'independent', workspaceId: 'workspace' }, lastKnownTitle: 'Other', state: {} }] } })
+    pending.resolve({ target: { sessionId: 'created', workspaceId: 'workspace' }, reusedBlank: false })
+    expect(await preparing).toMatchObject({ status: 'bound' })
+    const root = repository.getWorkbench('main')!.document.root
+    if (root.kind !== 'area') throw new Error('Expected Area')
+    expect(root.moduleHistory.find(page => page.moduleInstanceId === 'other')?.binding?.sessionId).toBe('independent')
+    expect(root.moduleHistory.find(page => page.moduleInstanceId === 'start')?.binding?.sessionId).toBe('created')
+  })
+
   it('keeps the Start editor visible after Workspace selection while binding its native Session', async () => {
     const { repository, areaId, module } = fixture(true)
     const create = vi.fn(async () => 'created')
@@ -108,11 +125,9 @@ describe('Core Area binding to Conversation Suite', () => {
       binding: { sessionId: 'created', workspaceId: 'workspace' },
     })
     expect(repository.getWorkbench('main')!.document.root).toMatchObject({
-      areaBinding: { sessionId: 'created', workspaceId: 'workspace' },
       moduleHistory: [{ editorId: editors.start, editorScope: 'root', binding: { sessionId: 'created', workspaceId: 'workspace' } }],
     })
     expect(projectDocumentV3ToLayoutV2(repository.getWorkbench('main')!.document).root).toMatchObject({
-      areaBinding: { sessionId: 'created', workspaceId: 'workspace' },
       tabs: [{ id: 'start', editorId: editors.start, editorScope: 'root', sessionId: 'created' }],
     })
     const stored = repository.getWorkbench('main')!.document
@@ -166,8 +181,8 @@ describe('Core Area binding to Conversation Suite', () => {
     expect(module()).toMatchObject({ editorId: editors.conversation, binding: { sessionId: 'newer' } })
   })
 
-  it('does not create a Session when sibling pages already use another conversation', async () => {
-    const { repository, areaId } = fixture(true)
+  it('creates an independent Session when sibling pages already use another conversation', async () => {
+    const { repository, areaId, module } = fixture(true)
     const doc = repository.getWorkbench('main')!.document
     if (doc.root.kind !== 'area') throw new Error('Expected Area')
     repository.replaceDocument('main', { ...doc, root: { ...doc.root,
@@ -176,15 +191,24 @@ describe('Core Area binding to Conversation Suite', () => {
         binding: { sessionId: 'existing', workspaceId: 'workspace' }, state: {}, lastKnownTitle: 'Conversation',
       }],
     } })
-    const createWorkspaceSession = vi.fn()
+    const createWorkspaceSession = vi.fn(async () => ({ target: { sessionId: 'new-session', workspaceId: 'workspace' }, reusedBlank: false as const }))
     const coordinator = new ConversationAreaCoordinator(repository, {
       createWorkspaceSession, connectWorkspace: vi.fn(), createWorkspace: vi.fn(),
     })
     expect(await coordinator.execute({
       type: 'create-in-workspace', workspaceId: 'workspace', presentation: 'start', startModuleInstanceId: 'start',
       claim: repository.claimArea('main', areaId, 'conflict'),
-    })).toMatchObject({ status: 'failed', code: 'area-already-bound' })
-    expect(createWorkspaceSession).not.toHaveBeenCalled()
+    })).toMatchObject({ status: 'bound', target: { sessionId: 'new-session', workspaceId: 'workspace' } })
+    expect(createWorkspaceSession).toHaveBeenCalledOnce()
+    expect(module()).toMatchObject({ editorId: editors.start, binding: { sessionId: 'new-session', workspaceId: 'workspace' } })
+    const updated = repository.getWorkbench('main')!.document.root
+    expect(updated.kind).toBe('area')
+    if (updated.kind === 'area') {
+      expect(updated.moduleHistory.find(item => item.moduleInstanceId === 'existing')).toMatchObject({
+        editorId: editors.conversation,
+        binding: { sessionId: 'existing', workspaceId: 'workspace' },
+      })
+    }
   })
 
   it('rejects late preparation and promotion after the Start occurrence is replaced', async () => {

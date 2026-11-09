@@ -1,4 +1,9 @@
+import { browserSafeUuid } from '../browser-safe-id.ts'
+import { workbenchFetch } from '../client/workbench-access.ts'
+import { WORKBENCH_GUEST_EDITORS } from '../workbench-access-contract.ts'
+import { requestWorkbenchShareGrant } from './WorkbenchSharePermissions.tsx'
 import { installFloatingExitGuard } from '../client/floating-exit-guard.ts'
+import { areasOf } from './document-v3.ts'
 import { createDistributionClient } from '../distribution-contract.ts'
 import { createWorkbenchPackageService } from './workbench-package-service.ts'
 import { createWorkbenchLayoutPackageService } from './layout-package-service.ts'
@@ -31,6 +36,8 @@ import { createNativePluginNavigation } from '../client/native-plugin-navigation
 import { createNativePluginsPanelVisibility, watchNativePluginsPanel } from '../client/native-main-panel-navigation.ts'
 import { createAreaSessionCreator } from '../client/session-placement.ts'
 import { createWorkbenchSettingsScope, type SettingsScope } from '../client/workbench-settings-contracts.ts'
+import { createFileWorkbenchSettings } from '../client/file-workbench-settings.ts'
+import { createWorkbenchCompleteClient } from '../client/workbench-complete.ts'
 import type { WorkbenchEditorCatalog, WorkbenchEditorCatalogRow } from './catalog.ts'
 import { decodeWorkbenchSettingsV4, type WorkbenchSettingsV4 } from './persistence.ts'
 import { createProjectNeutralFrameSettings, type WorkbenchDirectoryContextPatch } from './frame-settings-adapter.ts'
@@ -71,6 +78,7 @@ import { createWorkbenchShareController } from '../client/workbench-share-contro
 import { createConversationTabStatusSource } from '../client/conversation-tab-status.ts'
 import { isWorkbenchShareGuestPage } from '../client/workbench-share-guest.ts'
 import { createRemoteBayAgentController } from '../client/bay-agent-controller.ts'
+import { decodeBackgroundAiPreferences, type BackgroundAiPreferencesV1 } from './background-ai-preferences.ts'
 import type { BayAgentControllerV1 } from './workbench-bay-agent-work.ts'
 import { BAY_AGENT_DRAFT_ROUTE } from '../bay-agent-contract.ts'
 import { createRemoteWorkbenchAiDraftGenerator } from './workbench-ai.ts'
@@ -94,6 +102,7 @@ function editorCatalogFor(ctx: ClientContext): WorkbenchEditorCatalog {
         const entries = (scope: 'root' | 'session') => ctx.slots.entriesOfSlot(`workbench.editor.${scope}`)
           .map(entry => workbenchEditorCatalogRowFromSlotEntry(entry, scope))
         rows = [...entries('session'), ...entries('root')]
+          .filter(row => !isWorkbenchShareGuestPage() || WORKBENCH_GUEST_EDITORS.includes(row.id))
           .sort((left, right) => left.order - right.order || left.id.localeCompare(right.id))
           .map(({ order: _order, ...row }) => row)
       }
@@ -143,84 +152,16 @@ export function applyWorkbenchCoreFoundation(
   modeController: WorkbenchModeControllerV1 = createWorkbenchModeController(),
   moduleManager?: WorkbenchModuleManagerV1,
   runtime?: WorkbenchCoreRuntimeV1,
-): { flush: () => Promise<boolean>; runtimeMetrics: { getSnapshot(): WorkbenchRuntimeMetricsSnapshotV1 }; floatingRuntime: ReturnType<typeof createFloatingWorkspaceRuntime>; bayAgent?: BayAgentControllerV1 } {
+): { ready: () => Promise<void>; flush: () => Promise<boolean>; runtimeMetrics: { getSnapshot(): WorkbenchRuntimeMetricsSnapshotV1 }; floatingRuntime: ReturnType<typeof createFloatingWorkspaceRuntime>; bayAgent?: BayAgentControllerV1 } {
   const runtimeMetrics = createWorkbenchRuntimeMetrics()
   const floatingRuntime = createFloatingWorkspaceRuntime()
+  const suppliedToolUsageService = (ctx as unknown as { get?: (name: string, strict?: boolean) => unknown }).get?.('workbenchToolUsageService') as WorkbenchToolUsageServiceV1 | undefined
   if (!isWorkbenchShareGuestPage()) ctx.effect(() => installNativeAutomaticIsolation(ctx, modeController), 'workbench: automatic review isolation')
   floatingRuntime.setCleanup(closeWorkbenchNative)
-  const decode = (value: unknown): WorkbenchSettingsV4 | undefined => {
-    const currentSessionId = Object.values(ctx.sessions.list.getSnapshot().byId).find(row => (row.retainedBy.mainView ?? 0) > 0)?.id
-    return decodeWorkbenchSettingsV4(value, {
-      ...(currentSessionId === undefined ? {} : { currentSessionId }),
-      workspaces: ctx.workspaces.list.getSnapshot().items.map(workspace => ({
-        workspaceId: workspace.workspaceId,
-        name: workspace.title,
-        sessionIds: workspace.sessionIds,
-      })),
-  })
-  }
-  const suppliedToolUsageService = (ctx as unknown as { get?: (name: string, strict?: boolean) => unknown }).get?.('workbenchToolUsageService') as WorkbenchToolUsageServiceV1 | undefined
-  // DSH 0.1.7 renamed settingsScope.bind() to configForms.get(). Keep the
-  // decoder and Workbench revision semantics local to this adapter, while
-  // retaining a lazy 0.1.6 fallback for isolated unit fixtures and rollback.
-  const compatible = ctx as ClientContext & {
-    configForms?: { get<T>(entryId: string): {
-      getSnapshot(): { status: 'loading' | 'ready' | 'unavailable'; value: unknown; revision: number | undefined; writable: boolean; base?: unknown; user?: unknown }
-      subscribe(listener: () => void): () => void
-      set(field: string, value: unknown): Promise<boolean>
-      unset(field: string): Promise<boolean>
-      mutate(ops: readonly unknown[], expectedRevision?: number): Promise<boolean>
-    } }
-    settingsScope?: { bind<T>(options: { namespace: string; decode: (value: unknown) => T }): SettingsScope<T> }
-  }
-  const settingsNamespace = 'workbench-layout'
-  const configForm = compatible.configForms?.get<unknown>(settingsNamespace)
-  const legacySettings = configForm === undefined
-    ? compatible.settingsScope?.bind<WorkbenchSettingsV4>({ namespace: settingsNamespace, decode: value => decode(value) as WorkbenchSettingsV4 })
-    : undefined
-  if (configForm === undefined && legacySettings === undefined) throw new Error('Workbench settings service is unavailable')
-  let configFormSnapshot: {
-    status: 'loading' | 'ready' | 'unavailable'
-    value: unknown
-    revision: number | undefined
-    writable: boolean
-    base?: unknown
-    user?: unknown
-  } | undefined
-  let workbenchConfigSnapshot: ReturnType<SettingsScope<WorkbenchSettingsV4>['getSnapshot']> | undefined
-  const sourceSettings: SettingsScope<WorkbenchSettingsV4> = configForm === undefined
-    ? legacySettings!
-    : {
-      getSnapshot: () => {
-        const snapshot = configForm.getSnapshot()
-        if (configFormSnapshot !== undefined
-          && configFormSnapshot.status === snapshot.status
-          && configFormSnapshot.value === snapshot.value
-          && configFormSnapshot.revision === snapshot.revision
-          && configFormSnapshot.writable === snapshot.writable
-          && configFormSnapshot.base === snapshot.base
-          && configFormSnapshot.user === snapshot.user) return workbenchConfigSnapshot!
-        configFormSnapshot = snapshot
-        workbenchConfigSnapshot = { ...snapshot, mode: 'host', value: snapshot.value === undefined ? undefined : decode(snapshot.value) }
-        return workbenchConfigSnapshot
-      },
-      subscribe: listener => configForm.subscribe(listener),
-      set: (field, value) => configForm.set(field, value),
-      unset: field => configForm.unset(field),
-      mutate: (ops, expectedRevision) => configForm.mutate(ops, expectedRevision),
-    }
-  const settings = createWorkbenchSettingsScope(sourceSettings, ctx.remote, () => undefined)
-  floatingRuntime.policy = () => sourceSettings.getSnapshot().value?.interactionPolicy
-  ctx.effect(() => {
-    let pending = false
-    const migrate = () => {
-      const snapshot = sourceSettings.getSnapshot(), raw = configForm?.getSnapshot().value as { interactionPolicy?: { version?: number } } | undefined
-      if (pending || !configForm || snapshot.status !== 'ready' || !snapshot.writable || snapshot.revision === undefined || raw?.interactionPolicy?.version === 2 || !snapshot.value?.interactionPolicy) return
-      pending = true
-      void settings.patch({ operation: 'set', path: ['interactionPolicy'], value: snapshot.value.interactionPolicy, expectedRevision: snapshot.revision }).finally(() => { pending = false })
-    }
-    const off = sourceSettings.subscribe(migrate); migrate(); return off
-  }, 'workbench: interaction preference migration')
+  const fileSettings = createFileWorkbenchSettings()
+  ctx.effect(() => () => fileSettings.dispose(), 'workbench: file authority')
+  const settings = fileSettings.scope
+  floatingRuntime.policy = () => settings.getSnapshot().value?.interactionPolicy
   const suppliedToolGateway = (ctx as unknown as { get?: (name: string, strict?: boolean) => unknown }).get?.('workbenchToolGateway') as WorkbenchToolGatewayManagerV1 | undefined
   const toolGateway = suppliedToolGateway ?? createWorkbenchToolGatewayManager({
     activeWorkbenchId: () => ((settings.getSnapshot().value as WorkbenchSettingsV4 | undefined)?.activeWorkbenchId ?? 'main'),
@@ -256,7 +197,10 @@ export function applyWorkbenchCoreFoundation(
   const connectionRpc = resolveConnectionRpc()
   const shareGuest = isWorkbenchShareGuestPage()
   const shareController = shareGuest ? undefined
-    : createWorkbenchShareController(connectionRpc === undefined ? {} : { rpc: connectionRpc })
+    : createWorkbenchShareController({ ...(connectionRpc === undefined ? {} : { rpc: connectionRpc }), chooseGrant: id => {
+      const record = settings.getSnapshot().value?.workbenches[id]
+      return requestWorkbenchShareGrant(undefined, record ? areasOf(record.document.root).map((area, index) => ({ id: area.areaId, label: record.areaMetadata?.[area.areaId]?.label || `区域 ${index + 1}` })) : [])
+    } })
   if (shareController !== undefined) {
     ctx.effect?.(() => {
       const refreshConnection = () => { shareController.setRpc(resolveConnectionRpc()) }
@@ -304,11 +248,38 @@ export function applyWorkbenchCoreFoundation(
       ? {
         isBrowserOwned: id => !settingsTargetWritable(DESKTOP_SETTINGS_CONTEXT, id, windowController),
         contextPatch: input => contextPatch === undefined ? Promise.resolve({ status: 'unavailable' as const }) : contextPatch(input),
+        createFileWorkbench: async input => {
+          const value = await fileSettings.request<{ workbenchId: string; revision: number }>({ action: 'create', ...input })
+          await ctx.sessions.refresh()
+          return { status: 'committed', ...value }
+        },
       }
       : {
         workbenchId: windowView.workbenchId,
         contextPatch: input => contextPatch === undefined ? Promise.resolve({ status: 'unavailable' as const }) : contextPatch(input),
       })
+  directory.pickParentDirectory = async () => (await ctx.uiWorkspace.pickDirectory()) ?? undefined
+  directory.memoryRequest = fileSettings.request
+  directory.completeRequest = createWorkbenchCompleteClient().request
+  directory.getAreaProjects = id => settings.getSnapshot().value?.workbenches[id]?.areaProjects ?? {}
+  directory.getHiddenAreas = id => {
+    const record = settings.getSnapshot().value?.workbenches[id]
+    if (!record) return []
+    const visible = new Set(areasOf(record.document.root).map(area => area.areaId))
+    return Object.keys(record.areaDefinitions ?? {}).filter(areaId => !visible.has(areaId)).map(areaId => ({ areaId, label: record.areaMetadata?.[areaId]?.label ?? record.areaProjects?.[areaId]?.relativePath ?? areaId }))
+  }
+  directory.showArea = async (workbenchId, areaId) => {
+    if (directory.flushBeforeLifecycleTransition && !await directory.flushBeforeLifecycleTransition()) throw new Error('请先保存当前布局。')
+    const result = await fileSettings.request<{ status: string }>({ action: 'show-area', workbenchId, areaId, expectedRevision: settings.getSnapshot().revision })
+    if (result.status !== 'committed') throw new Error('工作台刚刚发生变化，请重试。')
+  }
+  directory.getRootPath = id => settings.getSnapshot().value?.workbenches[id]?.fileWorkbench?.rootPath
+  directory.listProjectDirectories = (workbenchId, relativePath = '') => fileSettings.request({ action: 'directories', workbenchId, relativePath })
+  directory.bindAreaProject = async input => {
+    if (directory.flushBeforeLifecycleTransition && !await directory.flushBeforeLifecycleTransition()) throw new Error('请先保存当前布局。')
+    const result = await fileSettings.request<{ status: string }>({ action: 'bind-area', ...input, expectedRevision: settings.getSnapshot().revision })
+    if (result.status !== 'committed') throw new Error('工作台刚刚发生变化，请重试。')
+  }
   for (const operation of ['archive', 'remove'] as const) {
     const original = directory[operation].bind(directory)
     directory[operation] = async id => {
@@ -324,7 +295,7 @@ export function applyWorkbenchCoreFoundation(
   const slotEditorCatalog = editorCatalogFor(ctx)
   const extensionRegistry = createWorkbenchExtensionRegistryV1({
     catalog: slotEditorCatalog,
-    settings: sourceSettings,
+    settings,
     coreEditorIds: [
       'workbench.conversation.start', 'workbench.conversation', 'workbench.agent-trajectory',
       'workbench.workspace-files', 'workbench.document-preview', 'workbench.browser',
@@ -369,7 +340,7 @@ export function applyWorkbenchCoreFoundation(
     }), 'workbench: native Plugins panel DOM handoff')
   }
   const creatorInspect = createWorkbenchCreatorInspectProvider({
-    settings: sourceSettings,
+    settings,
     editorCatalog,
     sessions: ctx.sessions,
     workspaces: ctx.workspaces,
@@ -403,16 +374,21 @@ export function applyWorkbenchCoreFoundation(
           workspaceId: input.workspaceId as WorkspaceId,
           ...(input.agentPreset === undefined ? {} : { agentPreset: input.agentPreset }),
         })
+        if (input.workbenchId && input.areaId) {
+          const project = settings.getSnapshot().value?.workbenches[input.workbenchId]?.areaProjects?.[input.areaId]
+          if (!project) throw new Error('请先为区域设置项目文件夹。')
+          await fileSettings.request({ action: 'register-session', workbenchId: input.workbenchId, areaId: input.areaId, sessionId,
+            sessionKey: 'user:' + input.requestId, relativePath: project.relativePath, title: input.title ?? '对话', agentPreset: input.agentPreset ?? 'standard', createdAt: Date.now(), requestId: input.requestId })
+        }
         return { target: { workspaceId: input.workspaceId, sessionId }, reusedBlank: false }
       },
     })
     ;(ctx as unknown as { provide?: (name: string, value: unknown) => unknown }).provide?.(WORKBENCH_CONTROL_PLANE_SERVICE_NAME, controlPlane)
   }
-  const bayAgent = createRemoteBayAgentController(windowView?.workbenchId ?? settings.getSnapshot().value?.activeWorkbenchId ?? 'main', fetch, () => ctx.sessions.refresh())
+  const bayAgent = createRemoteBayAgentController(windowView?.workbenchId ?? settings.getSnapshot().value?.activeWorkbenchId ?? 'main', workbenchFetch, () => ctx.sessions.refresh())
   const aiDraftGenerator = createRemoteWorkbenchAiDraftGenerator({
     route: BAY_AGENT_DRAFT_ROUTE,
-    fetcher: fetch,
-    getSelection: workbenchId => settings.getSnapshot().value?.workbenches[workbenchId]?.workbenchAi,
+    fetcher: workbenchFetch,
   })
   ;(ctx as unknown as { provide?: (name: string, value: unknown) => unknown }).provide?.('bayAgentController', bayAgent)
   ctx.effect(() => {
@@ -492,6 +468,11 @@ export function applyWorkbenchCoreFoundation(
     workbenchDirectory: directory,
      loadModelCatalog: async (): Promise<import('@deepseek-ai/dsh-api-session-controller').ModelCatalog> => unwrapRemoteResult<import('@deepseek-ai/dsh-api-session-controller').ModelCatalog>(await ctx.remote.session.modelCatalog(), 'model catalog'),
     ...(windowView === undefined ? { extensionRegistry } : {}),
+    saveBackgroundAi: async (value: BackgroundAiPreferencesV1, expectedRevision?: number) => {
+      const normalized = decodeBackgroundAiPreferences(value)
+      if (!normalized) throw new Error('请填写完整的模型配置和提示词。')
+      return settings.patch({ operation: 'set', path: ['backgroundAi'], value: normalized, ...(expectedRevision === undefined ? {} : { expectedRevision }) })
+    },
     updateInteractionPolicy: async (policy: WorkbenchConversationInteractionPolicyV1) => {
       if (windowView !== undefined) return false
       const result = await settings.patch({ operation: 'set', path: ['interactionPolicy'], value: policy })
@@ -569,10 +550,15 @@ export function applyWorkbenchCoreFoundation(
         return { target: { workspaceId, sessionId }, reusedBlank: previous.has(sessionId) }
       },
       createWorkspaceSession: createAreaSessionCreator({
-        create: (workspaceId, options) => ctx.sessions.create({
-          workspaceId: workspaceId as WorkspaceId,
-          ...(options?.agentPreset === undefined ? {} : { agentPreset: options.agentPreset }),
-        }),
+        create: async (workspaceId, options) => {
+          if (options?.workbenchId && options.areaId) {
+            const project = settings.getSnapshot().value?.workbenches[options.workbenchId]?.areaProjects?.[options.areaId]
+            if (!project) throw new Error('请先为区域设置项目文件夹。')
+            return fileSettings.request<string>({ action: 'create-session', workbenchId: options.workbenchId, areaId: options.areaId, workspaceId,
+              agentPreset: options.agentPreset ?? 'standard', requestId: options.requestId ?? browserSafeUuid() })
+          }
+          return ctx.sessions.create({ workspaceId: workspaceId as WorkspaceId, ...(options?.agentPreset === undefined ? {} : { agentPreset: options.agentPreset }) })
+        },
       }),
       createWorkspace: path => ctx.workspaces.create({ path }),
       pickDirectory: () => ctx.uiWorkspace.pickDirectory(),
@@ -608,6 +594,7 @@ export function applyWorkbenchCoreFoundation(
   return {
     floatingRuntime,
     bayAgent,
+    ready: async () => { await fileSettings.refresh(); if (settings.getSnapshot().status !== 'ready') throw new Error('工作台目录快照尚未就绪。') },
     flush: () => directory.flushBeforeLifecycleTransition!(),
     runtimeMetrics: Object.freeze({ getSnapshot: runtimeMetrics.getSnapshot }),
   }

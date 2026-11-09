@@ -42,13 +42,13 @@ describe('Area session creation', () => {
   })
 
   it('passes the requested Agent preset into the exact Host create call', async () => {
-    const calls: Array<{ workspaceId: string; options?: { agentPreset?: string } }> = []
+    const calls: Array<{ workspaceId: string; options?: { agentPreset?: string; requestId?: string } }> = []
     const place = createAreaSessionCreator({
       create: async (workspaceId, options) => { calls.push({ workspaceId, options }); return 'session' },
     })
     expect(await place('workspace', { requestId: 'area', agentPreset: 'requested' }))
       .toEqual({ target: { sessionId: 'session', workspaceId: 'workspace' }, reusedBlank: false })
-    expect(calls).toEqual([{ workspaceId: 'workspace', options: { agentPreset: 'requested' } }])
+    expect(calls).toEqual([{ workspaceId: 'workspace', options: { agentPreset: 'requested', requestId: 'area' } }])
   })
 
   it('propagates Host create failures without publishing a false selection', async () => {

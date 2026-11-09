@@ -1,3 +1,4 @@
+import { browserSafeUuid } from '../browser-safe-id.ts'
 import {
   canonicalWorkbenchEditorId, REMOVED_WORKBENCH_EDITOR_IDS,
 } from './model.ts'
@@ -27,14 +28,15 @@ export interface WorkbenchSplitNodeV3 {
 
 /** A visual rectangle with one current module.
  *
- * `moduleHistory` is retained in the wire shape for backwards compatibility
- * with Workbench V2/V3 documents. New durable documents contain at most the
- * current module; legacy history is collapsed at decode/write boundaries.
+ * `moduleHistory` stores all retained page views. Each page has its own source;
+ * the active page is a display choice and never the Area's Session identity.
  */
 export interface AreaNode {
   kind: 'area'
   areaId: string
-  /** One explicit binding shared by all session-scoped modules in this Area. */
+  /** Operation hint consumed and removed by the Host when a split is saved. */
+  projectSourceAreaId?: string
+  /** Retired wire field, ignored by V18 projection and removed on Host write. */
   areaBinding?: SessionBindingV1
   areaBindingGeneration?: number
   activeModuleInstanceId?: string
@@ -107,7 +109,7 @@ function uniqueIdAllocator(
 export function applyWorkbenchCommandV3(
   document: WorkbenchDocumentV3,
   command: WorkbenchCommandV3,
-  createId: WorkbenchIdFactory = kind => `${kind}-${globalThis.crypto.randomUUID()}`,
+  createId: WorkbenchIdFactory = kind => `${kind}-${browserSafeUuid()}`,
 ): WorkbenchDocumentV3 {
   // Commands can be replayed against a legacy in-memory document before the
   // Settings decoder has written its migration. Collapse compatibility history
@@ -120,13 +122,9 @@ export function applyWorkbenchCommandV3(
   if (command.type === 'split-empty') {
     const source = areasOf(document.root).find(area => area.areaId === command.sourceAreaId)
     if (source === undefined) return document
-    const sourceModule = source.moduleHistory.find(
-      module => module.moduleInstanceId === source.activeModuleInstanceId,
-    )
     const areaId = nextId('area')
     const moduleInstanceId = nextId('module')
     const splitId = nextId('split')
-    const sourceTarget = source?.areaBinding ?? sourceModule?.binding
     const launcher: ModuleInstanceDocument = {
       moduleInstanceId,
       editorId: 'workbench.conversation.start',
@@ -148,7 +146,7 @@ export function applyWorkbenchCommandV3(
   const copied: ModuleInstanceDocument = structuredClone(located.module)
   copied.moduleInstanceId = moduleInstanceId
   const newArea: AreaNode = {
-    kind: 'area', areaId, ...(located.area.areaBinding === undefined ? {} : { areaBinding: structuredClone(located.area.areaBinding) }), activeModuleInstanceId: moduleInstanceId, moduleHistory: [copied],
+    kind: 'area', areaId, projectSourceAreaId: located.area.projectSourceAreaId ?? located.area.areaId, activeModuleInstanceId: moduleInstanceId, moduleHistory: [copied],
   }
   return splitBeside(document, located.area.areaId, newArea, splitId, command.edge, command.ratio)
 }
@@ -235,7 +233,7 @@ export function modulesOf(node: WorkbenchNodeV3): ModuleInstanceDocument[] {
  */
 export function cloneWorkbenchDocumentWithFreshIds(
   document: WorkbenchDocumentV3,
-  createId: WorkbenchIdFactory = kind => `${kind}-${globalThis.crypto.randomUUID()}`,
+  createId: WorkbenchIdFactory = kind => `${kind}-${browserSafeUuid()}`,
 ): WorkbenchDocumentV3 {
   const sourceDocument = normalizeWorkbenchDocument(document)
   const occupied = new Set<string>()
@@ -297,8 +295,7 @@ export function migrateDocumentV2ToV3(document: WorkbenchLayoutDocument): Workbe
     return {
       kind: 'area',
       areaId: node.id,
-      ...(node.areaBinding === undefined ? {} : { areaBinding: structuredClone(node.areaBinding) }),
-      ...(node.areaBindingGeneration === undefined ? {} : { areaBindingGeneration: node.areaBindingGeneration }),
+      ...(node.projectSourceAreaId === undefined ? {} : { projectSourceAreaId: node.projectSourceAreaId }),
       ...(node.activeTabId === undefined ? {} : { activeModuleInstanceId: node.activeTabId }),
       moduleHistory: node.tabs.map(convertModule),
     }
@@ -350,7 +347,7 @@ export function compactWorkbenchDocumentHistory(
   return { document: { ...document, root }, changed: true }
 }
 
-/** Canonicalize editor ids and infer one shared Area binding while preserving tabs. */
+/** Canonicalize editor ids while preserving independent page sources. */
 export function normalizeWorkbenchDocument(document: WorkbenchDocumentV3): WorkbenchDocumentV3 {
   const normalizeNode = (node: WorkbenchNodeV3): WorkbenchNodeV3 => {
     if (node.kind === 'split') {
@@ -359,6 +356,11 @@ export function normalizeWorkbenchDocument(document: WorkbenchDocumentV3): Workb
     }
     const moduleHistory = node.moduleHistory.map(module => {
       const editorId = canonicalWorkbenchEditorId(module.editorId)
+      if (editorId === 'workbench.workspace-files') {
+        const { binding: _binding, pendingBinding: _pending, bindingGeneration: _generation, sessionStates: _states, sessionStateOrder: _order, ...page } = module
+        const state = page.state && typeof page.state === 'object' && !Array.isArray(page.state) ? page.state : {}
+        return { ...page, editorId, editorScope: 'root' as const, state: { ...state, projectAreaId: typeof state.projectAreaId === 'string' ? state.projectAreaId : node.areaId } }
+      }
       // A root Start may retain one native Session during message preparation.
       // Preserve the exact binding on reopen; only its accepted first prompt
       // promotes the occurrence to the Conversation editor.
@@ -367,18 +369,11 @@ export function normalizeWorkbenchDocument(document: WorkbenchDocumentV3): Workb
       }
       return editorId === module.editorId ? module : { ...module, editorId }
     })
-    const sessionModules = moduleHistory.filter(module => module.editorScope === 'session'
-      || (module.editorId === 'workbench.conversation.start' && module.binding !== undefined))
-    const inferredBinding = sessionModules.length === 0 ? undefined : node.areaBinding ?? sessionModules[0]?.binding
-    const bindingMatches = inferredBinding === undefined || sessionModules.every(module => (
-      module.binding?.sessionId === inferredBinding.sessionId && module.binding?.workspaceId === inferredBinding.workspaceId
-    ))
     const activeModuleInstanceId = moduleHistory.some(module => module.moduleInstanceId === node.activeModuleInstanceId)
       ? node.activeModuleInstanceId : moduleHistory[0]?.moduleInstanceId
     return {
       kind: 'area', areaId: node.areaId, moduleHistory,
-      ...(bindingMatches && inferredBinding !== undefined ? { areaBinding: structuredClone(inferredBinding) } : {}),
-      ...(node.areaBindingGeneration === undefined ? {} : { areaBindingGeneration: node.areaBindingGeneration }),
+      ...(node.projectSourceAreaId === undefined ? {} : { projectSourceAreaId: node.projectSourceAreaId }),
       ...(activeModuleInstanceId === undefined ? {} : { activeModuleInstanceId }),
     }
   }
@@ -442,7 +437,7 @@ export function removeRetiredWorkbenchEditors(document: WorkbenchDocumentV3): Wo
  * @param document - project-neutral Workbench document.
  * @returns a transient v2-shaped visual layout.
  */
-export function projectDocumentV3ToLayoutV2(document: WorkbenchDocumentV3): WorkbenchLayoutDocument {
+export function projectDocumentV3ToLayoutV2(document: WorkbenchDocumentV3, projects?: Readonly<Record<string, import('../workbench-directory-contract.ts').AreaProjectV1>>): WorkbenchLayoutDocument {
   const sourceDocument = normalizeWorkbenchDocument(document)
   const convertModule = (module: ModuleInstanceDocument): TabDocument => ({
     id: module.moduleInstanceId,
@@ -466,8 +461,9 @@ export function projectDocumentV3ToLayoutV2(document: WorkbenchDocumentV3): Work
     }
     return {
       kind: 'group', id: node.areaId,
-      ...(node.areaBinding === undefined ? {} : { areaBinding: structuredClone(node.areaBinding) }),
-      ...(node.areaBindingGeneration === undefined ? {} : { areaBindingGeneration: node.areaBindingGeneration }),
+      ...(projects === undefined ? {} : { projectRequired: true }),
+      ...(projects?.[node.areaId] ? { project: structuredClone(projects[node.areaId]!) } : {}),
+      ...(node.projectSourceAreaId === undefined ? {} : { projectSourceAreaId: node.projectSourceAreaId }),
       ...(node.activeModuleInstanceId === undefined ? {} : { activeTabId: node.activeModuleInstanceId }),
       tabs: node.moduleHistory.map(convertModule),
     }
@@ -537,20 +533,14 @@ export function validateWorkbenchDocumentV3(value: unknown, options: { allowDeta
       if (active !== undefined && (typeof active !== 'string'
         || !moduleHistory.some(module => module.moduleInstanceId === active))) return undefined
       if (candidate.areaBinding !== undefined && !isSessionBinding(candidate.areaBinding)) return undefined
-      const sessionModules = moduleHistory.filter(module => module.editorScope === 'session'
-        || (module.editorId === 'workbench.conversation.start' && module.binding !== undefined))
-      const inferred = candidate.areaBinding ?? sessionModules[0]?.binding
-      const matches = inferred === undefined || sessionModules.every(module => module.binding?.sessionId === inferred.sessionId && module.binding?.workspaceId === inferred.workspaceId)
-      // Explicit shared binding remains strict. Without it each module may own
-      // a separate conversation, as normalization and the V2 model already allow.
-      if (candidate.areaBinding !== undefined && !matches) return undefined
-      const areaBinding = matches ? inferred : undefined
+      // V18 keeps project identity at the Workbench directory layer. Session
+      // modules inside an Area may each point to a different conversation.
+      // Ignore the retired Area binding; every page keeps its own source.
       if (candidate.areaBindingGeneration !== undefined && (typeof candidate.areaBindingGeneration !== 'number'
         || !Number.isSafeInteger(candidate.areaBindingGeneration) || candidate.areaBindingGeneration < 0)) return undefined
       return {
         kind: 'area', areaId: candidate.areaId, moduleHistory,
-        ...(areaBinding === undefined ? {} : { areaBinding: structuredClone(areaBinding) }),
-        ...(candidate.areaBindingGeneration === undefined ? {} : { areaBindingGeneration: candidate.areaBindingGeneration }),
+        ...(typeof candidate.projectSourceAreaId === 'string' ? { projectSourceAreaId: candidate.projectSourceAreaId } : {}),
         ...(active === undefined ? {} : { activeModuleInstanceId: active }),
       }
     }

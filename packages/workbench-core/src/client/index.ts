@@ -1,3 +1,4 @@
+import { waitForFileWorkbench } from './workbench-access.ts'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-client-connection/client'
 export type { WorkbenchEditorOwnerProps } from './editor-slots.ts'
@@ -132,7 +133,7 @@ import { WORKBENCH_CORE_RUNTIME_SERVICE_NAME, createWorkbenchCoreRuntime } from 
 import { createWorkbenchModuleCenterBridge } from '../browser-module-center.ts'
 import { createWorkbenchManagerRestartBridge } from './workbench-manager-restart.ts'
 import { readWorkbenchWindowView } from './workbench-window-view.ts'
-import { hasBrowserWorkbenchIntent, reportBrowserWorkbenchClosed, reportBrowserWorkbenchReady, resolveBrowserWorkbenchView, startBrowserWorkbenchHeartbeat } from './resolve-browser-window-view.ts'
+import { hasBrowserWorkbenchIntent, reportBrowserWorkbenchClosed, reportBrowserWorkbenchReady, reportBrowserWorkbenchFailed, resolveBrowserWorkbenchView, startBrowserWorkbenchHeartbeat } from './resolve-browser-window-view.ts'
 import { mountBrowserWorkbenchShell, mountBrowserWorkbenchStatusShell, unmountBrowserWorkbenchShell } from './browser-workbench-shell.ts'
 import { mountBrowserWorkbenchShareStatusShell } from './browser-workbench-shell.ts'
 import { isWorkbenchShareGuestPage, startWorkbenchShareGuestHeartbeat, startWorkbenchShareLifecycleMonitor } from './workbench-share-guest.ts'
@@ -203,8 +204,13 @@ export async function apply(ctx: WorkbenchCoreClientContextV1): Promise<void> {
   const resolution = await resolveBrowserWorkbenchView(ctx as never)
   if (resolution.status === 'failed') {
     mountBrowserWorkbenchStatusShell(`无法打开 Workbench 浏览器窗口（${resolution.code}）。请从 DSH 客户端重新打开。`)
+    return
   }
   const windowView = resolution.status === 'ready' ? resolution.view : browserIntent ? undefined : readWorkbenchWindowView()
+  if (windowView) {
+    try { await waitForFileWorkbench(windowView.workbenchId) }
+    catch (error) { mountBrowserWorkbenchStatusShell(`工作台目录尚不可用：${error instanceof Error ? error.message : String(error)}`); reportBrowserWorkbenchClosed(ctx as never, windowView); return }
+  }
   const runtime = createWorkbenchCoreRuntime({
     core: WORKBENCH_CORE_MANIFEST,
     flush: () => foundation.flush(),
@@ -222,7 +228,7 @@ export async function apply(ctx: WorkbenchCoreClientContextV1): Promise<void> {
     },
     commitSignedCatalogInstall: createWorkbenchBrowserSignedCatalogInstallCommit(),
     commitDirectSourceInstall: createWorkbenchBrowserDirectSourceInstallCommit(),
-    center: createWorkbenchModuleCenterBridge(),
+    ...(windowView === undefined ? { center: createWorkbenchModuleCenterBridge() } : {}),
     ...(managerRestart === undefined ? {} : {
       resumeRestart: managerRestart.resumeRestart,
       requestRestart: async (transactionId, onStatus) => {
@@ -264,24 +270,26 @@ export async function apply(ctx: WorkbenchCoreClientContextV1): Promise<void> {
         window.removeEventListener('pagehide', closeView)
       }, 'workbench: browser view lifecycle')
     }
-    void runtime.mode.enter({ workbenchId: windowView.workbenchId }).then(async () => {
+    void (async () => {
+      await foundation.ready()
+      // Restore before mounting the floating workspace. Its persistent Main
+      // placeholder can otherwise race the incoming Main binding and reject
+      // a valid handoff as a stale rebind.
+      if (!isWorkbenchShareGuestPage() && ctx.connection?.rpc) {
+        const result = await ctx.connection.rpc.call(WORKBENCH_WINDOW_RPC_CHANNEL, workbenchWindowRpcEndpoint('floating-read'), {
+          windowId: windowView.windowId, closeToken: windowView.closeToken,
+        }, AbortSignal.timeout(8_000))
+        if (!result.ok) throw new Error('浮动工作区交接读取失败')
+        const snapshot = (result.value as { snapshot?: unknown }).snapshot
+        if (snapshot != null) foundation.floatingRuntime.restoreHandoff(windowView.workbenchId, snapshot)
+      }
+      await runtime.mode.enter({ workbenchId: windowView.workbenchId })
       if (await waitForWorkbenchSurface(windowView.workbenchId)) {
         const shell = mountBrowserWorkbenchShell(windowView.workbenchId)
         if (shell.status !== 'ready') {
           mountBrowserWorkbenchStatusShell('目标工作台无法在此 DSH 页面中安全挂载。DSH 页面内容已隔离，请从客户端重新打开工作台。')
-          const rpc = ctx.connection?.rpc
-          if (rpc !== undefined) await rpc.call(WORKBENCH_WINDOW_RPC_CHANNEL, workbenchWindowRpcEndpoint('failed'), {
-            windowId: windowView.windowId, code: shell.code ?? 'browser-shell-unsupported',
-          }, AbortSignal.timeout(5_000)).catch(() => {})
+          await reportBrowserWorkbenchFailed(ctx as never, windowView, shell.code ?? 'browser-shell-unsupported')
           return
-        }
-        if (!isWorkbenchShareGuestPage() && ctx.connection?.rpc) {
-          const result = await ctx.connection.rpc.call(WORKBENCH_WINDOW_RPC_CHANNEL, workbenchWindowRpcEndpoint('floating-read'), {
-            windowId: windowView.windowId, closeToken: windowView.closeToken,
-          }, AbortSignal.timeout(8_000))
-          if (!result.ok) throw new Error('floating-handoff-read-failed')
-          const snapshot = (result.value as { snapshot?: unknown }).snapshot
-          if (snapshot != null) foundation.floatingRuntime.restoreHandoff(windowView.workbenchId, snapshot)
         }
         const ready = await reportBrowserWorkbenchReady(ctx as never, windowView)
         if (!ready) {
@@ -322,17 +330,12 @@ export async function apply(ctx: WorkbenchCoreClientContextV1): Promise<void> {
       }
       else {
         mountBrowserWorkbenchStatusShell('目标工作台未能安全挂载。DSH 页面内容已隔离，请从客户端重新打开工作台。')
-        const rpc = ctx.connection?.rpc
-        if (rpc !== undefined) await rpc.call(WORKBENCH_WINDOW_RPC_CHANNEL, workbenchWindowRpcEndpoint('failed'), {
-          windowId: windowView.windowId, code: 'browser-view-mount-timeout',
-        }, AbortSignal.timeout(5_000)).catch(() => {})
+        await reportBrowserWorkbenchFailed(ctx as never, windowView, 'browser-view-mount-timeout')
       }
-    }).catch(async () => {
-      mountBrowserWorkbenchStatusShell('Workbench 浏览器窗口启动失败。DSH 页面内容已隔离，请从客户端重新打开工作台。')
-      const rpc = ctx.connection?.rpc
-      if (rpc !== undefined) await rpc.call(WORKBENCH_WINDOW_RPC_CHANNEL, workbenchWindowRpcEndpoint('failed'), {
-        windowId: windowView.windowId, code: 'browser-view-enter-failed',
-      }, AbortSignal.timeout(5_000)).catch(() => {})
+    })().catch(async error => {
+      const diagnostic = error instanceof Error ? error.message : String(error)
+      mountBrowserWorkbenchStatusShell(`Workbench 浏览器窗口启动失败：${diagnostic}。请从客户端重新打开工作台。`)
+      await reportBrowserWorkbenchFailed(ctx as never, windowView, 'browser-view-enter-failed')
     })
   }
   ctx.effect?.(() => {

@@ -2,7 +2,7 @@
 
 更新时间：2026-10-22  
 规范版本：1.0  
-适用基线：Workbench Core `0.2.2-alpha.17.6`、DSH `0.2.2-rc.1`（commit `66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db`）
+适用基线：Workbench Core `0.2.2-alpha.18.0`、DSH `0.2.2-rc.1`（commit `66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db`）
 状态：**Core 接口与自动化合同说明；正式桌面扩展生命周期验收仍未完成**
 
 本文是开发新的 Workbench 容器内页扩展时的主规范。模板位于 `packages/workbench-core/presets/workbench-creator/skills/workbench-extension-development/templates/workbench-editor/`。若模板与本文不一致，以对应目标 Core/DSH 版本的公开导出、类型、测试和锁定文件为准；不要复制本文以外版本的 Slot 参数或 API。
@@ -98,7 +98,7 @@ my-workbench-extension/
       "kind": "extension",
       "delivery": "direct-source",
       "version": "1.0.0",
-      "coreCompatibility": "0.2.2-alpha.17.6",
+      "coreCompatibility": "0.2.2-alpha.18.0",
       "dshGeneration": "0.2.2-rc.1",
       "activation": "restart-only",
       "scope": "root",
@@ -137,7 +137,7 @@ const extension = {
   moduleId: 'example.my-extension',
   apiVersion: 1,
   editorIds: ['example.my-extension.main'],
-  coreCompatibility: '0.2.2-alpha.17.6',
+  coreCompatibility: '0.2.2-alpha.18.0',
   dshGeneration: '0.2.2-rc.1',
 }
 
@@ -224,14 +224,14 @@ Core 对 Slot metadata 做运行时校验。声明无效、ID 冲突、扩展内
 |---|---|---|
 | 独立工具，不读当前对话或 Workspace | `workbench.editor.root` / `root` | `requiredBinding: 'none'`, `binding.requirement: 'none'`, `unbound: 'available'`, `sharing: 'none'` |
 | 需要工作区上下文但不需要具体 Session | 当前公开合同没有独立 Workspace Slot；按目标版本公开 owner 能力选择 session Slot 并允许无 Session pending，或等待 Core 增加明确 Workspace-only 合同 | 不得假设 root owner 能取得 Workspace |
-| 需要所属 Area 的 Workspace 和确切 Session | `workbench.editor.session` / `session` | `requiredBinding: 'session'`, `unbound: 'pending'`, 通常 `sharing: 'area'` |
+| 需要所属 Area 的 Workspace 和确切 Session | `workbench.editor.session` / `session` | `requiredBinding: 'session'`, `unbound: 'pending'`, 18.0 使用 `sharing: 'independent'` |
 | 需要扩展自己挑选或创建的资源 | 只使用已公开且显式授权的 Core API | 不可仅凭 `binding.sharing: 'independent'` 就假定存在创建 API |
 
 `binding` 的字段含义：
 
 - `requirement`: `none`、`workspace`、`session`。Core 按此合同决定是否需要绑定。
 - `unbound`: `available` 表示未绑定也能工作；`pending` 表示显示等待资源/操作；`hidden` 表示在缺少资源时不提供入口。pending 不等于自动创建。
-- `sharing`: `none`、`area`、`independent` 描述绑定归属策略。无绑定内页必须为 `none`；Session 内页通常使用 `area`，即使用此区域自己的绑定。
+- `sharing`: `none`、`area`、`independent` 是宿主声明枚举。18.0 的 Session 内页使用 `independent`，每个内页明确保存自己的来源对话；无绑定内页使用 `none`。`area` 仅作为旧声明字段保留，不允许据此读取区域首个对话或批量重绑。区域保存项目目录；切换标签、移动视图不更改会话与任务归属。
 
 Core 传给编辑器的 owner 可能包含 `instanceId`、`areaId`、`workspaceId`、`sessionId`、`bindingGeneration`、`areaClaim`、`state`、`lifecycle` 以及受支持的回调。session 编辑器只使用当前实例传入的精确 ID。空 `sessionId` 时应渲染声明的 pending/恢复 UI，不要查全局 current Session、扫描 Session 列表或根据焦点/区域顺序猜测。
 

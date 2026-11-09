@@ -1,4 +1,4 @@
-import { applyLayoutCommand, sessionTargetKey, type LayoutNode, type SessionBindingV1, type WorkbenchLayoutDocument } from './model.ts'
+import { sessionTargetKey, type SessionBindingV1 } from './model.ts'
 import type { SessionMarkerRecord } from './persistence.ts'
 import { ensureSessionMarkers } from './session-markers.ts'
 
@@ -31,16 +31,4 @@ export function bindingPickerCandidates(input: {
     }
   }
   return result.sort((a, b) => b.updatedAt - a.updatedAt || sessionTargetKey(a.binding).localeCompare(sessionTargetKey(b.binding)))
-}
-
-/** Rebind all Session pages atomically, retaining each page's per-target state. */
-export function retargetBindingArea(document: WorkbenchLayoutDocument, areaId: string, binding: SessionBindingV1): WorkbenchLayoutDocument {
-  const visit = (node: LayoutNode): LayoutNode => {
-    if (node.kind === 'split') return { ...node, first: visit(node.first), second: visit(node.second) }
-    if (node.id !== areaId) return node
-    let local: WorkbenchLayoutDocument = { version: 2, root: node, activeGroupId: node.id }
-    for (const tab of node.tabs) if (tab.editorScope === 'session') local = applyLayoutCommand(local, { type: 'retarget-session', tabId: tab.id, binding })
-    return { ...local.root, areaBinding: binding, areaBindingGeneration: (node.areaBindingGeneration ?? 0) + 1 } as typeof node
-  }
-  return { ...document, root: visit(document.root) }
 }

@@ -26,7 +26,7 @@ export function registerWorkbenchOfficialAreaEditors(
     binding: {
       requirement: requiredBinding,
       unbound: requiredBinding === 'none' ? 'available' : 'pending',
-      sharing: requiredBinding === 'session' ? 'area' : 'none',
+      sharing: requiredBinding === 'session' ? 'independent' : 'none',
     },
     ...(conversationResources === undefined ? {} : { conversationResources }),
     runtime: { background, collapsed, reacquire: 'on-visible' },
@@ -35,7 +35,7 @@ export function registerWorkbenchOfficialAreaEditors(
     start: declaration(WORKBENCH_OFFICIAL_AREA_EDITOR_IDS.start, 'root', '新建对话', 'none', 'dispose', 'keep'),
     conversation: declaration(WORKBENCH_OFFICIAL_AREA_EDITOR_IDS.conversation, 'session', '对话', 'session', 'keep', 'keep'),
     trajectory: declaration(WORKBENCH_OFFICIAL_AREA_EDITOR_IDS.trajectory, 'session', 'Agent 轨迹', 'session', 'pause', 'pause'),
-    files: declaration(WORKBENCH_OFFICIAL_AREA_EDITOR_IDS.files, 'session', '工作区文件', 'session', 'pause', 'pause'),
+    files: { ...declaration(WORKBENCH_OFFICIAL_AREA_EDITOR_IDS.files, 'root', '项目文件', 'none', 'pause', 'pause'), presentation: { floating: false } },
     terminal: declaration(WORKBENCH_OFFICIAL_AREA_EDITOR_IDS.terminal, 'session', '终端', 'session', 'pause', 'keep'),
     browser: declaration(WORKBENCH_OFFICIAL_AREA_EDITOR_IDS.browser, 'session', '浏览器', 'session', 'pause', 'keep'),
     documentPreview: declaration(WORKBENCH_OFFICIAL_AREA_EDITOR_IDS.documentPreview, 'session', '文件预览', 'session', 'pause', 'pause'),
@@ -63,9 +63,9 @@ export function registerWorkbenchOfficialAreaEditors(
       label: 'Agent 轨迹', order: 30,
       inject: () => ({ workbenchEditor: { schemaVersion: 1, declaration: declarations.trajectory } }),
     } as never, editors.trajectory as never))),
-    disposerOf(ctx.slots.inject('workbench.editor.session', () => ctx.slots.register({
-      name: 'workbench.editor.session', id: WORKBENCH_OFFICIAL_AREA_EDITOR_IDS.files,
-      label: '工作区文件', order: 40,
+    disposerOf(ctx.slots.inject('workbench.editor.root', () => ctx.slots.register({
+      name: 'workbench.editor.root', id: WORKBENCH_OFFICIAL_AREA_EDITOR_IDS.files,
+      label: '项目文件', order: 40,
       inject: () => ({ workbenchEditor: { schemaVersion: 1, declaration: declarations.files } }),
     } as never, editors.files as never))),
     disposerOf(ctx.slots.inject('workbench.editor.session', () => ctx.slots.register({

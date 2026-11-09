@@ -1,16 +1,16 @@
 import type { GroupNode, SessionBindingV1 } from './model.ts'
 
-/** The header and its visual dependents must resolve the same Area context. */
-export function areaSessionBinding(
+/** Resolve the active page source only; an Area has no representative Session. */
+export function activePageSessionBinding(
   group: GroupNode | undefined,
   workspaces: readonly { workspaceId: string; sessionIds: readonly string[] }[],
   projectNeutral: boolean | undefined,
   account: string,
 ): SessionBindingV1 | undefined {
   if (!group) return undefined
-  if (group.areaBinding) return group.areaBinding
   const active = group.tabs.find(tab => tab.id === group.activeTabId) ?? group.tabs[0]
-  if (active?.editorScope !== 'session' || active.sessionId === undefined) return undefined
+  if (active?.editorScope !== 'session') return active?.binding
+  if (active.pendingBinding || active.sessionId === undefined) return undefined
   if (active.binding) return active.binding
   const workspaceId = projectNeutral
     ? workspaces.find(workspace => workspace.sessionIds.includes(active.sessionId!))?.workspaceId

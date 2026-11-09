@@ -30,7 +30,7 @@ describe('Workbench Area tab row model', () => {
     const editorIndex = indexWorkbenchEditors([editor('workbench.conversation', 'session', 'message'), editor('files', 'session', 'folder')])
     const input = { editorIndex, activeTabId: 'chat', areaBinding: { sessionId: 'session-1' }, pausedTabId: 'chat',
       conversations: new Map([['session-1', { status: 'attention' as const, label: '等待审批' }]]),
-      tabs: [tab({ id: 'chat', editorId: 'workbench.conversation', editorScope: 'session' }),
+      tabs: [tab({ id: 'chat', editorId: 'workbench.conversation', editorScope: 'session', binding: { sessionId: 'session-1' } }),
         tab({ id: 'copy', editorId: 'workbench.conversation', editorScope: 'session', sessionId: 'session-1' }),
         tab({ id: 'files', editorId: 'files', editorScope: 'session', sessionId: 'session-1' })] }
     expect(buildWorkbenchAreaTabRows(input).summaries.map(row => [row.status, row.statusLabel])).toEqual([

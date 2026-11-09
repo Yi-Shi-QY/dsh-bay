@@ -183,16 +183,21 @@ describe('settings product interactions', () => {
     fireEvent.click(view.getByRole('button', { name: '放弃修改' }))
     await waitFor(() => expect(view.getByRole('heading', { name: '你的工作台' })).toBeTruthy())
   })
-  it('scopes browser data and removes global management, import and preference controls', () => {
+  it('scopes browser data and exposes background settings without global management controls', () => {
     const context = { mode: 'browser-workbench' as const, workbenchId: 'a' }
     const { view } = setup({ settingsContext: context })
-    expect(view.getAllByRole('tab').map(tab => tab.textContent)).toEqual(['当前工作台', '使用中的内页', '导出分享'])
+    expect(view.getAllByRole('tab').map(tab => tab.textContent)).toEqual(['当前工作台', '使用中的内页', '背景 AI', '导入与分享'])
     expect(view.queryByRole('button', { name: '导入工作台' })).toBeNull()
     expect(view.queryByRole('button', { name: '永久删除布局' })).toBeNull()
     expect(view.queryByText('B')).toBeNull()
     fireEvent.click(view.getByRole('tab', { name: '使用中的内页' }))
     expect(view.queryByLabelText('显示 笔记 添加入口')).toBeNull()
     expect(view.queryByRole('button', { name: 'DSH 插件管理' })).toBeNull()
+    fireEvent.click(view.getByRole('tab', { name: '背景 AI' }))
+    expect(view.getByLabelText('工作台背景提示词')).toBeTruthy()
+    expect(view.getByLabelText('区域背景提示词')).toBeTruthy()
+    expect(view.queryByLabelText('新建工作台提示词')).toBeNull()
+    expect(view.queryByLabelText('显示区域容器标签色框')).toBeNull()
   })
   it('shows one behavior selector plus the marker-frame switch and patches only the chosen row', async () => {
     const patch = vi.fn(async () => true)

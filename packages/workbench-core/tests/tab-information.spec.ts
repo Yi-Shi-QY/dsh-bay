@@ -12,7 +12,7 @@ const facts: WorkbenchTabInformationFacts = {
   location: '区域 02',
 }
 function info(overrides: Partial<TabDocument> = {}, currentFacts = facts) {
-  const tab: TabDocument = { id: 'tab', editorId: 'workbench.conversation', editorScope: 'session', state: {}, lastKnownTitle: '对话', ...overrides }
+  const tab: TabDocument = { id: 'tab', editorId: 'workbench.conversation', editorScope: 'session', binding: { sessionId: 'parent', workspaceId: 'project' }, state: {}, lastKnownTitle: '对话', ...overrides }
   return buildWorkbenchTabInformation({ tab, editor: { id: tab.editorId, scope: tab.editorScope, label: '内页类型' },
     areaBinding: { workspaceId: 'project', sessionId: 'parent' }, statusLabel: '进行中', ordinal: 3, facts: currentFacts })
 }
@@ -35,7 +35,7 @@ describe('tab identifying information', () => {
   })
 
   it('does not inherit conversation metadata into independent or pending tabs', () => {
-    expect(info({ editorScope: 'root' }).tooltip).not.toContain('登录页交互优化')
+    expect(info({ editorScope: 'root', binding: undefined }).tooltip).not.toContain('登录页交互优化')
     const pending = info({ pendingBinding: 'new', sessionId: 'parent', state: { resourceAddress: 'dsh-resource://file/session/parent/secret.ts' } })
     expect(pending.tooltip).toContain('对话：待绑定')
     expect(pending.tooltip).not.toMatch(/登录页交互优化|PTC|secret/)

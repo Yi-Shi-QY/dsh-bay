@@ -14,6 +14,8 @@ import type { WorkbenchExtensionConsentV1 } from '../workbench-extension-access.
 import type { WorkbenchToolUsageAggregateV1 } from '../tool-usage.ts'
 import type { WorkbenchToolGatewayUsageAggregateV1 } from '../tool-gateway-usage.ts'
 import { decodeAreaContexts, decodeWorkbenchContext, type AreaContextV1, type WorkbenchContextV1 } from './workbench-context.ts'
+import { decodeBackgroundAiPreferences, type BackgroundAiPreferencesV1 } from './background-ai-preferences.ts'
+import { validatePortableBayAgentOrchestration, type PortableBayAgentOrchestrationV1 } from './workbench-bay-agent-work.ts'
 
 /** Settings key for a Workspace-scoped or ungrouped layout. */
 export type WorkspaceAccountKey = `workspace:${string}` | 'ungrouped'
@@ -91,7 +93,7 @@ export interface WorkbenchExternalBindingRecordV1 {
   reference: string
 }
 
-/** Workbench-scoped DSH model route shared by Bay Agent and AI assistance. */
+/** Workbench-scoped DSH model route for the persistent Bay Agent session. */
 export interface WorkbenchAiSelectionV1 {
   provider: string
   model: string
@@ -100,6 +102,14 @@ export interface WorkbenchAiSelectionV1 {
 
 /** One named, project-neutral visual Workbench. */
 export interface WorkbenchRecordV2 {
+  /** V18 file authority. rootPath is a recipient-local projection, never portable. */
+  fileWorkbench?: { schemaVersion: 1; revision: number; rootPath?: string }
+  areaProjects?: Record<string, import('../workbench-directory-contract.ts').AreaProjectV1>
+  /** Stable Areas survive closing views and merging their display into another Area. */
+  areaDefinitions?: Record<string, { areaId: string }>
+  sessionCatalog?: Record<string, import('../workbench-directory-contract.ts').WorkbenchSessionEntryV1>
+  /** Imported work is inert until the human explicitly continues it. */
+  executionPaused?: boolean
   workbenchId: string
   name: string
   description: string
@@ -124,6 +134,8 @@ export interface WorkbenchRecordV2 {
   externalBindings?: Record<string, WorkbenchExternalBindingRecordV1>
   /** Portable model route preference; credentials never belong here. */
   workbenchAi?: WorkbenchAiSelectionV1
+  /** Portable one-shot background preferences; omitted means use the Host default. */
+  backgroundAi?: BackgroundAiPreferencesV1
   /** Stable Workbench-owned Bay Agent Main Session identity. */
   bayAgentSession?: {
     sessionId: string
@@ -131,6 +143,8 @@ export interface WorkbenchRecordV2 {
     createdAt: number
     updatedAt: number
   }
+  /** Detached Bay Agent audit history restored from a package; never a live runtime. */
+  bayAgentOrchestration?: PortableBayAgentOrchestrationV1
   pinnedAt?: number
   archivedAt?: number
 }
@@ -179,6 +193,8 @@ export interface WorkbenchSettingsV4 {
   toolGatewayUsageAggregates?: Record<string, WorkbenchToolGatewayUsageAggregateV1>
   /** User preference for routing resource actions emitted by Conversation. */
   interactionPolicy?: WorkbenchConversationInteractionPolicyV1
+  /** Profile-wide one-shot background generation settings, outside portable layouts. */
+  backgroundAi?: BackgroundAiPreferencesV1
   /** Profile-local permission for third-party DSH bundles to contribute Workbench editors. */
   extensionConsents?: Record<string, WorkbenchExtensionConsentV1>
   /** Transient decoder signal; omitted from the atomic root replacement. */
@@ -475,6 +491,7 @@ function decodeSettingsV4(value: unknown): WorkbenchSettingsV4 | undefined {
   if (toolUsageAggregates === undefined) return undefined
   const toolGatewayUsageAggregates = decodeToolGatewayUsageAggregates(value.toolGatewayUsageAggregates)
   if (toolGatewayUsageAggregates === undefined) return undefined
+  const backgroundAi = decodeBackgroundAiPreferences(value.backgroundAi)
   const workbenches: Record<string, WorkbenchRecordV2> = {}
   const invalidWorkbenches: Record<string, InvalidWorkbenchRecordV1> = {}
   let migrationRequired = value.migrationRequired === true || !isRecord(value.interactionPolicy) || value.interactionPolicy.version !== 2
@@ -517,13 +534,26 @@ function decodeSettingsV4(value: unknown): WorkbenchSettingsV4 | undefined {
       invalidWorkbenches[key] = retainedInvalid(key, raw)
       continue
     }
+    const bayAgentOrchestration = raw.bayAgentOrchestration === undefined ? undefined : decodeBayAgentOrchestration(raw.bayAgentOrchestration)
+    if (raw.bayAgentOrchestration !== undefined && bayAgentOrchestration === undefined) {
+      invalidWorkbenches[key] = retainedInvalid(key, raw)
+      continue
+    }
     const workbenchAi = raw.workbenchAi === undefined ? undefined : decodeWorkbenchAi(raw.workbenchAi)
+    const workbenchBackgroundAi = decodeBackgroundAiPreferences(raw.backgroundAi)
     if (raw.workbenchAi !== undefined && workbenchAi === undefined) {
       invalidWorkbenches[key] = retainedInvalid(key, raw)
       continue
     }
     const context = raw.context === undefined ? undefined : decodeWorkbenchContext(raw.context)
-    const areaIds = areasOf(normalizeWorkbenchDocument(document).root).map(area => area.areaId)
+    const areaIds = [...new Set([...areasOf(normalizeWorkbenchDocument(document).root).map(area => area.areaId), ...Object.keys(isRecord(raw.areaDefinitions) ? raw.areaDefinitions : {})])]
+    if ((raw.areaDefinitions !== undefined && (!isRecord(raw.areaDefinitions) || Object.entries(raw.areaDefinitions).some(([id, row]) => !isRecord(row) || row.areaId !== id)))
+      || (raw.areaProjects !== undefined && (!isRecord(raw.areaProjects) || Object.entries(raw.areaProjects).some(([id, row]) => !areaIds.includes(id) || !isRecord(row) || typeof row.relativePath !== 'string' || !Number.isSafeInteger(row.generation) || Number(row.generation) < 1)))
+      || (raw.sessionCatalog !== undefined && (!isRecord(raw.sessionCatalog) || Object.entries(raw.sessionCatalog).some(([id, row]) => !isRecord(row) || row.sessionKey !== id || typeof row.relativePath !== 'string' || !['main', 'user', 'worker', 'subagent'].includes(String(row.role)) || (row.role !== 'main' && !areaIds.includes(String(row.areaId))))))
+      || (raw.fileWorkbench !== undefined && (!isRecord(raw.fileWorkbench) || raw.fileWorkbench.schemaVersion !== 1 || !Number.isSafeInteger(raw.fileWorkbench.revision)))
+      || (raw.executionPaused !== undefined && typeof raw.executionPaused !== 'boolean')) {
+      invalidWorkbenches[key] = retainedInvalid(key, raw); continue
+    }
     const areaContexts = raw.areaContexts === undefined ? undefined : decodeAreaContexts(raw.areaContexts, areaIds)
     const areaMetadata = raw.areaMetadata === undefined ? undefined : decodeAreaMetadata(raw.areaMetadata, areaIds)
     if ((raw.context !== undefined && context === undefined) || (raw.areaContexts !== undefined && areaContexts === undefined)
@@ -537,6 +567,11 @@ function decodeSettingsV4(value: unknown): WorkbenchSettingsV4 | undefined {
     workbenches[key] = {
       workbenchId: key, name: raw.name, description: raw.description,
       document: normalized, createdAt: raw.createdAt, updatedAt: raw.updatedAt,
+      ...(raw.areaDefinitions === undefined ? {} : { areaDefinitions: structuredClone(raw.areaDefinitions) as NonNullable<WorkbenchRecordV2['areaDefinitions']> }),
+      ...(raw.areaProjects === undefined ? {} : { areaProjects: structuredClone(raw.areaProjects) as NonNullable<WorkbenchRecordV2['areaProjects']> }),
+      ...(raw.sessionCatalog === undefined ? {} : { sessionCatalog: structuredClone(raw.sessionCatalog) as NonNullable<WorkbenchRecordV2['sessionCatalog']> }),
+      ...(raw.fileWorkbench === undefined ? {} : { fileWorkbench: structuredClone(raw.fileWorkbench) as NonNullable<WorkbenchRecordV2['fileWorkbench']> }),
+      ...(raw.executionPaused === undefined ? {} : { executionPaused: raw.executionPaused }),
       ...(context === undefined ? {} : { context }),
       ...(areaContexts === undefined || Object.keys(areaContexts).length === 0 ? {} : { areaContexts }),
       ...(areaMetadata === undefined || Object.keys(areaMetadata).length === 0 ? {} : { areaMetadata }),
@@ -547,7 +582,9 @@ function decodeSettingsV4(value: unknown): WorkbenchSettingsV4 | undefined {
       ...(offlineOrigin === undefined ? {} : { offlineOrigin: { schemaVersion: 1, packageId: offlineOrigin.packageId as string, archiveSha256: offlineOrigin.archiveSha256 as string } }),
       ...(externalBindings === undefined ? {} : { externalBindings }),
       ...(bayAgentSession === undefined ? {} : { bayAgentSession }),
+      ...(bayAgentOrchestration === undefined ? {} : { bayAgentOrchestration }),
       ...(workbenchAi === undefined ? {} : { workbenchAi }),
+      ...(workbenchBackgroundAi === undefined ? {} : { backgroundAi: workbenchBackgroundAi }),
       ...(raw.pinnedAt === undefined ? {} : { pinnedAt: raw.pinnedAt }),
       ...(raw.archivedAt === undefined ? {} : { archivedAt: raw.archivedAt }),
     }
@@ -608,6 +645,7 @@ function decodeSettingsV4(value: unknown): WorkbenchSettingsV4 | undefined {
     globalHiddenEditorIds: migratedGlobalHiddenEditorIds,
     workbenches, layoutTemplates: {}, invalidWorkbenches, sessionMarkers: decodeSessionMarkers(value.sessionMarkers),
     interactionPolicy: migrateWorkbenchInteractionPolicy(value.interactionPolicy),
+    ...(backgroundAi === undefined ? {} : { backgroundAi }),
     ...(Object.keys(extensionConsents).length === 0 ? {} : { extensionConsents }),
     ...(Object.keys(toolGatewayPolicies).length === 0 ? {} : { toolGatewayPolicies }),
     ...(Object.keys(toolUsageAggregates).length === 0 ? {} : { toolUsageAggregates }),
@@ -626,6 +664,16 @@ function decodeBayAgentSession(value: unknown): WorkbenchRecordV2['bayAgentSessi
     createdAt: value.createdAt,
     updatedAt: value.updatedAt,
   }
+}
+
+function decodeBayAgentOrchestration(value: unknown): PortableBayAgentOrchestrationV1 | undefined {
+  try {
+    if (JSON.stringify(value).length > 4 * 1024 * 1024) return undefined
+    const text = JSON.stringify(value)
+    if (/(?:runtimeAssignmentId|workerSessionId|moduleInstanceId|sessionId|workspaceId|credential|password|secret|token|transcript|absolutePath|filePath)/iu.test(text)) return undefined
+    validatePortableBayAgentOrchestration(value)
+    return structuredClone(value)
+  } catch { return undefined }
 }
 
 function decodeWorkbenchAi(value: unknown): WorkbenchAiSelectionV1 | undefined {

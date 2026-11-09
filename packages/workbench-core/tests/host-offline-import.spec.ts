@@ -160,7 +160,7 @@ describe('Host offline import recovery', () => {
     expect(f.rollback).not.toHaveBeenCalled()
   })
 
-  it('binds linked pending pages once, preserves their types and invalidates late sibling claims', async () => {
+  it('binds pending pages independently while preserving their types', async () => {
     const f = await setup(true), service = f.create()
     await service.commit(f.pkg.archive)
     const done = await service.complete(f.pkg.packageId, true), record = f.records[done.workbenchId] as WorkbenchRecordV2
@@ -170,14 +170,16 @@ describe('Host offline import recovery', () => {
     const claim = repository.claimArea(record.workbenchId, pending[0]!.areaId, 'create-a')
     const late = repository.claimArea(record.workbenchId, pending[1]!.areaId, 'create-b')
     expect(repository.bindConversation(claim, { sessionId: 'recipient-session', workspaceId: 'recipient-workspace' }, false).status).toBe('bound')
-    expect(repository.bindConversation(late, { sessionId: 'late-session' }, false).status).toBe('stale')
+    expect(repository.bindConversation(late, { sessionId: 'late-session' }, false).status).toBe('bound')
     const bound = areasOf(repository.getWorkbench(record.workbenchId)!.document.root)
-    expect(bound.slice(1).map(area => area.moduleHistory[0]!.binding?.sessionId)).toEqual(['recipient-session', 'recipient-session'])
+    expect(bound.slice(1).map(area => area.moduleHistory.find(module => module.binding !== undefined)?.binding?.sessionId)).toEqual(['recipient-session', 'late-session'])
     expect(bound[2]!.moduleHistory[0]!.editorId).toBe('workbench.agent-trajectory')
     const projected = projectDocumentV3ToLayoutV2(record.document)
     expect(validateLayout(projected)).toBeDefined()
     expect(migrateDocumentV2ToV3(projected)).toEqual(record.document)
     const rebound = retargetSession(projected, pending[0]!.moduleHistory[0]!.moduleInstanceId, { sessionId: 'selected-existing' })
-    expect(areasOf(migrateDocumentV2ToV3(rebound).root).slice(1).every(area => area.moduleHistory[0]?.binding?.sessionId === 'selected-existing')).toBe(true)
+    const reboundAreas = areasOf(migrateDocumentV2ToV3(rebound).root)
+    expect(reboundAreas.find(area => area.areaId === pending[0]!.areaId)?.moduleHistory[0]?.binding?.sessionId).toBe('selected-existing')
+    expect(reboundAreas.find(area => area.areaId === pending[1]!.areaId)?.moduleHistory).toEqual(pending[1]!.moduleHistory)
   })
 })

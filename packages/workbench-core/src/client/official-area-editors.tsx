@@ -4,6 +4,7 @@ import type { RemoteFailure } from '@deepseek-ai/dsh-api-remotes/client'
 import type { TerminalLaunchShells, TerminalView, TerminalViewState } from '@deepseek-ai/dsh-api-terminal-controller/client'
 import type { WebTerminalId, WebTerminalInfo } from '@deepseek-ai/dsh-api-terminal-controller/types'
 import type { WorkspaceDirectoryEntry } from '@deepseek-ai/dsh-api-workspace-files/types'
+import { ProjectFilesEditor } from './ProjectFilesEditor.tsx'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { SidebarRightTabClaim, SidebarRightTabInfo } from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
 import type {} from '@deepseek-ai/dsh-client-resources/client'
@@ -96,7 +97,7 @@ function sessionIdOf(owner: AreaProps): SessionId | undefined {
 function MissingSession(): ReactNode {
   return <section data-workbench-official-area-state="missing-session" style={{ padding: 20 }}>
     <strong>此官方内页需要绑定 DSH Session</strong>
-    <p>请先在当前 Area 绑定一个工作区对话，然后重新打开此内页。</p>
+    <p>请在此内页菜单中选择来源对话，然后重新打开此内页。</p>
   </section>
 }
 
@@ -765,15 +766,7 @@ export interface WorkbenchOfficialAreaEditorSetV1 {
 export function createWorkbenchOfficialAreaEditors(ctx: Context): WorkbenchOfficialAreaEditorSetV1 {
   const conversation = createWorkbenchNativeConversationEditors(ctx)
   return {
-    files: owner => <NativeSidebarAreaEditor
-      key={`${owner.instanceId}:${owner.sessionId}:${owner.runtimeIdentity ? owner.bindingGeneration : owner.areaClaim}`}
-      owner={owner}
-      ctx={ctx}
-      kind="files"
-      title="工作区文件"
-      entryKey={NATIVE_TAB_ENTRY_KEYS.files}
-      fallback={<WorkspaceFilesEditor owner={owner} ctx={ctx} />}
-    />,
+    files: owner => <ProjectFilesEditor workbenchId={owner.workbenchId} areaId={typeof (owner.state as { projectAreaId?: unknown } | undefined)?.projectAreaId === 'string' ? (owner.state as { projectAreaId: string }).projectAreaId : owner.areaId} />,
     terminal: owner => <NativeSidebarAreaEditor
       key={`${owner.instanceId}:${owner.sessionId}:${owner.runtimeIdentity ? owner.bindingGeneration : owner.areaClaim}`}
       owner={owner}

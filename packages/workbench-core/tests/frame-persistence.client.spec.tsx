@@ -256,8 +256,8 @@ describe('Frame layout persistence', () => {
     expect(h.view.getByRole('button', { name: '选择已有对话' })).toBeTruthy()
 
     fireEvent.click(h.view.getByRole('button', { name: '选择已有对话' }))
-    expect(h.view.getByRole('listbox', { name: '可绑定的对话' })).toBeTruthy()
-    expect(h.view.getByText(/没有可绑定的非空对话/)).toBeTruthy()
+    expect(h.view.getByRole('listbox', { name: '可选择的对话' })).toBeTruthy()
+    expect(h.view.getByText(/没有可选择的非空对话/)).toBeTruthy()
     expect(h.view.queryByRole('button', { name: /新建对话/ })).toBeNull()
   })
 
@@ -447,8 +447,8 @@ describe('Frame layout persistence', () => {
     expect(h.view.getByRole('menuitem', { name: '平衡两侧区域' }).hasAttribute('disabled')).toBe(true)
     expect(swap.hasAttribute('disabled')).toBe(false)
     fireEvent.click(swap)
-    expect(h.view.container.querySelector('[data-workbench-group="active-area-b"] [role="tab"][aria-selected="true"]')?.getAttribute('aria-label')).toContain('Active area C')
-    expect(h.view.container.querySelector('[data-workbench-group="active-area-c"] [role="tab"][aria-selected="true"]')?.getAttribute('aria-label')).toContain('Active area B')
+    expect(h.view.container.querySelector('[data-workbench-group="active-area-b"] [role="tab"][aria-selected="true"]')?.getAttribute('aria-label')).toContain('Active area B')
+    expect(h.view.container.querySelector('[data-workbench-group="active-area-c"] [role="tab"][aria-selected="true"]')?.getAttribute('aria-label')).toContain('Active area C')
 
     const area = h.view.container.querySelector<HTMLElement>('[data-workbench-group="group-main"]')!
     expect(area.querySelector('[data-area-collapse-toggle]')).not.toBeNull()
@@ -764,7 +764,7 @@ describe('Frame layout persistence', () => {
     expect((h.view.getByRole('button', { name: '收回到 DSH 客户端' }) as HTMLButtonElement).disabled).toBe(true)
   })
 
-  it('confirms before browser Host reclaim stops an active LAN share', async () => {
+  it('returns browser control to DSH without stopping an active LAN share', async () => {
     const requestBrowserReclaim = vi.fn(async () => true)
     const stop = vi.fn(async () => {})
     const session = {
@@ -789,13 +789,10 @@ describe('Frame layout persistence', () => {
     expect(h.view.queryByRole('button', { name: '开始局域网分享' })).toBeNull()
     expect(h.view.getByRole('button', { name: '复制局域网分享链接' })).toBeTruthy()
     fireEvent.click(h.view.getByRole('button', { name: '收回到 DSH 客户端' }))
-    expect(confirm).toHaveBeenCalledWith('当前 Workbench 正在局域网分享。收回到 DSH 客户端会停止分享并断开所有访客，确定继续吗？')
-    expect(stop).not.toHaveBeenCalled()
-    expect(requestBrowserReclaim).not.toHaveBeenCalled()
-    confirm.mockReturnValue(true)
-    fireEvent.click(h.view.getByRole('button', { name: '收回到 DSH 客户端' }))
-    await waitFor(() => expect(stop).toHaveBeenCalledOnce())
     await waitFor(() => expect(requestBrowserReclaim).toHaveBeenCalledOnce())
+    expect(stop).not.toHaveBeenCalled()
+    expect(confirm).not.toHaveBeenCalled()
+    expect(shareController.getSnapshot().sessions).toEqual([session])
   })
 
   it('keeps the desktop rail usable when another Workbench owns the browser view', async () => {

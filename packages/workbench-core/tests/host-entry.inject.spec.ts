@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { apply, inject } from '../src/index.ts'
+import { fileAccessFixture } from './helpers/file-access.ts'
 
 describe('Core Host entry service injection', () => {
   it('resolves Host services from the Cordis inject child context', () => {
@@ -27,7 +28,7 @@ describe('Core Host entry service injection', () => {
     expect(rootGet).not.toHaveBeenCalledWith('webServer')
   })
 
-  it('registers browser window RPC through the root Connection and injected WebServer child', () => {
+  it('registers browser window RPC through the root Connection and injected WebServer child', async () => {
     expect(inject).toContain('connection')
     let rpcHandler: ((endpoint: string, payload: unknown) => unknown) | undefined
     const connection = {
@@ -40,7 +41,8 @@ describe('Core Host entry service injection', () => {
     }
     const settings = { describe: () => [{ ns: 'workbench-layout', value: { workbenches: { 'workbench-a': {} } } }] }
     const webServer = { getOrigin: () => 'http://127.0.0.1:4200' }
-    const rootGet = vi.fn((name: string) => name === 'connection' ? connection : name === 'settings' ? settings : undefined)
+    const fixture = await fileAccessFixture()
+    const rootGet = vi.fn((name: string) => name === 'connection' ? connection : name === 'settings' ? settings : name === 'workbenchNativeAccess' ? {} : name === 'workbenchAccessHost' ? fixture.access : undefined)
     const ctx = {
       get: rootGet,
       provide: vi.fn(),
@@ -58,6 +60,7 @@ describe('Core Host entry service injection', () => {
 
     expect(connection.rpc.intercept).toHaveBeenCalledWith('/api', expect.any(Function), expect.any(Function))
     expect(typeof rpcHandler).toBe('function')
-    expect(connection.fetch.register).toHaveBeenCalledTimes(7)
+    expect(connection.fetch.register).toHaveBeenCalledTimes(8)
+    await fixture.dispose()
   })
 })

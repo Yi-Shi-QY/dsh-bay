@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Button, Modal, IconCloseOutlineMedium } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { WorkbenchDirectory, WorkbenchDirectoryOperationResult } from './frame-settings-adapter.ts'
+import type { WorkbenchAiDraftInputV1 } from './workbench-ai.ts'
 import css from './WorkbenchHome.module.css'
 
 function resultMessage(result: WorkbenchDirectoryOperationResult): string | undefined {
@@ -21,7 +22,7 @@ export function WorkbenchContextDialog({
   initialValue: string
   onClose(): void
   onSaved?(): void
-  generateDraft?: (input: { workbenchId: string; scope: 'workbench' | 'area'; areaId?: string; currentValue: string }) => Promise<string>
+  generateDraft?: (input: Exclude<WorkbenchAiDraftInputV1, { scope: 'create' }>) => Promise<string>
 }) {
   const [value, setValue] = useState(initialValue)
   const [busy, setBusy] = useState(false)
@@ -40,9 +41,11 @@ export function WorkbenchContextDialog({
   }
   const assist = async () => {
     if (generateDraft === undefined) { setError('当前环境未连接 DSH 原生 AI 服务。'); return }
-    setBusy(true); setError(undefined); setNotice('正在读取工作台结构并请求一次性 AI 生成草稿…')
+    setBusy(true); setError(undefined); setNotice(areaId === undefined ? '正在根据工作台简介、全部区域和内页生成背景草稿…' : '正在根据当前区域的全部内页生成背景草稿…')
     try {
-      const draft = await generateDraft({ workbenchId, scope: areaId === undefined ? 'workbench' : 'area', ...(areaId === undefined ? {} : { areaId }), currentValue: value })
+      const draft = await generateDraft(areaId === undefined
+        ? { workbenchId, scope: 'workbench', currentValue: value }
+        : { workbenchId, scope: 'area', areaId, currentValue: value })
       if (draft.trim() === '') throw new Error('AI 返回了空的背景草稿。')
       setValue(draft); setNotice('已生成基于当前范围事实的背景草稿，请确认后保存。')
     } catch (error) { setError(error instanceof Error ? error.message : String(error)); setNotice(undefined) }

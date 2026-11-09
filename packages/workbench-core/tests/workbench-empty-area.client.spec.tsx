@@ -46,7 +46,7 @@ describe('Empty Area launch surface', () => {
     const { view, selectSession } = renderEmptyFrame()
     fireEvent.click((await view.findAllByRole('button', { name: '添加内页：终端' }))[0]!)
     await waitFor(() => expect(view.queryByRole('tab', { name: /当前内页：终端/ })).not.toBeNull())
-    expect(view.getByRole('button', { name: '选择要绑定的对话' })).toBeDefined()
+    expect(view.getByRole('button', { name: '选择此内页的对话' })).toBeDefined()
     expect(view.queryByTestId('workbench.terminal')).toBeNull()
     expect(selectSession).not.toHaveBeenCalled()
   })
