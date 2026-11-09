@@ -164,6 +164,28 @@ describe('settings product interactions', () => {
     fireEvent.click(toggle)
     expect(setExtensionAllowed).not.toHaveBeenCalled()
   })
+  it('offers an unsent Creator repair brief for an incompatible extension', async () => {
+    const openCreator = vi.fn(async () => {})
+    const extension = { key: 'incompatible-creator', packageName: '@example/old', packageVersion: '0.8.0', moduleId: 'old', editorIds: ['old.page'], availability: 'incompatible' as const, allowed: false, detail: '需要更新扩展版本。' }
+    const snapshot = { status: 'ready' as const, extensions: [extension] }
+    const { view } = setup({
+      extensionRegistry: { getSnapshot: () => snapshot, subscribe: () => () => {}, refresh: async () => {}, dispose: () => {}, catalog: { getSnapshot: () => [], subscribe: () => () => {} } },
+      openCreator,
+    })
+    fireEvent.click(view.getByRole('button', { name: '需要处理', exact: true }))
+    const repair = [...view.container.querySelectorAll('button')].find(button => button.textContent?.includes('创造模式中修复'))
+    expect(repair).toBeTruthy()
+    expect(repair?.querySelector('svg')).toBeTruthy()
+    fireEvent.click(repair!)
+    await waitFor(() => expect(openCreator).toHaveBeenCalledTimes(1))
+    const prompt = openCreator.mock.calls[0]?.[0] ?? ''
+    expect(prompt).toContain('old')
+    expect(prompt).toContain('@example/old')
+    expect(prompt).toContain('0.8.0')
+    expect(prompt).toContain('old.page')
+    expect(prompt).toContain('18.0')
+    expect(prompt).toContain('offline-embedded')
+  })
   it('protects Home metadata on navigation, keeps failed input, and retries', async () => {
     const { view, props } = setup({ openOptions: { section: 'workbenches', workbenchId: 'a' } }, true)
     const update = vi.spyOn(props.workbenchDirectory!, 'updateMetadata').mockResolvedValueOnce({ status: 'conflict', expectedRevision: 1, actualRevision: 2 })

@@ -6,12 +6,13 @@ import { describe, expect, it } from 'vitest'
 import { resolveWorkbenchExtensionAccessV1 } from '../src/workbench-extension-access.ts'
 import type { WorkbenchEditorCatalogRow } from '../src/foundation/catalog.ts'
 
-const templateUrl = new URL('../presets/workbench-creator/skills/workbench-extension-development/templates/workbench-editor/client.js', import.meta.url)
+const templateRoot = new URL('../presets/workbench-creator/skills/workbench-extension-development/templates/workbench-editor/', import.meta.url)
+const variantRoot = new URL('../presets/workbench-creator/skills/workbench-extension-development/templates/workbench-editor-variants/', import.meta.url)
 const packageName = '@local/workbench-editor-example'
 
-function loadTemplatePlugin(): Record<string, unknown> {
+function loadTemplatePlugin(fileName = 'client.js', root = templateRoot): Record<string, unknown> {
   let entry: { factory(require: (name: string) => unknown): Record<string, unknown> } | undefined
-  vm.runInNewContext(readFileSync(templateUrl, 'utf8'), {
+  vm.runInNewContext(readFileSync(new URL(fileName, root), 'utf8'), {
     window: { __ModuleLoader__: { load(value: typeof entry) { entry = value } } },
   }, { filename: 'workbench-editor/client.js' })
   const react = { createElement: () => null, useState: (initial: unknown) => [initial, () => {}] }
@@ -68,6 +69,29 @@ describe('Workbench editor extension template identity', () => {
       packageName, availability: 'not-allowed', allowed: false,
     })
     expect(pending.editors).toEqual([])
+    await fiber.dispose()
+  })
+})
+
+describe('Workbench session editor template variant', () => {
+  it('keeps each inner page bound to the exact Session and marks the artifact embeddable', async () => {
+    const plugin = loadTemplatePlugin('session-client.js', variantRoot)
+    const context = new Context()
+    const fiber = context.plugin(plugin as never)
+    let registration: Record<string, unknown> | undefined
+    await (plugin.apply as (context: unknown) => Promise<void>)({
+      slots: {
+        inject(_name: string, register: () => unknown) { return register() },
+        register(options: Record<string, unknown>) { registration = options; return () => {} },
+      },
+      modules: { import: async (name: string) => name === 'react' ? { createElement: () => null, useEffect: () => {} } : undefined },
+    })
+    expect(registration?.name).toBe('workbench.editor.session')
+    expect(registration?.registrant).toBe(packageName)
+    const metadata = (registration?.inject as (() => { workbenchEditor: any }) | undefined)?.().workbenchEditor
+    expect(metadata.declaration).toMatchObject({ scope: 'session', requiredBinding: 'session', presentation: { floating: false }, binding: { requirement: 'session', unbound: 'pending', sharing: 'independent' } })
+    expect(metadata.distribution).toMatchObject({ exportPolicy: 'embed', packageName, provides: { editorIds: ['workbench.example'] } })
+    expect(metadata.portability).toEqual(expect.objectContaining({ version: 1, exportState: expect.any(Function), importState: expect.any(Function) }))
     await fiber.dispose()
   })
 })

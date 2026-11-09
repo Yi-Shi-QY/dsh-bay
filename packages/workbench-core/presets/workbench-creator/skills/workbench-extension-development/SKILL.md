@@ -11,6 +11,8 @@ In Creator, users can start this workflow from the `/create-workbench-extension`
 
 Use this workflow for a durable extension that registers one or more Workbench editor pages. The target deliverable is a standard DSH Bundle/Client Plugin containing its Workbench module and editor declarations. DSH's native Plugin Manager owns installation, update, native enable/disable, and uninstall in a Profile; Workbench Core separately discovers and validates the extension, then requires the user's opt-in before exposing its inner pages. Workbench Core `0.2.2-alpha.18.0` carries declaration metadata through the DSH Slot inject face and declares the Plugin Inventory and Plugin Manager Remotes needed to verify installed and running extensions. Core Host also registers this Skill through DSH's global Skill provider registry, so the official DSH Creator can discover it without a Workbench-specific preset override. Automated coverage is in place, while real desktop Creator discovery and the broader update/uninstall migration loop remain pending. The Creator may write and validate the package, but must not represent a successful build or DSH installation as Workbench activation. A Dynamic Cordis runner may be used by a separately mounted programmatic consumer or UI control as a temporary, process-local experiment, but it is not a packaged Workbench extension. Choose the deliverable from the user's requested lifetime and outcome.
 
+For the 18.0 model, remember the ownership chain while designing the editor: a Workbench owns its root directory, an Area points at a project directory relative to that root, and one Area may contain many Sessions. An inner page that displays or controls a conversation must bind to the exact `workspaceId` and `sessionId` supplied by its owner; an Area is not a representative Session and an extension must never infer one from the first tab, focus, or the DSH global current Session. A complete Workbench package carries the root files, project directories, Sessions, attachments, context, memory and task relations; the extension artifact embedded inside that package carries only the extension's declared runtime files and portable editor state.
+
 Read the [complete Workbench container inner-page extension specification](./WORKBENCH-CONTAINER-INNER-PAGE-EXTENSION-SPEC.zh.md) before creating or packaging an extension. It is the detailed source for identity mapping, Slot metadata, binding, state, lifecycle, testing, and diagnostics.
 
 ## Working rules
@@ -24,8 +26,10 @@ Read the [complete Workbench container inner-page extension specification](./WOR
 - The object returned by the Client entry must set Cordis's plugin `name` to the exact package name used as the DSH `moduleName`, and each Workbench Slot registration must explicitly set the same `registrant`. SlotCore uses the active Fiber name as the default `registrant`; explicit metadata avoids inheriting `root` or another parent name when a plugin is nested, while Core still verifies the value against `pluginInventory` and `listBundles`.
 - Keep `dsh.workbench.editorIds`, any manifest `provides.editorIds`, embedded editor declarations, and runtime `extension.editorIds` synchronized and unique. When a manifest includes editor declarations, their ID set must exactly match `provides.editorIds`; repeat the same complete runtime extension identity on each Slot contribution. The public Core validator rejects duplicates, malformed IDs, incomplete editor lists, and unreadable metadata.
 - A session editor must use the exact `workspaceId` and `sessionId` supplied by Workbench. Never infer identity from Area position, focus, or DSH's global current Session.
+- Treat an Area as a project-directory association, never as a Session binding. Multiple session editor instances in one Area must remain independent, and moving a tab, fixing it in the floating workspace, or switching the active tab must not rewrite its source Session.
+- Use `owner.workspaceId` and `owner.sessionId` only for the instance that Core supplies. Project files, terminals and conversation resources must go through the public DSH/Workbench resource APIs or an explicitly declared Host adapter; never read the Workbench root or construct an absolute path in portable state.
 - A module declaration describes requested resources and lifecycle behavior; it does not grant permissions. Keep permissions minimal and explain why each is needed.
-- The Workbench setting “allow this extension in Workbench�?controls only Workbench contributions. It is not DSH plugin enablement or a security sandbox; only DSH's Plugin Manager controls whether the DSH plugin is loaded.
+- The Workbench setting "allow this extension in Workbench" controls only Workbench contributions. It is not DSH plugin enablement or a security sandbox; only DSH's Plugin Manager controls whether the DSH plugin is loaded.
 - Persist only small, versioned, JSON-serializable state that the extension can safely restore. Keep local recovery state separate from shareable state. Never persist credentials, live handles, transcripts, absolute paths, or author-specific Workspace IDs in a shared template.
 - Treat `state.restore` as the share-import restore policy. `state.share: 'portable'` may cross a package only after schema and `maxBytes` checks; `reference-only` and `forbidden` keep layout references but transfer no state. Core also checks the declared byte limit before mounting a saved local snapshot and may ask the user to clear it.
 - A separate DSH test Profile protects the user's normal data from test changes. It is not a security sandbox for untrusted extension code.
@@ -45,7 +49,7 @@ For a durable inner page, create a normal DSH UI Plugin/Bundle and include its W
 
 DSH's native Plugin Manager manages the Profile from which it is called. Profile changes persist across sessions, affect other sessions in that Profile, and may execute installed Host code with host-user privileges. Follow DSH's Full Access or per-call approval flow. Do not provide `approvedBuilds` unless the user explicitly approved the named pending package build scripts. For Workbench extension development, use a separate DSH test Profile for installation and runtime checks; never install a candidate into the user's active Profile by default. A test Profile separates test data but is not a security sandbox for untrusted code.
 
-The reusable scaffold is in `templates/workbench-editor/`. It is a root-scoped starter. Copy it into a workspace package, replace the example identity and declaration, then validate it against the pinned DSH generation. If the editor requires a Session, also change the registered Slot from `workbench.editor.root` to `workbench.editor.session`, use `scope: 'session'`, declare `requiredBinding: 'session'`, and set `binding.sharing: 'independent'` so each inner page keeps its own explicit source Session. The template deliberately uses the native DSH `dsh` manifest and `cordis.patch.yml`; it is not a second Workbench loader.
+The reusable scaffold is in `templates/workbench-editor/`. It is a root-scoped starter; the drop-in Session variant is kept in the adjacent `templates/workbench-editor-variants/session-client.js` so the installable template directory remains an exact `runtimeFiles` closure. Copy the template into a workspace package, replace the example identity and declaration, then validate it against the pinned DSH generation. If the editor requires a Session, copy the variant over `client.js` or change the registered Slot from `workbench.editor.root` to `workbench.editor.session`, use `scope: 'session'`, declare `requiredBinding: 'session'`, and set `binding.sharing: 'independent'` so each inner page keeps its own explicit source Session. The template deliberately uses the native DSH `dsh` manifest and `cordis.patch.yml`; it is not a second Workbench loader.
 
 ## Install and verify a durable extension
 
@@ -151,12 +155,56 @@ Report the achieved state, package identity/digest when available, validation ev
 Never install into the user's active Profile, add the extension to the current Workbench, publish it, or change public release pointers automatically. Those are separate actions. When the user later requests installation, use the DSH Plugin Manager flow and report its actual installed/active result. A candidate package is not automatically safe because it passed tests.
 
 
-## 17.2 distribution contract
+## 18.0 Workbench project and Session contract
 
-For a shareable extension, include distribution.version=1, exportPolicy, runtimeKind, an exact runtimeFiles list including package.json, every declared entry, Bundle patch and LICENSE, and requires for plugin dependencies. Use globally unique Bundle row IDs. Include no npm runtime dependencies, install scripts, source maps or unlisted resources. Exact host peers must be available in DSH 0.2.2-rc.1. A client-only package may have only the template's inert Host shim; declare client-host for executable Host logic.
+18.0 changes the resource model that extensions must follow:
 
-Register explicit portability.exportState and portability.importState functions in the injected Workbench metadata, as shown in the template. Project only bounded, versioned JSON; do not copy raw owner state. A stateless editor must explicitly project and restore empty state. Test both handlers and reject secrets, machine paths and invalid shapes. The Host derives provenance from native package identity and verified runtime files.
+- The Workbench owns one root directory. An Area stores a Workbench-relative project path; it may share that path with another Area, but it never owns a representative Session.
+- A Session editor uses the exact `workspaceId` and `sessionId` delivered in its `owner`. One Area may contain many independent Sessions and many instances of the same editor.
+- A root editor may be placed in an Area without a Session only when its declaration says `requiredBinding: 'none'`. It must not silently upgrade itself to a Session editor.
+- The owner `runtimeIdentity` identifies the mounted editor instance. `instanceId` and Area placement are layout identities; neither can be used as a Session or project key.
+- The extension may request a new conversation only through the explicit `placeConversation`/Core route supplied by the owner and must return the resulting binding. Opening a page or receiving a missing binding never creates a Session.
+- Project files, terminals and resources are accessed through public DSH/Workbench adapters. An extension stores relative resource references or bounded projections, never the Workbench root, absolute paths, native Workspace IDs from another machine, or raw Session transcripts.
 
-The owner prepares distribution artifacts from the exact published file list. Core never builds arbitrary projects automatically. Complete exports fail if any retained tab or dependency lacks reliable migration or artifacts; the user may explicitly choose layout sharing. Receiver consent applies to one package and Profile. New installation and enabling require restart before actual registration and state restoration. Signature verification proves publisher/content consistency, not code safety. Static dependency inspection is conservative and does not prove arbitrary JavaScript safe.
+For the normal Area container workflow, use this declaration:
 
-17.3 扩展同时遵循 templates/workbench-editor/README.md 的“展示位置与实例生命周期”要求：运行缓存采用 runtimeIdentity、资源经 owner 路由、未保存数据注册关闭保护，隐藏不终止底层任务。交付时测试浮窗→Area 固定及跨工作台实例隔离，不能仅验证首次挂载�?
+```js
+scope: 'session',
+requiredBinding: 'session',
+binding: { requirement: 'session', unbound: 'pending', sharing: 'independent' },
+presentation: { floating: false },
+```
+
+The `independent` value is deliberate: the same Area can contain multiple conversations and each editor occurrence follows its own Session. The historical `sharing: 'area'` value must not be used to read the first Area tab or to batch-rebind inner pages.
+
+## 18.0 offline-embedded distribution
+
+There are two related but separate artifacts:
+
+1. The **extension artifact** is the DSH Bundle/Client Plugin prepared from `dsh.workbench.distribution`. It contains the exact runtime files listed by `runtimeFiles`, its Bundle patch, license and portable editor state handlers.
+2. The **complete Workbench package** is the Workbench V5 package. It contains the Workbench root files, Area project directories, native Sessions, attachments, context, memory and Bay orchestration relations. During `offline-embedded` export, the Host embeds each eligible extension artifact under the dependency lock.
+
+An extension is eligible for an offline Workbench package only when all of the following are true:
+
+- `distribution.version` is `1`, `exportPolicy` is `embed`, and `runtimeKind` is correct (`client-only` for a client-only extension, `client-host` only when the package has an explicit Host entry and the required capability is declared).
+- `runtimeFiles` is a complete, relative, duplicate-free list containing `package.json`, every `exports`/`main` entry, every Bundle patch and `LICENSE`/`LICENCE` file. No source files, source maps, `.git`, credentials, installation hooks, lockfiles, absolute paths or unlisted resources are included.
+- All runtime dependencies are bundled or are exact supported DSH peer seeds. `requires` lists only Workbench distribution dependencies that the receiving Host can resolve. The package must pass static closure inspection.
+- `portability.exportState` and `portability.importState` project bounded JSON. `state.share: 'portable'` is required for state that should cross machines; use `reference-only` or `forbidden` when the state depends on a local service.
+- The artifact is prepared and verified before the Workbench package is exported. Do not manually copy a `.tgz` into a package or mark a reference as embedded without its digest and integrity.
+
+The extension artifact does not carry the Workbench project files or native Session history. Those are collected by the complete Workbench package. Conversely, a complete package does not make an extension executable if the package's DSH generation, Core version, permissions or native installation state cannot be restored; the import report must leave the page pending and name the missing dependency.
+
+For a real offline check, run the template through the Host distribution preparation, create a Workbench package with `offline-embedded`, inspect the dependency digest, import it into a clean test Profile, install/enable the extension through DSH's Plugin Manager, allow it in Workbench, and then restore a layout containing at least two Areas and three Sessions. A successful archive inspection alone is only `build-passed`; it is not `installed`, `active` or `desktop-verified`.
+
+## 18.0 development and delivery checklist
+
+Before handing an extension to a Workbench user, record:
+
+- Workbench Core `0.2.2-alpha.18.0`, DSH `0.2.2-rc.1`, package name, module ID and all editor IDs.
+- For every editor: root/session scope, project/Session requirement, unbound behavior, state schema/maxBytes/share policy, lifecycle and resource routes.
+- Exact DSH runtime/bundle/Slot identity mapping and the Workbench consent result.
+- Extension artifact runtime file list, dependency lock, SHA-256/integrity and whether the artifact was embedded in `offline-embedded` mode.
+- Complete package data status separately from environment status: files and Sessions restored, extension installed/allowed, and tasks waiting for the user.
+- Automated checks, clean test Profile result, real desktop/browser result and every unverified scenario.
+
+Do not call a layout reference, a successful `prepareDistributionArtifact`, or an archive inspection a complete offline Workbench migration. The acceptance target is a restored project directory, independently bound Sessions, and an extension whose verified artifact can be mounted by the receiving Workbench.

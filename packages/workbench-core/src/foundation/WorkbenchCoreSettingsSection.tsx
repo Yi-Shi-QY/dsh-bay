@@ -35,6 +35,7 @@ export type WorkbenchCoreSettingsSectionProps = ComponentProps<typeof WorkbenchS
   updateInteractionPolicy?: (policy: WorkbenchConversationInteractionPolicyV1) => Promise<boolean>
   loadModelCatalog?: () => Promise<import('@deepseek-ai/dsh-api-session-controller').ModelCatalog>
   saveBackgroundAi?: (value: import('./background-ai-preferences.ts').BackgroundAiPreferencesV1, expectedRevision?: number) => Promise<boolean | { status: string; revision?: number }>
+  openCreator?: (prompt: string) => Promise<void>
 }
 
 

@@ -1,11 +1,11 @@
 # Workbench 容器内页扩展插件开发规范
 
-更新时间：2026-10-22  
-规范版本：1.0  
+更新时间：2026-11-10
+规范版本：1.1
 适用基线：Workbench Core `0.2.2-alpha.18.0`、DSH `0.2.2-rc.1`（commit `66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db`）
 状态：**Core 接口与自动化合同说明；正式桌面扩展生命周期验收仍未完成**
 
-本文是开发新的 Workbench 容器内页扩展时的主规范。模板位于 `packages/workbench-core/presets/workbench-creator/skills/workbench-extension-development/templates/workbench-editor/`。若模板与本文不一致，以对应目标 Core/DSH 版本的公开导出、类型、测试和锁定文件为准；不要复制本文以外版本的 Slot 参数或 API。
+本文是开发新的 Workbench 容器内页扩展时的主规范。可安装的主模板位于 `packages/workbench-core/presets/workbench-creator/skills/workbench-extension-development/templates/workbench-editor/`，Session 变体位于相邻的 `templates/workbench-editor-variants/session-client.js`。若模板与本文不一致，以对应目标 Core/DSH 版本的公开导出、类型、测试和锁定文件为准；不要复制本文以外版本的 Slot 参数或 API。
 
 ## 1. 产品与技术边界
 
@@ -19,6 +19,26 @@
 | 工作台布局 | 保存区域中的内页引用、顺序、绑定与受限 JSON 状态 | 安装、启用或卸载扩展 |
 
 所以扩展必须先通过 DSH 原生流程安装并在同一 Profile 中运行；Workbench 设置中的“允许使用”再单独允许其向 Workbench 提供内页。Core 的允许开关只是接入许可，不是 DSH 启用开关，也**不是安全沙箱**。同进程中已加载的 DSH 插件代码不因 Core 撤销许可而变成隔离状态。
+
+## 1.1 18.0 工作台、区域项目与多会话
+
+18.0 的持久关系是：
+
+```text
+Workbench 根目录
+  ├─ Area → 根目录内的项目相对路径
+  │          └─ 多个独立 Session → 各自的内页实例
+  └─ Bay Agent Main → 工作台根目录
+```
+
+- Workbench 创建时拥有一个根目录；Area 只保存根目录内的相对项目路径。多个 Area 可以共享一个项目路径，但仍分别保存背景、布局、任务和内页关系。
+- Area 不再绑定一个代表 Session。一个 Area 可以同时包含多个对话，内页仍然一个实例绑定一个具体 Session。
+- Session 内页必须使用 Core owner 传入的 `workspaceId` 和 `sessionId`。`workspaceId` 是该 Session 对应的 DSH 项目工作区身份，不能由 Area 顺序、当前焦点、标签标题或全局当前 Session 推断。
+- 移动内页、在浮动工作区固定/取消固定、切换标签或从 DSH 原版模式返回，都不能改写内页的 Session 来源。只有明确的绑定代际变化才释放旧资源。
+- 扩展不能把 Workbench 根目录、绝对路径、机器专属 Workspace ID、Session transcript 或凭据写入可迁移状态。项目文件、终端和对话资源必须通过公开 DSH/Workbench 适配器访问。
+- 打开内页、缺少绑定或恢复布局不能隐式创建 Session。需要新对话时只能调用 Core owner 提供的显式创建/绑定入口，并保存返回的绑定身份。
+
+扩展制品与完整工作台包分工不同：扩展制品只携带自己的运行文件和受限内页状态；完整工作台包负责携带根目录文件、区域项目、原生 Session、附件、背景、记忆、任务和编排关系。离线导出只有在扩展依赖可嵌入并通过校验时，才会把扩展制品放入完整工作台包。
 
 ## 2. 当前支持范围
 
@@ -259,6 +279,20 @@ Core 传给编辑器的 owner 可能包含 `instanceId`、`areaId`、`workspaceI
 
 Portability descriptor 是运行时函数，不会序列化进包。descriptor 的输入/输出都必须是有限 JSON，且输出继续受 `maxBytes` 限制。接收方重新绑定自己的 Workspace/Session；扩展不得从作者机器复制绑定身份。
 
+### 8.1 与完整工作台包的关系
+
+扩展状态分享和完整工作台迁移是两个层次：
+
+| 内容 | 扩展分发制品 | 完整工作台包 V5 |
+|---|---|---|
+| 扩展 `package.json`、Client/Host 入口、Bundle patch、许可证 | 必须由 `distribution.runtimeFiles` 精确列出 | 作为可验证依赖制品嵌入 `offline-embedded` 包 |
+| 内页的受限 JSON 状态 | 由 `portability.exportState/importState` 转换 | 随布局和内页引用恢复 |
+| 工作台根目录、区域项目文件和空目录 | 不包含 | 包含全部工作文件，按导出排除项报告处理 |
+| 原生 Session、附件和子会话 | 不包含 | 由 Host 的原生 Session 迁移适配器收集和恢复 |
+| 背景、记忆、Work Item、Assignment、Attention 和编排审计投影 | 不包含 | 随工作台定义和完整包作业恢复 |
+
+因此，扩展的 `state.share: 'portable'` 只表示它的内页状态可以跨机器传递，不表示它可以读取或携带整个项目目录。接收方没有对应扩展、Core/DSH 版本不匹配或依赖没有嵌入时，完整包必须保留内页引用并显示待恢复原因，不能把扩展替换为空白页面后报告完整恢复。
+
 ## 9. 生命周期和资源释放
 
 Workbench 的视图生命周期与 DSH 后台任务生命周期是两回事。`background`、`collapsed` 和 `reacquire` 声明控制视图资源策略，不表示 Core 会取消 DSH 模型任务、终端进程或外部操作。
@@ -348,10 +382,12 @@ DSH Plugin Manager 安装标准插件包
 2. 按资源需要决定 root/session Slot；为每个 editor 填完整声明，并在 `package.json` 的 `dsh.workbench` 描述中镜像同一组身份与版本。
 3. 使用目标 Core 发布的公开 client 类型与 validator。扩展插件启动时不得硬依赖 Core runtime 才能完成 DSH 插件加载；不要 import Core 私有 `src/` 路径。
 4. 构建标准 DSH Bundle/Client Plugin。使用仓库/DSH 当前版本规定的命令，不从 Profile 目录直接运行 pnpm，也不手改 Profile 文件。
-5. 自动化测试至少覆盖：身份同步和唯一性、Slot inject metadata 可读、无绑定/pending 行为、精确 Area binding、状态 schema/字节限制、resource 路由、隐藏/收起/重新激活与卸载清理。
-6. 在隔离 DSH 测试 Profile 中，经 DSH Plugin Manager 安装并启用；如需重启，等待完整重启后再验收。
-7. 分别验证 DSH 清单/runtime 状态、Core 扩展中心状态、Workbench consent、实际添加/使用内页和布局恢复。遇到身份映射失败时记录 `registrant`、runtime `entryId/moduleName`、bundle row 和 Core 显示的 diagnostic code。
-8. 记录包名、版本、Core/DSH 兼容声明、artifact SHA-256（若发布流程生成）、测试命令和逐项结果。只对真实完成的状态使用 `installed`、`active` 或 `desktop-verified`。
+5. 自动化测试至少覆盖：身份同步和唯一性、Slot inject metadata 可读、无绑定/pending 行为、一个 Area 内多个独立 Session、精确 Area/项目 binding、状态 schema/字节限制、resource 路由、隐藏/收起/重新激活与卸载清理。
+6. 对 `dsh.workbench.distribution` 运行精确 runtime file、静态依赖闭包和 `exportState/importState` 检查；使用 `offline-embedded` 生成工作台包，确认扩展制品带有 digest/integrity，而不是只写一个在线引用。
+7. 在隔离 DSH 测试 Profile 中，经 DSH Plugin Manager 安装并启用；如需重启，等待完整重启后再验收。
+8. 分别验证 DSH 清单/runtime 状态、Core 扩展中心状态、Workbench consent、实际添加/使用内页和布局恢复。遇到身份映射失败时记录 `registrant`、runtime `entryId/moduleName`、bundle row 和 Core 显示的 diagnostic code。
+9. 在干净接收环境中导入完整工作台包，验证根目录文件、区域项目、至少三个 Session、附件和扩展内页状态分别恢复；缺少扩展或环境时应保留待恢复状态，不自动创建替代 Session。
+10. 记录包名、版本、Core/DSH 兼容声明、artifact SHA-256（若发布流程生成）、测试命令和逐项结果。只对真实完成的状态使用 `installed`、`active` 或 `desktop-verified`。
 
 不要默认向用户活动 Profile 安装；测试 Profile 可以隔离数据但不是恶意代码沙箱。安装或运行插件可能具有 DSH 所授予的宿主权限。
 
@@ -362,9 +398,12 @@ DSH Plugin Manager 安装标准插件包
 - [ ] `package.json` editor ID 集、runtime `extension.editorIds` 和实际 Slot ID 集完全一致且唯一。
 - [ ] `inject()` 返回的 `workbenchEditor` metadata 在目标 DSH Slot 实现下可由 Core 读到。
 - [ ] root/session Slot、binding requirement、unbound UI 与真实工作流相符。
-- [ ] 打开内页不会隐式创建 Session；多个 Area 不会串用全局 Session。
+- [ ] 打开内页不会隐式创建 Session；一个 Area 内的多个 Session 内页互不串用，多个 Area 共享项目目录时也不互相改写背景、任务或 Session。
 - [ ] 保存值是 JSON-safe 且在 `maxBytes` 内；Schema 变化和超限能恢复，不静默丢数据。
 - [ ] `portable`、`reference-only`、`forbidden` 的导出导入行为符合声明。
+- [ ] `distribution.runtimeFiles` 包含所有运行入口、Bundle patch 和许可证，没有源码、source map、安装脚本或未列出的依赖。
+- [ ] `offline-embedded` 工作台包中存在与扩展 artifact digest/integrity 一致的嵌入制品；接收方缺少扩展时显示待恢复，而不是伪造空白内页。
+- [ ] 完整包恢复的是工作台根目录、Area 项目、原生 Session 和扩展状态；扩展 artifact 本身没有携带作者机器路径、Profile 或 Session transcript。
 - [ ] 隐藏、收起、关闭、许可撤销、DSH 停用、卸载、更新后均释放可释放资源并保留布局引用。
 - [ ] 声明的对话资源路由真实点击后只作用于正确 Area，并能关闭和恢复。
 - [ ] 浏览器/桌面各自支持的能力经过真实宿主验证；不支持项说明准确。
@@ -406,11 +445,11 @@ Core 目前会在身份映射失败时显示结构化诊断 code、registrant、
 
 ## 18. 当前实现与待验收状态
 
-Workbench Core `0.2.2-alpha.13` / DSH `0.2.1-rc.2` 保留 alpha.12 已实现的 Slot inject metadata 读取、DSH runtime/bundle inventory 注入与唯一映射、声明校验、Profile-local Workbench consent、扩展状态过滤、撤销/缺失时布局引用保留、刷新竞争保护和身份诊断 UI，并由 Core Host 全局 Skill registry 提供 `workbench-extension-development`，供 DSH 原版 Creator 通过原生 Skill 工具发现。扩展发现和状态策略有定向自动化测试；原版 Creator 真实会话读取、生成扩展及桌面生命周期仍需实测。
+Workbench Core `0.2.2-alpha.18.0` / DSH `0.2.2-rc.1` 提供 Slot inject metadata 读取、DSH runtime/bundle inventory 注入与唯一映射、声明校验、Profile-local Workbench consent、扩展状态过滤、撤销/缺失时布局引用保留、刷新竞争保护和身份诊断 UI，并由 Core Host 全局 Skill registry 提供 `workbench-extension-development`，供 DSH 原版 Cordis Creator 通过原生 Skill 工具发现。18.0 同时提供 Area 项目目录、多 Session 内页来源、浏览器/桌面共享的工作台状态，以及 `offline-embedded` 扩展制品收集。扩展发现、状态策略和模板离线制品校验已有自动化覆盖；原版 Creator 真实会话生成扩展、桌面安装/重启和跨机器完整包恢复仍需实测。
 
 本规范本身不表示任何第三方测试插件已经成功安装或激活。`packages/workbench-svgdeepseek-pet` 是历史测试扩展，**不是本规范或当前 Core 验收的前置条件**；相关源码、制品和证据仅用于历史追溯。
 
-仍需独立完成的验收包括：干净桌面 Profile 下扩展发现设置 UI；DSH 原生安装、启停、升级、卸载和重装恢复全流程；实际布局 stale reference 恢复；Creator 产物端到端安装；各扩展真实功能及资源路由；不同宿主能力表现。17.2 完整分发已加入 Profile 发布身份的 Ed25519 签名和精确运行制品摘要验证；这不等于扩展作者认证或代码安全保证，也没有运行时安全沙箱。自动化通过只表示代码合同测试通过。
+仍需独立完成的验收包括：干净桌面 Profile 下扩展发现设置 UI；DSH 原生安装、启停、升级、卸载和重装恢复全流程；实际布局 stale reference 恢复；Creator 产物端到端安装；各扩展真实功能及资源路由；不同宿主能力表现；包含扩展制品的完整工作台 V5 跨平台导入。离线制品检查和 Profile 发布身份签名只能证明清单、摘要和发布者内容一致，不等于扩展作者认证、代码安全保证或运行时安全沙箱。自动化通过只表示代码合同测试通过。
 
 ## 19. 最小发布信息
 
@@ -436,14 +475,14 @@ Known unsupported/unverified behavior:
 
 
 
-## 20. 17.2 分发要求
+## 20. 18.0 分发要求
 
-完整包支持普通持久 Bundle 的 client-only 和 client-host。声明 distribution.version=1、exportPolicy、runtimeKind、精确 runtimeFiles、requires；包含所有入口、必要静态资源、Bundle 配置和 LICENSE。Bundle row ID 必须全局唯一。依赖打入产物，或使用本代宿主提供的精确 peer；禁止安装构建脚本。client-only 只能有模板中的空 Host shim。
+扩展包支持普通持久 Bundle 的 client-only 和 client-host。声明 distribution.version=1、exportPolicy、runtimeKind、精确 runtimeFiles、requires；包含所有入口、必要静态资源、Bundle 配置和 LICENSE。Bundle row ID 必须全局唯一。依赖打入产物，或使用本代宿主提供的精确 peer；禁止安装构建脚本。client-only 只能有模板中的空 Host shim。要进入完整工作台的 `offline-embedded` 包，扩展必须使用 `exportPolicy: 'embed'` 并通过静态闭包检查。
 
 inject 返回的 workbenchEditor 同时提供 portability.exportState/importState 与 distribution；Host 根据原生清单和文件校验补充 provenance。仅处理器输出的受限 JSON 可迁移，无状态内页使用明确空投影。配置恢复须精确匹配包名、版本、运行摘要、editor ID、scope 和授权，缺失项保留 Host 待恢复数据。
 
-新安装和启用后必须重启；实际注册通过才恢复配置并提交工作台。协议不会迁移 Session、模型、工作目录、凭据或整个 Profile。签名不是沙箱，静态闭包检查不是任意代码安全证明。
-# 17.3 浮动展示补充契约
+新安装和启用后必须重启；实际注册通过才恢复配置并提交工作台。扩展 artifact 不迁移 Session、模型、工作目录、凭据或整个 Profile；完整工作台 V5 另行负责根目录文件、Area 项目、Session、附件、记忆和任务关系。签名不是沙箱，静态闭包检查不是任意代码安全证明。
+# 18.0 浮动展示补充契约
 
 17.3 维持 Settings V4、布局与分发格式。所有内页共用 owner 绑定/权限/状态校验。新增可选 `presentation.floating`（false 禁止浮窗）、`owner.presentation`、稳定 `owner.runtimeIdentity`、`registerCloseGuard`。位置不是实例身份；浮窗固定到 Area 不能重建任务或原生 occurrence。
 

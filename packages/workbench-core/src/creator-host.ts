@@ -32,6 +32,17 @@ unique. Treat module activation scope (root/session/area) separately from editor
 scope (root/session). Use the exact owner workspaceId/sessionId supplied by Core; never
 guess the global current Session or create one merely by opening a page. Declare binding,
 unbound, state maxBytes/restore/share, lifecycle and conversation resource policies.
+In the 18.0 Workbench model an Area is a project-directory association and may contain
+many independent Sessions; it is not a representative Session. Use the session-client
+template variant for conversation-bound pages and binding.sharing=independent. Project
+files, terminals and resources must use public DSH/Workbench adapters and portable state
+must never contain absolute paths, native Workspace IDs from another machine or transcripts.
+For offline Workbench sharing, keep extension distribution separate from the complete
+Workbench package: set exportPolicy=embed, declare an exact runtimeFiles list and
+portability handlers, pass static closure checks, then verify the extension artifact is
+embedded in an offline-embedded package by digest. The complete package carries the
+Workbench root, Area projects, Sessions, attachments, context, memory and task relations;
+the extension artifact carries only its own runtime files and bounded state.
 Core inventory mapping, compatibility checks and Workbench consent must pass before an
 editor is considered available; an accepted build or Slot registration is not proof of
 installation or activation.

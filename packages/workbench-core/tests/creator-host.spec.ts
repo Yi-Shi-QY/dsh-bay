@@ -21,6 +21,10 @@ describe('Core additions beside the official Creator tools', () => {
     expect(prompt).toContain('inject()')
     expect(prompt).toContain('global current Session')
     expect(prompt).toContain('maxBytes/restore/share')
+    expect(prompt).toContain('project-directory association')
+    expect(prompt).toContain('session-client')
+    expect(prompt).toContain('offline-embedded')
+    expect(prompt).toContain('runtimeFiles')
     expect(prompt).not.toContain('cordis_define')
     const agent = { id: 'creator-agent' }
     const signal = new AbortController().signal

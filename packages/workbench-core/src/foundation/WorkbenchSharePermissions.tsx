@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { Button, Modal, IconCloseOutlineMedium, IconShareOutlineMedium } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, Modal, IconCloseOutlineMedium, IconShareOutlineMedium, IconShieldOutlineMedium } from '@deepseek-ai/dsh-client-ui-primitives'
 import { COLLABORATION_GRANT, REVIEW_GRANT, type WorkbenchCapability, type WorkbenchGrant } from '../workbench-access-contract.ts'
 import { workbenchFetch } from '../client/workbench-access.ts'
 import type { WorkbenchShareControllerV1, WorkbenchShareSessionSnapshotV1 } from '../client/workbench-share-controller.ts'
@@ -90,7 +90,7 @@ export function WorkbenchShareGrantControls({ controller, session }: { controlle
       setBusy(true); setError(undefined)
       try { await controller.reduce!(session.workbenchId, grant) } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
     })()
-  }}>收紧分享权限</Button>{error ? <p role="alert">{error}</p> : null}</div>
+  }}><IconShieldOutlineMedium size={16} />收紧分享权限</Button>{error ? <p role="alert">{error}</p> : null}</div>
 }
 
 type Approval = { id: string; sessionId: string; tool: string; arguments: unknown }

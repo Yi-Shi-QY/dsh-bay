@@ -30,8 +30,9 @@ import { createPortal } from 'react-dom'
 import {
   IconChevronLeftOutlineMedium, IconChevronRightOutlineMedium, IconCloseOutlineMedium,
   IconChevronDownOutlineMedium, IconChevronUpOutlineMedium, IconCheckOutlineMedium,
-  IconCompareSplitOutlineMedium, IconCopyOutlineMedium, IconEditOutlineMedium,
-  IconEllipsisOutlineMedium, IconFlatListOutlineMedium, IconFolderOpenOutlineMedium,
+  IconCompareSplitOutlineMedium, IconCopyOutlineMedium, IconDatabaseOutlineMedium,
+  IconEditOutlineMedium,
+  IconEllipsisOutlineMedium, IconFlatListOutlineMedium, IconFolderOpenOutlineMedium, IconListPenOutlineMedium,
   IconLinkOutlineMedium, IconPlusOutlineMedium, IconSearchOutlineMedium, IconSettingsOutlineMedium,
   IconShareOutlineMedium,
 } from '@deepseek-ai/dsh-client-ui-primitives'
@@ -3049,14 +3050,14 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
                                 setContextDialog({ workbenchId: row.workbenchId })
                                 void returnFocus
                               }}
-                            ><span>编辑工作台背景</span></button>
+                            ><IconListPenOutlineMedium size={16} /><span>编辑工作台背景</span></button>
                             {(workbenchDirectory.getHiddenAreas?.(row.workbenchId) ?? []).map(area => <button key={area.areaId} type="button" role="menuitem" disabled={browserOwned || frameTransition !== undefined} onClick={() => {
                               setWorkbenchMenuOpenId(undefined)
                               void workbenchDirectory.showArea?.(row.workbenchId, area.areaId).catch(error => setStateDiagnostic(String(error)))
                             }}>重新显示区域 · {area.label}</button>)}
                             {workbenchDirectory.memoryRequest ? <button type="button" role="menuitem" disabled={browserOwned} onClick={() => {
                               setWorkbenchMenuOpenId(undefined); setWorkbenchMenuPosition(undefined); setMemoryWorkbenchId(row.workbenchId)
-                            }}>工作台专属记忆</button> : null}
+                            }}><IconDatabaseOutlineMedium size={16} /><span>工作台专属记忆</span></button> : null}
                             <button
                               type="button"
                               role="menuitem"

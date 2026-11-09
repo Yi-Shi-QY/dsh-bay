@@ -16,6 +16,7 @@ import { workbenchExtensionContractFingerprint } from '../src/workbench-extensio
 import { createAreaContext, createWorkbenchContext } from '../src/foundation/workbench-context.ts'
 
 const template=join(import.meta.dirname,'../presets/workbench-creator/skills/workbench-extension-development/templates/workbench-editor')
+const sessionTemplate=join(import.meta.dirname,'../presets/workbench-creator/skills/workbench-extension-development/templates/workbench-editor-variants/session-client.js')
 const layout=()=>{const r=structuredClone(settingsFixture().workbenches.a!);if(r.document.root.kind!=='area')throw new Error('fixture');r.document.root.moduleHistory=[];delete r.document.root.activeModuleInstanceId;return projectLayoutPackage(r,[])}
 async function signer(){const pair=generateKeyPairSync('ed25519');const publicKey=pair.publicKey.export({format:'der',type:'spki'}).subarray(-32).toString('base64');return{publisher:{displayName:'测试房主',publicKey,keyId:await publisherKeyIdV4(publicKey)},sign:async(bytes:Uint8Array)=>sign(null,bytes,pair.privateKey).toString('base64')}}
 
@@ -75,6 +76,21 @@ describe('17.2 signed package contract',()=>{
 })
 
 describe('explicit runtime artifact preparation',()=>{
+  it('prepares the Session editor variant as an embeddable offline artifact',async()=>{
+    const dir=await mkdtemp(join(tmpdir(),'wb180-session-artifact-'))
+    try{
+      await cp(template,dir,{recursive:true})
+      await writeFile(join(dir,'client.js'),await readFile(sessionTemplate))
+      const manifest=JSON.parse(await readFile(join(dir,'package.json'),'utf8'))
+      manifest.dsh.workbench.scope='session'
+      manifest.dsh.workbench.editors[0].scope='session'
+      await writeFile(join(dir,'package.json'),JSON.stringify(manifest))
+      const prepared=await prepareDistributionArtifact(dir,(name,version)=>(name==='react'&&version==='18.3.1')||(name==='@deepseek-ai/dsh-client-ui-slots'&&version==='0.2.2-rc.1'))
+      expect(prepared.dependency.editorScopes).toEqual([{editorId:'workbench.example',scope:'session'}])
+      expect(prepared.dependency.exportPolicy).toBe('embed')
+      expect(prepared.dependency.runtimeFiles).toEqual(expect.arrayContaining(['package.json','client.js','cordis.patch.yml','LICENSE']))
+    }finally{await rm(dir,{recursive:true,force:true})}
+  })
   it('supports the real Creator root-entry template and exact runtime file set',async()=>{
     const p=await prepareDistributionArtifact(template,(name,version)=>(name==='react'&&version==='18.3.1')||(name==='@deepseek-ai/dsh-client-ui-slots'&&version==='0.2.2-rc.1'))
     expect(p.dependency.packageName).toBe('@local/workbench-editor-example')

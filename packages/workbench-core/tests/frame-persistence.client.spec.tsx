@@ -201,6 +201,7 @@ function setup(
       saveTemplate,
       setLayoutLocked,
       unload,
+      memoryRequest: vi.fn(async () => []),
       setBeforeLifecycleTransition: (handler: () => Promise<boolean>) => { flush = handler; return () => { flush = undefined } },
     },
     editorCatalog: { getSnapshot: () => entries, subscribe: () => () => {} },
@@ -657,8 +658,10 @@ describe('Frame layout persistence', () => {
     expect(menu.parentElement).toBe(document.body)
     expect(menu.style.left).toBe('120px')
     expect(menu.style.top).toBe('41px')
-    expect(menu.querySelectorAll('button > svg')).toHaveLength(4)
+    expect(menu.querySelectorAll('button > svg')).toHaveLength(6)
     expect(h.view.getByRole('menuitem', { name: '重命名' })).toBeTruthy()
+    expect(h.view.getByRole('menuitem', { name: '编辑工作台背景' }).querySelector('svg')).not.toBeNull()
+    expect(h.view.getByRole('menuitem', { name: '工作台专属记忆' }).querySelector('svg')).not.toBeNull()
     expect(h.view.getByRole('menuitem', { name: '另存为布局模板' })).toBeTruthy()
     expect(h.view.getByRole('menuitem', { name: /Workbench A/ })).toBeTruthy()
     expect(h.view.getByRole('menuitem', { name: '从标签栏卸载' })).toBeTruthy()

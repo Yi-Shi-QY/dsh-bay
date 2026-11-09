@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { IconSearchOutlineRegular, IconShareOutlineMedium, IconSettingsOutlineMedium } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconAgentPresetOutlineMedium, IconSearchOutlineRegular, IconShareOutlineMedium, IconSettingsOutlineMedium } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { WorkbenchCoreSettingsSectionProps } from './WorkbenchCoreSettingsSection.tsx'
 import { WorkbenchEditorIcon as EditorIcon } from './WorkbenchEditorIcon.tsx'
 import { resolveWorkbenchEditorPresentation, type WorkbenchEditorCatalogRow } from './catalog.ts'
@@ -233,6 +233,25 @@ function extensionAvailabilityLabel(extension: ExtensionRow) {
   if (extension.availability === 'incompatible') return '不兼容'
   return '声明无效'
 }
+/** Build the one-shot repair brief that Creator will receive as an unsent draft. */
+export function creatorRepairPrompt(extension: ExtensionRow): string {
+  return [
+    '请在当前项目中修复并升级这个 DSH Bay Workbench 容器内页扩展，使它适配当前 18.0 版本。',
+    '',
+    `扩展模块：${extension.moduleId}`,
+    `包名：${extension.packageName ?? '未知'}`,
+    `当前版本：${extension.packageVersion ?? '未知'}`,
+    `提供的内页：${extension.editorIds.join('、') || '未知'}`,
+    `当前状态：${extensionAvailabilityLabel(extension)}`,
+    `诊断信息：${extension.detail}`,
+    '',
+    '请先读取当前项目和 workbench-extension-development 技能，检查当前 DSH/Core 版本、Slot 注册、Session 绑定、18.0 工作台目录与多会话模型，以及 offline-embedded 离线制品要求。',
+    '然后分析旧扩展与当前版本的差异，制定并实施兼容升级方案。',
+    '保留扩展原有身份和功能，避免修改无关模块。',
+    '完成类型检查、扩展合同测试和离线制品检查后，再说明仍需人工验证的部分。',
+  ].join('\n')
+}
+
 function extensionStatusTone(extension: ExtensionRow) {
   return extension.availability === 'ready' && !extension.allowed ? 'not-allowed' : extension.availability
 }
@@ -301,6 +320,13 @@ function ExtensionSettingsCard({ extension, props, inventoryReady }: { extension
         onChange={allowed => { if (!allowed && count > 0) setConfirmRevoke(true); else void commit(allowed) }} />
     </div> : null}
     {extension.availability !== 'ready' ? <p className={css.cardHint}>{extension.detail}</p> : null}
+    {!browser && extension.availability === 'incompatible' && props.openCreator ? <div className={css.noticeActions}>
+      <button type="button" className={css.secondaryButton} disabled={actions.states.creator?.busy}
+        onClick={() => void actions.run('creator', () => props.openCreator!(creatorRepairPrompt(extension)))}>
+        <IconAgentPresetOutlineMedium size={16} />
+        在创造模式中修复
+      </button>
+    </div> : null}
     {confirmRevoke ? <div className={css.notice} role="group" aria-label="确认停用扩展">
       <p>停用将影响 {affected.length} 个工作台中的 {count} 个内页，布局引用会保留。</p>
       <div className={css.noticeActions}><button className={css.dangerButton} disabled={actions.states.permission?.busy} onClick={() => void commit(false)}>确认停用</button>

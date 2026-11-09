@@ -17,7 +17,7 @@ Core 兼容版本为 `0.2.2-alpha.18.0`。模板扩展自身保留独立的 `0.1
 
 完整字段、生命周期、身份校验、权限和验收要求见[Workbench 容器内页扩展插件开发规范](../../WORKBENCH-CONTAINER-INNER-PAGE-EXTENSION-SPEC.zh.md)。
 
-这是一个可安装的 DSH UI Plugin 起点。它注册一个不需要 Session 的 `workbench.editor.root` 内页，展示 Core 传入的 Area owner，并把一个小型 JSON 状态交给 Core 保存。
+这是一个可安装的 DSH UI Plugin 起点。默认 `client.js` 注册一个不需要 Session 的 `workbench.editor.root` 内页，展示 Core 传入的 Area owner，并把一个小型 JSON 状态交给 Core 保存。需要跟随区域内具体对话的扩展应使用相邻 `templates/workbench-editor-variants/session-client.js` 变体：复制它覆盖 `client.js`，同时把 `package.json` 的 `scope`、`editors[].scope` 和运行时声明改成 `session`，保留 `binding.sharing: 'independent'`。这样一个区域可以有多个不同对话，每个内页只跟随 Core 传入的那个 Session。变体不放在可直接安装的模板目录中，因为 Host 会按 `runtimeFiles` 拒绝未声明的额外文件。
 
 复制本目录到工作区后，必须同时替换以下身份：
 
@@ -33,7 +33,7 @@ DSH SlotCore 只保留其定义过的 Slot option 字段，会丢弃附加在 op
 
 模板在同一 metadata 中声明 `presentation.iconSvg: { version: 1, paths: [...] }`。每个内页必须有与功能对应的专属图形；模板中的笔记本只是示例，请按实际功能设计。同一扩展的多个内页也应容易区分。Core 统一绘制 24×24、无填充、主题描边的安全 SVG；只允许受限路径，不接受原始 SVG、样式、事件、颜色或图片 URL。用 `normalizeWorkbenchEditorSvgIcon()` 检查结构，并在 16/20/24px、浅色/深色、仅图标与悬停/键盘聚焦状态进行视觉验收。原有语义 token 继续兼容，旧扩展的几何回退标识不能代替新内页的图标设计。
 
-如果内页需要当前区域的精确 Session，必须同时把注册目标从 `workbench.editor.root` 改为 `workbench.editor.session`，并将 `client.js` 中对应的 options 改成：
+如果内页需要当前区域的精确 Session，可以先复制 `templates/workbench-editor-variants/session-client.js` 覆盖 `client.js`，或者手动把注册目标从 `workbench.editor.root` 改为 `workbench.editor.session`，并将 `client.js` 中对应的 options 改成：
 
 ```js
 ctx.slots.inject('workbench.editor.session', () => ctx.slots.register({
@@ -74,10 +74,26 @@ binding: { requirement: 'session', unbound: 'pending', sharing: 'independent' }
 `package.json` 中的 `dsh.workbench` 声明也必须与编辑器 ID、模块身份和版本兼容条件一致。这是普通 DSH Bundle / Client Plugin 模板。它不是 Dynamic Cordis Package，也不代表 Catalog 发布或离线分享已经完成。请使用 DSH Plugin Manager 在独立测试 Profile 中安装，并分别记录 build、installed、active 等状态。
 
 
-## 17.2 完整分发
+## 18.0 offline-embedded 分发
 
-本模板已包含 distribution、精确 runtimeFiles、许可证及 exportState/importState。它的 client-only Host 入口仅用于原生注册，不执行 Host 业务；若需要 Host 功能，改为 client-host 并明确权限和行为。所有 Bundle row ID 必须与其他扩展不同。
+本模板已包含 distribution、精确 runtimeFiles、许可证及 exportState/importState。它的 client-only Host 入口仅用于原生注册，不执行 Host 业务；若需要 Host 功能，改为 client-host 并明确权限和行为。所有 Bundle row ID 必须与其他扩展不同。`exportPolicy: 'embed'` 是进入工作台 `offline-embedded` 完整包的前提；Host 会按 `runtimeFiles` 生成带 digest/integrity 的扩展制品，不能把一个在线 URL 或未验证目录当作离线依赖。
 
 准备制品只收集发布清单中的文件，不打包整个工程，不运行构建命令。运行依赖须已打入产物；宿主 peer 使用精确版本。禁止安装脚本、凭据、本机路径、源码工程及会话记录。应分别测试多个后台标签的配置往返、无状态处理器、缺失依赖及错误状态。
 
-将目录作为持久 Bundle 安装到测试 Profile 后，可在工作台分享页选择离线嵌入并准备制品；导出检查通过才会生成签名包。接收方确认后安装，重启并继续恢复。工作台授权不是 Host 代码沙箱；完整离线也不包含模型、外部服务、Session 或工作目录。
+将目录作为持久 Bundle 安装到测试 Profile 后，可在工作台分享页选择离线嵌入并准备制品；导出检查通过才会生成包含扩展制品的完整工作台包。接收方导入后仍需按 DSH Plugin Manager 安装/启用扩展并允许 Workbench，重启完成实际注册，再恢复内页状态。完整工作台包负责根目录文件、Area 项目、原生 Session、附件、背景、记忆和任务关系；这个扩展制品本身不携带模型、凭据、工作台文件或 Session transcript。
+
+## 18.0 开发验收最小路径
+
+```text
+复制模板并替换身份
+→ 选择 root 工具或 session 内页变体
+→ 用 pinned DSH/Core 运行类型检查和扩展合同测试
+→ prepareDistributionArtifact 验证 runtimeFiles、依赖闭包和摘要
+→ 在隔离 DSH Profile 安装/启用并重启
+→ 在 Workbench 明确允许扩展
+→ 在一个 Area 创建至少三个独立 Session 并分别添加内页
+→ 导出 offline-embedded 完整工作台包
+→ 在干净接收环境导入，确认项目目录、Session 和内页状态恢复
+```
+
+归档检查通过只代表 `build-passed`。只有 DSH 安装、Core consent、实际注册、完整包导入和继续对话都分别通过，才可以记录为 `installed`、`active` 或 `desktop-verified`。

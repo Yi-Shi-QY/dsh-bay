@@ -456,6 +456,13 @@ export function applyWorkbenchCoreFoundation(
     settingsContext,
     settingsSource: settingsView,
     windowController,
+    openCreator: (prompt: string) => modeController.exit(() => {
+      ctx.uiWorkspace.startSession(undefined, {
+        agentPreset: 'creator',
+        prompt,
+        whenDraftExists: 'replace',
+      })
+    }),
 
     editorCatalog,
     nativePluginNavigation: createNativePluginNavigation({
