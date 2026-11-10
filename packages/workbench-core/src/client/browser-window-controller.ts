@@ -1,3 +1,4 @@
+import { decodeReclaimProgress, type WorkbenchReclaimProgress } from '../workbench-reclaim.ts'
 import type { ClientConnectionRpc, ConnectionRpcResult } from '@deepseek-ai/dsh-client-connection/client'
 import {
   normalizeWorkbenchWindowSnapshot,
@@ -17,6 +18,7 @@ const HEARTBEAT_RECOVERY_WINDOW_MS = 2 * 60_000
 
 interface PreparedView { readonly windowId: string; readonly url: string; readonly expiresAt: number }
 interface BrowserWindowControllerOptions {
+  readonly restoreDesktop?: () => Promise<void>
   readonly rpc?: ClientConnectionRpc | undefined
   readonly floating?: { snapshot(workbenchId: string): FloatingHandoffV1; restore(workbenchId: string, value: unknown): void; incomplete?(workbenchId: string): void }
 }
@@ -65,7 +67,7 @@ function stableSnapshot(value: WorkbenchWindowSnapshotV1): WorkbenchWindowSnapsh
 }
 
 /** Browser carrier uses DSH Connection RPC for both the desktop IPC and web transports. */
-export function createBrowserWindowController({ rpc, floating }: BrowserWindowControllerOptions = {}): WorkbenchWindowControllerV1 & {
+export function createBrowserWindowController({ rpc, floating, restoreDesktop }: BrowserWindowControllerOptions = {}): WorkbenchWindowControllerV1 & {
   prepare(workbenchId: string): Promise<boolean>
   setRpc(rpc?: ClientConnectionRpc): void
   dispose(): void
@@ -93,6 +95,25 @@ export function createBrowserWindowController({ rpc, floating }: BrowserWindowCo
     publish({ supported: activeRpc !== undefined, windows: [], requests: [...requests.values()], request })
   }
   const requestFor = (workbenchId: string) => requests.get(workbenchId)
+  const reclaimOperations = new Map<string, Promise<{ status: 'reclaimed' | 'failed'; code?: string }>>()
+  const recoveryInfo = (workbenchId: string) => {
+    const value = requestFor(workbenchId)?.reclaimProgress
+    return { ...(value?.forced ? { forced: true } : {}), ...(value?.recovery ? { recovery: value.recovery } : {}) }
+  }
+  const progress = (workbenchId: string, windowId: string, value: WorkbenchReclaimProgress) => {
+    const current = requestFor(workbenchId)
+    if (current?.windowId === windowId) publishRequest({ ...current, reclaimProgress: { ...recoveryInfo(workbenchId), ...value } })
+  }
+  const finishRestore = async (workbenchId: string, windowId: string, generation: number, receipt?: WorkbenchReclaimProgress) => {
+    if (disposed || generation !== generationFor(workbenchId)) throw new Error('browser-view-reclaim-stale')
+    // Closure and acknowledged handoff share the same restoration boundary.
+    publishRequest({ workbenchId, windowId, status: 'reclaiming', reclaimProgress: { ...recoveryInfo(workbenchId), ...receipt, phase: 'restoring' } })
+    await restoreFloating(workbenchId, windowId)
+    if (disposed || generation !== generationFor(workbenchId)) throw new Error('browser-view-reclaim-stale')
+    await restoreDesktop?.()
+    if (disposed || generation !== generationFor(workbenchId)) throw new Error('browser-view-reclaim-stale')
+    publishRequest({ workbenchId, windowId, status: 'reclaimed', reclaimProgress: { phase: 'checking', ...recoveryInfo(workbenchId) } })
+  }
   const restored = new Set<string>()
   const restoring = new Map<string, Promise<void>>()
   const call = async (endpoint: string, payload: unknown, timeoutMs = STATUS_TIMEOUT_MS): Promise<unknown> => {
@@ -105,8 +126,10 @@ export function createBrowserWindowController({ rpc, floating }: BrowserWindowCo
     if (!floating || restored.has(windowId)) return
     const pending = restoring.get(windowId)
     if (pending) return pending
+    const restoreGeneration = generationFor(workbenchId)
     const task = (async () => {
       const value = await call('floating-read', { windowId }) as { snapshot?: unknown; incomplete?: boolean }
+      if (disposed || restoreGeneration !== generationFor(workbenchId) || requestFor(workbenchId)?.windowId !== windowId) throw new Error('browser-view-reclaim-stale')
       if (value.snapshot != null) floating.restore(workbenchId, value.snapshot)
       else if (value.incomplete) floating.incomplete?.(workbenchId)
       restored.add(windowId)
@@ -158,7 +181,8 @@ export function createBrowserWindowController({ rpc, floating }: BrowserWindowCo
       await new Promise(resolve => setTimeout(resolve, ready ? STATUS_POLL_INTERVAL_MS : 800))
       if (disposed || generation !== generationFor(workbenchId)) return
       try {
-        const result = await call('status', { windowId }) as { status?: unknown; code?: unknown; metrics?: unknown }
+        const result = await call('status', { windowId }) as { status?: unknown; code?: unknown; metrics?: unknown; reclaimProgress?: unknown }
+        if (disposed || generation !== generationFor(workbenchId)) return
         const runtimeMetrics = typeof result.metrics === 'object' && result.metrics !== null && !Array.isArray(result.metrics)
           ? { runtimeMetrics: result.metrics as Readonly<Record<string, unknown>> } : {}
         if (result.status === 'ready') {
@@ -168,7 +192,7 @@ export function createBrowserWindowController({ rpc, floating }: BrowserWindowCo
           continue
         }
         if (result.status === 'reclaim-requested') {
-          publishRequest({ workbenchId, status: 'reclaiming', windowId })
+          publishRequest({ workbenchId, status: 'reclaiming', windowId, reclaimProgress: decodeReclaimProgress(result.reclaimProgress) ?? { phase: 'notifying' } })
           ready = true
           continue
         }
@@ -177,9 +201,23 @@ export function createBrowserWindowController({ rpc, floating }: BrowserWindowCo
           ready = true
           continue
         }
-        if (result.status === 'reclaimed') {
-          await restoreFloating(workbenchId, windowId)
-          publishRequest({ workbenchId, status: 'reclaimed', windowId })
+        if (result.status === 'reclaimed' || result.status === 'closed') {
+          // A user clicking reclaim during automatic recovery joins this work
+          // instead of invalidating its generation and restoring a second time.
+          const recovery = (async () => {
+            try {
+              await finishRestore(workbenchId, windowId, generation, result.status === 'closed' ? { phase: 'restoring', recovery: 'page-closed' } : decodeReclaimProgress(result.reclaimProgress))
+              return { status: 'reclaimed' as const }
+            } catch (error) {
+              const code = error instanceof Error ? error.message : '桌面恢复失败，请重试。'
+              if (!disposed && generation === generationFor(workbenchId)) publishRequest({
+                workbenchId, windowId, status: 'reclaiming', reclaimProgress: { ...recoveryInfo(workbenchId), phase: 'restoring', error: code },
+              })
+              return { status: 'failed' as const, code }
+            }
+          })()
+          reclaimOperations.set(workbenchId, recovery)
+          try { await recovery } finally { if (reclaimOperations.get(workbenchId) === recovery) reclaimOperations.delete(workbenchId) }
           return
         }
         if (result.status === 'failed' && result.code === 'browser-view-heartbeat-timeout') {
@@ -187,8 +225,7 @@ export function createBrowserWindowController({ rpc, floating }: BrowserWindowCo
           heartbeatRecoveryDeadline ??= Date.now() + HEARTBEAT_RECOVERY_WINDOW_MS
           continue
         }
-        if (result.status === 'failed' || result.status === 'expired' || result.status === 'closed') {
-          if (result.status === 'closed') await restoreFloating(workbenchId, windowId)
+        if (result.status === 'failed' || result.status === 'expired') {
           publishRequest({ workbenchId, status: result.status as WorkbenchWindowRequestV1['status'], windowId,
             ...(typeof result.code === 'string' ? { code: result.code } : {}) })
           return
@@ -204,20 +241,17 @@ export function createBrowserWindowController({ rpc, floating }: BrowserWindowCo
     while (!disposed && generation === generationFor(workbenchId) && Date.now() < deadline) {
       await new Promise(resolve => setTimeout(resolve, STATUS_POLL_INTERVAL_MS))
       if (disposed || generation !== generationFor(workbenchId)) return false
-      try {
-        const result = await call('status', { windowId }) as { status?: unknown }
-        if (result.status === 'reclaimed') {
-          await restoreFloating(workbenchId, windowId)
-          publishRequest({ workbenchId, status: 'reclaimed', windowId })
-          return true
-        }
-        if (result.status === 'closed') {
-          await restoreFloating(workbenchId, windowId)
-          publishRequest({ workbenchId, status: 'closed', windowId })
-          return true
-        }
-        if (result.status !== 'reclaim-requested') return false
-      } catch { /* reconnect on the next poll */ }
+      let result: { status?: unknown; reclaimProgress?: unknown }
+      try { result = await call('status', { windowId }) as typeof result }
+      catch { continue /* retry transient transport failures; preserve restoration errors below */ }
+      if (disposed || generation !== generationFor(workbenchId)) return false
+      if (result.status === 'reclaimed' || result.status === 'closed') {
+        await finishRestore(workbenchId, windowId, generation, result.status === 'closed' ? { phase: 'restoring', recovery: 'page-closed' } : decodeReclaimProgress(result.reclaimProgress))
+        return true
+      }
+      if (result.status !== 'reclaim-requested') return false
+      const reported = decodeReclaimProgress(result.reclaimProgress)
+      if (reported) { progress(workbenchId, windowId, reported); if (reported.error) throw new Error(reported.error) }
     }
     return false
   }
@@ -269,23 +303,37 @@ export function createBrowserWindowController({ rpc, floating }: BrowserWindowCo
         return { status: 'failed', code }
       }
     },
-    async reclaim(workbenchId) {
+    reclaim(workbenchId, options) {
+      const existing = reclaimOperations.get(workbenchId)
+      if (existing) return existing
+      const task = reclaim(workbenchId, options).finally(() => { reclaimOperations.delete(workbenchId) })
+      reclaimOperations.set(workbenchId, task)
+      return task
+    },
+    desktopRestored(workbenchId, windowId, error) {
+      const current = requestFor(workbenchId)
+      if (current?.windowId === windowId && current.status === 'reclaimed' && current.reclaimProgress?.phase === 'checking') progress(workbenchId, windowId, { phase: error ? 'checking' : 'complete', ...(error ? { error } : {}) })
+    },
+    focus: async () => ({ status: 'failed', code: 'browser-window-controlled-by-user' }),
+    close: async () => ({ status: 'failed', code: 'browser-window-controlled-by-user' }),
+    dispose() { disposed = true; prepared.clear(); requests.clear(); generations.clear(); listeners.clear() },
+  }
+  async function reclaim(workbenchId: string, options?: { force?: boolean }): Promise<{ status: 'reclaimed' | 'failed'; code?: string }> {
       const current = requestFor(workbenchId)
       if (disposed || activeRpc === undefined || current?.workbenchId !== workbenchId
         || (current.status !== 'ready' && current.status !== 'reclaiming'
-          && !(current.status === 'failed' && current.code === 'browser-view-heartbeat-timeout'))
+          && !(current.status === 'failed' && ['browser-view-heartbeat-timeout', 'browser-view-reclaim-timeout'].includes(current.code ?? '')))
         || !/^[A-Za-z0-9-]{36}$/u.test(current.windowId ?? '')) {
         return { status: 'failed', code: 'browser-view-not-ready' }
       }
       const windowId = current.windowId
       if (windowId === undefined) return { status: 'failed', code: 'browser-view-not-ready' }
       const generation = nextGeneration(workbenchId)
-      publishRequest({ workbenchId, status: 'reclaiming', windowId })
+      publishRequest({ workbenchId, status: 'reclaiming', windowId, reclaimProgress: { phase: 'notifying', ...(options?.force ? { forced: true } : {}) } })
       try {
-        const result = await call('reclaim', { windowId, ...(current.status === 'reclaiming' ? { force: true } : {}) }) as { status?: unknown }
+        const result = await call('reclaim', { windowId, ...(options?.force === true ? { force: true } : {}) }) as { status?: unknown; reclaimProgress?: unknown }
         if (result.status === 'reclaimed' && !disposed && generation === generationFor(workbenchId)) {
-          await restoreFloating(workbenchId, windowId)
-          publishRequest({ workbenchId, status: 'reclaimed', windowId })
+          await finishRestore(workbenchId, windowId, generation, decodeReclaimProgress(result.reclaimProgress))
           return { status: 'reclaimed' }
         }
         if (disposed || generation !== generationFor(workbenchId) || result.status !== 'reclaim-requested') {
@@ -298,20 +346,19 @@ export function createBrowserWindowController({ rpc, floating }: BrowserWindowCo
         if (!disposed && generation === generationFor(workbenchId)) {
           let hostStatus: unknown
           try { hostStatus = (await call('status', { windowId }) as { status?: unknown }).status } catch { /* remain locked */ }
+          if (disposed || generation !== generationFor(workbenchId)) return { status: 'failed', code: 'browser-view-reclaim-stale' }
           if (hostStatus === 'ready') publishRequest({
             workbenchId, status: 'ready', windowId,
             code: error instanceof Error ? error.message : 'browser-view-reclaim-failed',
+            reclaimProgress: { ...(requestFor(workbenchId)?.reclaimProgress ?? { phase: 'notifying' }), error: error instanceof Error ? error.message : '收回失败，请重试。' },
           })
           else publishRequest({
             workbenchId, status: 'reclaiming', windowId,
             code: error instanceof Error ? error.message : 'browser-view-reclaim-failed',
+            reclaimProgress: { ...(requestFor(workbenchId)?.reclaimProgress ?? { phase: 'notifying' }), error: error instanceof Error ? error.message : '收回失败，请重试。' },
           })
         }
         return { status: 'failed', code: error instanceof Error ? error.message : 'browser-view-reclaim-failed' }
       }
-    },
-    focus: async () => ({ status: 'failed', code: 'browser-window-controlled-by-user' }),
-    close: async () => ({ status: 'failed', code: 'browser-window-controlled-by-user' }),
-    dispose() { disposed = true; prepared.clear(); requests.clear(); generations.clear(); listeners.clear() },
   }
 }

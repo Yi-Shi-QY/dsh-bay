@@ -7,6 +7,9 @@ window.__ModuleLoader__.load({
     function createEditor(React) {
       const h = React.createElement
       function Editor(owner) {
+        // For real asynchronous data loading, return owner.renderLoading?.({
+        //   label: '示例内页', compact: false,
+        // }) while pending. Keep errors and empty results as separate states.
         // This example persists edits immediately. Editors with unsaved local
         // drafts must return false (or ask to save/discard) from this guard.
         React.useEffect(() => owner.registerCloseGuard?.(() => true), [owner.registerCloseGuard])

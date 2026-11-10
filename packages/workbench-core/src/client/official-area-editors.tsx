@@ -5,6 +5,7 @@ import type { TerminalLaunchShells, TerminalView, TerminalViewState } from '@dee
 import type { WebTerminalId, WebTerminalInfo } from '@deepseek-ai/dsh-api-terminal-controller/types'
 import type { WorkspaceDirectoryEntry } from '@deepseek-ai/dsh-api-workspace-files/types'
 import { ProjectFilesEditor } from './ProjectFilesEditor.tsx'
+import { WorkbenchPageLoading, WorkbenchPageTransition } from '../foundation/WorkbenchPageLoading.tsx'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { SidebarRightTabClaim, SidebarRightTabInfo } from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
 import type {} from '@deepseek-ai/dsh-client-resources/client'
@@ -353,7 +354,7 @@ function WorkspaceFilesEditor({ owner, ctx }: { owner: AreaProps; ctx: Context }
   }
   const renderLevel = (path: string, depth: number): ReactNode => {
     const level = levels[path]
-    if (level === undefined || level.status === 'loading') return <div style={{ paddingLeft: depth * 18 + 12, opacity: .65 }}>正在读取…</div>
+    if (level === undefined || level.status === 'loading') return <div style={{ paddingLeft: depth * 18 }}><WorkbenchPageLoading label="文件目录" icon="folder" compact /></div>
     if (level.status === 'failed') return <div role="alert" style={{ paddingLeft: depth * 18 + 12, color: 'var(--dsw-alias-danger, #b42318)' }}>{level.message}</div>
     if (level.entries.length === 0) return <div style={{ paddingLeft: depth * 18 + 12, opacity: .65 }}>空目录</div>
     const rows = level.entries.map(entry => {
@@ -376,8 +377,8 @@ function WorkspaceFilesEditor({ owner, ctx }: { owner: AreaProps; ctx: Context }
       <strong aria-label="工作区路径" title={cwd} style={{ display: 'flex', minWidth: 0, flex: 1, marginRight: 12, overflow: 'hidden', whiteSpace: 'nowrap', fontSize: 12 }}><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', color: 'var(--dsw-alias-label-tertiary, currentColor)' }}>{titleParts.directory}</span><span style={{ flex: 'none', color: 'var(--dsw-alias-label-primary, currentColor)' }}>{titleParts.name}</span></strong>
       <button className={css.toolbarButton} type="button" aria-label="刷新工作区文件" title="刷新" onClick={() => { levelsRef.current = {}; setLevels({}); persist({}, expandedRef.current); void load(cwd) }} style={{ width: 28, height: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flex: 'none', border: 0, borderRadius: 28, background: 'transparent', color: 'var(--dsw-alias-label-secondary, currentColor)', cursor: 'pointer' }}><IconRefreshOutlineMedium /></button>
     </header>
-    {nativePreview === undefined && error === undefined ? <p role="status" style={{ margin: 0, padding: '8px 12px' }}>正在连接 DSH 文件预览…</p> : null}
-    <div ref={scrollRef} onScroll={event => { const next = event.currentTarget.scrollTop; setScrollTop(next); persistScrollAfterIdle(next) }} style={{ minHeight: 0, flex: 1, overflow: 'auto', padding: '8px 0 8px 8px', fontSize: 'var(--dsh-content-font-size-secondary, 13px)', lineHeight: 1.5 }}>{renderLevel(cwd, 0)}</div>
+    {nativePreview === undefined && error === undefined && levels[cwd]?.status === 'ready' ? <WorkbenchPageLoading label="文件预览" icon="file-preview" compact /> : null}
+    <div ref={scrollRef} onScroll={event => { const next = event.currentTarget.scrollTop; setScrollTop(next); persistScrollAfterIdle(next) }} style={{ minHeight: 0, flex: 1, overflow: 'auto', padding: '8px 0 8px 8px', fontSize: 'var(--dsh-content-font-size-secondary, 13px)', lineHeight: 1.5 }}>{levels[cwd] === undefined || levels[cwd]?.status === 'loading' ? <WorkbenchPageLoading label="项目文件" icon="folder" /> : renderLevel(cwd, 0)}</div>
     {error === undefined ? null : <p role="alert" style={{ margin: 0, padding: '10px 12px', color: 'var(--dsw-alias-state-error-primary, #b42318)', background: 'color-mix(in srgb, var(--dsw-alias-state-error-primary, #b42318) 8%, transparent)' }}>{error}</p>}
     {preview !== undefined && nativePreview !== undefined ? <aside className={css.resourcePreview} data-workbench-resource-preview="" aria-label={preview.info.tab.title} style={{ position: 'absolute', inset: 0, zIndex: 2, display: 'flex', minHeight: 0, flexDirection: 'column', background: 'var(--dsw-alias-bg-base, Canvas)' }}>
       <header className={css.areaToolbar} style={{ display: 'flex', alignItems: 'center', minHeight: 38, padding: '0 12px', borderBottom: '.5px solid var(--dsw-alias-border-l3, color-mix(in srgb, currentColor 16%, transparent))' }}>
@@ -632,7 +633,7 @@ function TerminalEditor({ owner, ctx }: { owner: AreaProps; ctx: Context }): Rea
     {state.info === undefined
       ? state.issue === 'missingTerminal'
         ? <div data-workbench-official-area-state="terminal-missing" style={{ display: 'flex', flex: 1, minHeight: 0, flexDirection: 'column', justifyContent: 'center', alignItems: 'center', gap: 16, padding: 24, textAlign: 'center' }}><span aria-hidden="true" style={{ fontSize: 36 }}>›_</span><p role="alert" style={{ maxWidth: '28ch', lineHeight: 1.6, margin: 0 }}>此终端已不存在，请新建终端。</p>{newTerminal}</div>
-        : <div data-workbench-official-area-state={state.phase === 'failed' ? 'terminal-failed' : 'terminal-loading'} style={{ display: 'flex', flex: 1, minHeight: 0, alignItems: 'center', justifyContent: 'center', padding: 24, color: 'var(--dsw-alias-label-tertiary, currentColor)' }}>{state.phase === 'failed' ? '终端暂时不可用。' : '正在加载终端…'}</div>
+        : state.phase === 'failed' ? <div data-workbench-official-area-state="terminal-failed" role="alert" style={{ display: 'flex', flex: 1, minHeight: 0, alignItems: 'center', justifyContent: 'center', padding: 24, color: 'var(--dsw-alias-label-tertiary, currentColor)' }}>终端暂时不可用。</div> : <WorkbenchPageLoading label="终端" icon="terminal" />
       : <NativeTerminalScreen
         model={model}
         state={state}
@@ -669,6 +670,11 @@ function restoreBrowserState(value: unknown) {
 }
 
 /** Web-only preview adapter. An iframe load is not proof that a site rendered. */
+function BrowserPreview({ url, title, sandboxed, onLoad, onError }: { url: string; title: string; sandboxed: boolean; onLoad: () => void; onError: () => void }) {
+  const [ready, setReady] = useState(false)
+  return <WorkbenchPageTransition loading={!ready} label="网页" icon="browser"><iframe title={title} src={url} sandbox={sandboxed ? 'allow-scripts allow-forms allow-same-origin allow-popups allow-popups-to-escape-sandbox' : undefined} referrerPolicy="no-referrer" onLoad={() => { setReady(true); onLoad() }} onErrorCapture={() => { setReady(true); onError() }} style={{ minHeight: 0, flex: 1, width: '100%', border: 0, background: 'var(--dsw-alias-bg-base, transparent)' }} /></WorkbenchPageTransition>
+}
+
 function BrowserEditor({ owner }: { owner: AreaProps }): ReactNode {
   const [initial] = useState(() => restoreBrowserState(owner.state))
   const [history, setHistory] = useState<readonly string[]>(initial.history)
@@ -732,7 +738,7 @@ function BrowserEditor({ owner }: { owner: AreaProps }): ReactNode {
     {!sandboxed ? <div role="status" style={{ padding: '6px 12px', background: 'color-mix(in srgb, var(--dsw-alias-state-warning-primary, #8a4b08) 8%, transparent)', color: 'var(--dsw-alias-state-warning-primary, #8a4b08)', fontSize: 11 }}>沙箱限制已关闭；页面可以导航顶层应用，并使用下载、模态对话框与输入锁定。</div> : null}
     {loadFailed ? <div role="status" style={{ padding: '6px 12px', color: 'var(--dsw-alias-state-error-primary, #b42318)', background: 'color-mix(in srgb, var(--dsw-alias-state-error-primary, #b42318) 8%, transparent)', fontSize: 11 }}>页面报告加载失败，请检查地址或在新标签页打开。</div> : null}
     {message === undefined ? null : <p role="alert" style={{ overflowWrap: 'anywhere', margin: 0, padding: '10px 12px', color: 'var(--dsw-alias-state-error-primary, #b42318)', background: 'color-mix(in srgb, var(--dsw-alias-state-error-primary, #b42318) 8%, transparent)' }}>{message}</p>}
-    {paused ? <div data-workbench-official-area-state="browser-paused" role="status" style={{ display: 'flex', flex: 1, minHeight: 0, justifyContent: 'center', alignItems: 'center', padding: 24, color: 'var(--dsw-alias-label-tertiary, currentColor)', textAlign: 'center' }}>后台区域已暂停网页预览；激活此区域后恢复。</div> : url === undefined ? <div data-workbench-official-area-state="browser-empty" style={{ display: 'flex', flex: 1, minHeight: 0, justifyContent: 'center', alignItems: 'center', padding: 24, color: 'var(--dsw-alias-label-tertiary, currentColor)', textAlign: 'center' }}>输入 HTTP(S) 地址开始浏览</div> : <iframe key={`${url}:${String(revision)}:${sandboxed ? 'sandbox' : 'open'}`} title={currentHost === undefined ? 'Workbench 浏览器' : currentHost} src={url} sandbox={sandboxed ? 'allow-scripts allow-forms allow-same-origin allow-popups allow-popups-to-escape-sandbox' : undefined} referrerPolicy="no-referrer" onLoad={reportLoaded} onError={() => setLoadFailed(true)} style={{ minHeight: 0, flex: 1, width: '100%', border: 0, background: 'var(--dsw-alias-bg-base, transparent)' }} />}
+    {paused ? <div data-workbench-official-area-state="browser-paused" role="status" style={{ display: 'flex', flex: 1, minHeight: 0, justifyContent: 'center', alignItems: 'center', padding: 24, color: 'var(--dsw-alias-label-tertiary, currentColor)', textAlign: 'center' }}>后台区域已暂停网页预览；激活此区域后恢复。</div> : url === undefined ? <div data-workbench-official-area-state="browser-empty" style={{ display: 'flex', flex: 1, minHeight: 0, justifyContent: 'center', alignItems: 'center', padding: 24, color: 'var(--dsw-alias-label-tertiary, currentColor)', textAlign: 'center' }}>输入 HTTP(S) 地址开始浏览</div> : <BrowserPreview key={`${url}:${String(revision)}:${sandboxed ? 'sandbox' : 'open'}`} title={currentHost === undefined ? 'Workbench 浏览器' : currentHost} url={url} sandboxed={sandboxed} onLoad={reportLoaded} onError={() => setLoadFailed(true)} />}
     {unknown ? <p style={{ margin: 0, padding: '4px 10px', color: 'var(--dsw-alias-label-tertiary, currentColor)', fontSize: 11, borderTop: '.5px solid var(--dsw-alias-border-l3, transparent)' }}>页面已在 iframe 内跳转；当前 URL 无法由 DSH 读取。地址栏保留最后输入的网址；刷新会返回该地址。</p> : null}
   </section>
 }

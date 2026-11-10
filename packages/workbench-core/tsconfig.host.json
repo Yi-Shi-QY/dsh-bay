@@ -14,6 +14,7 @@
     "src/foundation/document-v3.ts",
     "src/foundation/persistence.ts",
     "src/foundation/catalog.ts",
+    "src/foundation/editor-menu-preferences.ts",
     "src/foundation/workbench-editor-icons.ts",
     "src/foundation/workbench-slot-contracts.ts",
     "src/foundation/workbench-distribution.ts",

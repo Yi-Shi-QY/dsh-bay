@@ -24,7 +24,7 @@ export function installWorkbenchDirectoryRoute(connection: HostConnectionHandle,
       const actor = access?.resolve(request.headers)
       const patch = body.action === 'patch' ? body.operation as DirectoryPatch : undefined
       const workbenchId = typeof body.workbenchId === 'string' ? body.workbenchId : patch?.path?.[0] === 'workbenches' ? patch.path[1] : actor?.workbenchId
-      const mutation = ['create', 'create-session', 'show-area', 'bind-area', 'register-session', 'patch', 'memory-write', 'project-write'].includes(String(body.action))
+      const mutation = ['create', 'create-session', 'prepare-creator-repair', 'show-area', 'bind-area', 'register-session', 'patch', 'memory-write', 'project-write'].includes(String(body.action))
       const writeTargets = new Set<string>(workbenchId ? [workbenchId] : [])
       // Preserve area-scoped authorization through the final directory
       // transaction wrapper. Rechecking only the workbench would discard the
@@ -49,11 +49,12 @@ export function installWorkbenchDirectoryRoute(connection: HostConnectionHandle,
       if (['create-session', 'show-area', 'bind-area', 'register-session', 'patch'].includes(String(body.action))) capability = 'layout'
       if (body.action === 'memory-write') capability = 'memory'
       if (['directories', 'project-entries', 'project-preview', 'project-read'].includes(String(body.action))) capability = 'read-files'
-      if (body.action === 'project-write') capability = 'write-files'
+      if (['project-write', 'prepare-creator-repair'].includes(String(body.action))) capability = 'write-files'
       if (access && actor) {
         if (body.action === 'create' && actor.actor !== 'desktop') throw new WorkbenchAccessError('create-denied', '请在 DSH 中选择父目录并新建工作台。')
         if (mutation && actor.actor !== 'desktop' && (typeof body.requestId !== 'string' || !body.requestId)) throw new WorkbenchAccessError('request-id-required', '修改操作缺少请求标识。', 400)
         if (body.action === 'register-session' && actor.actor !== 'desktop') throw new WorkbenchAccessError('session-registration-denied', '请通过区域新建会话或打开已登记的会话。')
+        if (body.action === 'prepare-creator-repair' && actor.actor !== 'desktop') throw new WorkbenchAccessError('creator-repair-desktop-required', '请在 DSH 客户端中打开插件修复会话。')
         if (actor.actor === 'lan-guest' && ['memory-list', 'memory-read', 'memory-write'].includes(String(body.action))) throw new WorkbenchAccessError('memory-owner-required', '工作台正式记忆由当前主控管理。')
         if (patch) {
           if (!Array.isArray(patch.path)) throw new Error('无效的修改路径。')
@@ -139,6 +140,7 @@ export function installWorkbenchDirectoryRoute(connection: HostConnectionHandle,
       let value: unknown
       switch (body.action) {
         case 'snapshot': break
+        case 'prepare-creator-repair': value = await directory.prepareCreatorRepair({ workbenchId: text('workbenchId'), moduleId: text('moduleId'), ...(body.packageName === undefined ? {} : { packageName: text('packageName') }) }); break
         case 'create-session': if (!createSession) throw new Error('会话服务不可用。'); value = await createSession({ workbenchId: text('workbenchId'), areaId: text('areaId'), requestId: text('requestId'), agentPreset: typeof body.agentPreset === 'string' ? body.agentPreset : 'standard', workspaceId: text('workspaceId') }); break
         case 'show-area': value = await directory.showArea(text('workbenchId'), text('areaId'), Number(body.expectedRevision)); break
         case 'memory-list': if (!memory) throw new Error('记忆服务不可用。'); value = memory.list(text('workbenchId'), typeof body.query === 'string' ? body.query : ''); break

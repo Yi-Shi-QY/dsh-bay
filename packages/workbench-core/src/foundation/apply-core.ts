@@ -1,4 +1,5 @@
 import { browserSafeUuid } from '../browser-safe-id.ts'
+import { installWorkbenchSidebarShortcuts } from '../client/workbench-sidebar-shortcuts.tsx'
 import { workbenchFetch } from '../client/workbench-access.ts'
 import { WORKBENCH_GUEST_EDITORS } from '../workbench-access-contract.ts'
 import { requestWorkbenchShareGrant } from './WorkbenchSharePermissions.tsx'
@@ -16,12 +17,12 @@ import { scopeSettingsSnapshot, settingsTargetWritable, DESKTOP_SETTINGS_CONTEXT
  */
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-connection/client'
-import { createFloatingWorkspaceRuntime } from '../client/floating-workspace-runtime.ts'
+import { createFloatingWorkspaceRuntime, floatingInstanceKey } from '../client/floating-workspace-runtime.ts'
 import { connectFloatingUiPreferences } from '../client/floating-ui-preferences.ts'
 import { installNativeAutomaticIsolation } from '../client/native-automatic-isolation.tsx'
 import { closeWorkbenchNative } from '../client/native-sidebar-area-editor.tsx'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
-import type {} from '@deepseek-ai/dsh-api-session-controller/client'
+import type { SessionReference } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type {} from '@deepseek-ai/dsh-client-ui-workspace/client'
@@ -43,6 +44,7 @@ import { decodeWorkbenchSettingsV4, type WorkbenchSettingsV4 } from './persisten
 import { createProjectNeutralFrameSettings, type WorkbenchDirectoryContextPatch } from './frame-settings-adapter.ts'
 import type { SidebarCompatibilityProbe } from './WorkbenchFrame.tsx'
 import { WorkbenchCoreSettingsSection } from './WorkbenchCoreSettingsSection.tsx'
+import { CREATOR_REPAIR_AGENT_PRESET, type CreatorRepairTargetV1, type CreatorRepairProjectV1 } from '../workbench-directory-contract.ts'
 import { WorkbenchCoreInnerPage, type WorkbenchCoreInnerPageInjection } from './WorkbenchCoreInnerPage.tsx'
 import { WorkbenchCoreEntryAction } from './WorkbenchCoreEntryAction.tsx'
 import { createWorkbenchModeController, type WorkbenchModeControllerV1 } from '../mode-controller.ts'
@@ -82,6 +84,11 @@ import { decodeBackgroundAiPreferences, type BackgroundAiPreferencesV1 } from '.
 import type { BayAgentControllerV1 } from './workbench-bay-agent-work.ts'
 import { BAY_AGENT_DRAFT_ROUTE } from '../bay-agent-contract.ts'
 import { createRemoteWorkbenchAiDraftGenerator } from './workbench-ai.ts'
+import { createSessionTab } from './model.ts'
+
+declare module '@deepseek-ai/dsh-api-session-controller/client' {
+  interface SessionReferenceSourceMap { workbenchFloatingCreator: true }
+}
 
 export const inject = [
   'connection', 'slots', 'layout', 'sessions', 'workspaces', 'uiWorkspace', 'uiSession', 'configForms', 'modules', 'locale', 'conversation',
@@ -155,9 +162,14 @@ export function applyWorkbenchCoreFoundation(
 ): { ready: () => Promise<void>; flush: () => Promise<boolean>; runtimeMetrics: { getSnapshot(): WorkbenchRuntimeMetricsSnapshotV1 }; floatingRuntime: ReturnType<typeof createFloatingWorkspaceRuntime>; bayAgent?: BayAgentControllerV1 } {
   const runtimeMetrics = createWorkbenchRuntimeMetrics()
   const floatingRuntime = createFloatingWorkspaceRuntime()
+  const floatingSessionReferences = new Map<string, SessionReference>()
   const suppliedToolUsageService = (ctx as unknown as { get?: (name: string, strict?: boolean) => unknown }).get?.('workbenchToolUsageService') as WorkbenchToolUsageServiceV1 | undefined
   if (!isWorkbenchShareGuestPage()) ctx.effect(() => installNativeAutomaticIsolation(ctx, modeController), 'workbench: automatic review isolation')
-  floatingRuntime.setCleanup(closeWorkbenchNative)
+  floatingRuntime.setCleanup(id => {
+    closeWorkbenchNative(id)
+    floatingSessionReferences.get(id)?.release()
+    floatingSessionReferences.delete(id)
+  })
   const fileSettings = createFileWorkbenchSettings()
   ctx.effect(() => () => fileSettings.dispose(), 'workbench: file authority')
   const settings = fileSettings.scope
@@ -211,6 +223,10 @@ export function applyWorkbenchCoreFoundation(
   }
   const browserController = suppliedWindowController === undefined
     ? createBrowserWindowController({
+      restoreDesktop: async () => {
+        await fileSettings.request({ action: 'snapshot' })
+        await ctx.sessions.refresh()
+      },
       rpc: connectionRpc,
       floating: { snapshot: id => floatingRuntime.snapshotHandoff(id), restore: (id, value) => floatingRuntime.restoreHandoff(id, value),
         incomplete: id => floatingRuntime.patch(id, { error: '浏览器未完成临时标签交接，已保留此端原有内容。请使用“收回到 DSH 客户端”完成交接。', expanded: true }) },
@@ -274,6 +290,7 @@ export function applyWorkbenchCoreFoundation(
     if (result.status !== 'committed') throw new Error('工作台刚刚发生变化，请重试。')
   }
   directory.getRootPath = id => settings.getSnapshot().value?.workbenches[id]?.fileWorkbench?.rootPath
+  directory.getAreaLabels = id => settings.getSnapshot().value?.workbenches[id]?.areaMetadata ?? {}
   directory.listProjectDirectories = (workbenchId, relativePath = '') => fileSettings.request({ action: 'directories', workbenchId, relativePath })
   directory.bindAreaProject = async input => {
     if (directory.flushBeforeLifecycleTransition && !await directory.flushBeforeLifecycleTransition()) throw new Error('请先保存当前布局。')
@@ -449,6 +466,70 @@ export function applyWorkbenchCoreFoundation(
     if (snapshot !== scopedSource) { scopedSource = snapshot; scopedSnapshot = scopeSettingsSnapshot(snapshot, settingsContext) }
     return scopedSnapshot
   } }
+  const creatorRequests = new Map<string, Promise<void>>()
+  const openCreator = (prompt: string, title: string | undefined, target: CreatorRepairTargetV1): Promise<void> => {
+    const key = JSON.stringify(target)
+    const pending = creatorRequests.get(key)
+    if (pending) return pending
+    const operation = (async () => {
+      const sessionTitle = title ?? '创造模式 · 插件适配'
+      const snapshot = settings.getSnapshot()
+      if (snapshot.status !== 'ready' || !snapshot.value) throw new Error('工作台目录尚未就绪，请稍后重试。')
+      const workbenchId = target.workbenchId
+      const record = snapshot.value.workbenches[workbenchId]
+      if (!record || record.archivedAt !== undefined) throw new Error('没有可用的当前工作台，请先打开工作台后重试。')
+      const project = await fileSettings.request<CreatorRepairProjectV1>({ action: 'prepare-creator-repair', ...target })
+      const existing = [...floatingRuntime.instances.values()].find(row => row.workbenchId === workbenchId
+        && row.location === 'floating' && row.tab.editorId === 'workbench.conversation' && row.tab.binding?.sessionId === project.sessionId)
+      if (existing) { await modeController.enter({ workbenchId }); floatingRuntime.open(workbenchId, existing.tab, false, true); return }
+      // A prior view may have been pinned to an Area; open another view of the
+      // same session without moving that Area's page or creating another chat.
+      const tabId = floatingRuntime.find(project.sessionKey, workbenchId) ? project.sessionKey + ':' + browserSafeUuid() : project.sessionKey
+
+      // A reserved identity lets failed creation responses retry the same blank session.
+      const sessionId = project.registered ? project.sessionId as SessionId : await ctx.sessions.create({
+        workspaceId: project.workspaceId as WorkspaceId, sessionId: project.sessionId as SessionId,
+        agentPreset: CREATOR_REPAIR_AGENT_PRESET,
+      })
+      const reference = ctx.sessions.retain(sessionId, { source: 'workbenchFloatingCreator' })
+      let runtimeOwnsReference = false
+      try {
+        const binding = await reference.ready
+        if (!project.registered) {
+          unwrapRemoteResult(await binding.session.rename(sessionTitle), 'repair session rename')
+          await fileSettings.request({
+            action: 'register-session', workbenchId, sessionId, sessionKey: project.sessionKey, role: 'user',
+            relativePath: project.relativePath, title: sessionTitle, agentPreset: CREATOR_REPAIR_AGENT_PRESET,
+            createdAt: Date.now(),
+          })
+        }
+        // Preserve user drafts and never reinsert a brief into an ongoing conversation.
+        const blank = !project.registered || ctx.sessions.list.getSnapshot().byId[sessionId]?.blank === true
+        if (blank) {
+          const result = ctx.conversation.input.requestDraftInitialization(binding, {
+            prompt: prompt + '\n\n修复项目：' + project.relativePath
+              + '\n这是工作台内独立的修复目录，首次创建时不包含插件源码。先通过 DSH 原生插件检查能力定位目标包和可编辑源码；若无法取得源码，明确说明缺失项，不要凭空重建插件。将可编辑副本和修复产物保存在当前项目中。',
+            whenDraftExists: 'keep',
+          })
+          if (result === 'blocked') throw new Error('修复会话已准备，但输入区暂时无法接收草稿。请重试，已有会话会保留。')
+        }
+        const tab = createSessionTab(tabId, 'workbench.conversation', {
+          workspaceId: project.workspaceId, sessionId,
+        }, sessionTitle)
+        await modeController.enter({ workbenchId })
+        const instanceKey = floatingInstanceKey(workbenchId, tabId)
+        floatingSessionReferences.get(instanceKey)?.release()
+        floatingSessionReferences.set(instanceKey, reference)
+        runtimeOwnsReference = true
+        floatingRuntime.open(workbenchId, tab, false, true)
+      } catch (error) {
+        if (!runtimeOwnsReference) reference.release()
+        throw error
+      }
+    })().finally(() => { creatorRequests.delete(key) })
+    creatorRequests.set(key, operation)
+    return operation
+  }
   const settingsPage = {
     ...(windowView === undefined ? { distributionPackage: createWorkbenchPackageService({version:4,client: createDistributionClient(), settings, directory, editors: editorCatalog, rawEditors: slotEditorCatalog, registry: extensionRegistry, canExport: id => settingsTargetWritable(settingsContext, id, windowController), canImport: () => settingsContext.mode === 'desktop'}) } : {}),
     layoutPackage: createWorkbenchLayoutPackageService({ settings, directory, editors: editorCatalog, journal: createLayoutImportJournal(),
@@ -456,13 +537,7 @@ export function applyWorkbenchCoreFoundation(
     settingsContext,
     settingsSource: settingsView,
     windowController,
-    openCreator: (prompt: string) => modeController.exit(() => {
-      ctx.uiWorkspace.startSession(undefined, {
-        agentPreset: 'creator',
-        prompt,
-        whenDraftExists: 'replace',
-      })
-    }),
+    openCreator,
 
     editorCatalog,
     nativePluginNavigation: createNativePluginNavigation({
@@ -585,6 +660,11 @@ export function applyWorkbenchCoreFoundation(
     order: 20,
     inject: () => ({ modeController }),
   }, WorkbenchCoreEntryAction))
+
+  if (windowView === undefined) ctx.effect(() => installWorkbenchSidebarShortcuts(ctx, directory, async id => {
+    if (!directory.openInSurface) throw new Error('工作台界面尚未就绪，请稍后重试。')
+    await directory.openInSurface(id)
+  }), 'workbench: persistent native sidebar shortcuts')
 
   // Keep the migrated management page and its revision-aware directory on
   // the official Settings seam; Module Manager is an additional projection.

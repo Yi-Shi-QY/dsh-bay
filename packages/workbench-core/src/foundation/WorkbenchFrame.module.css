@@ -288,7 +288,7 @@
   font-weight: 600;
 }
 
-.workbenchTab[data-active] .workbenchTabTrigger {
+.workbenchTab[data-active] .workbenchTabTrigger:not([data-workbench-home-entry]) {
   padding-right: 4px;
 }
 

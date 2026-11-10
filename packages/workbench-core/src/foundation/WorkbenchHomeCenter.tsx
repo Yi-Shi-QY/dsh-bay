@@ -6,6 +6,7 @@ import type { WorkbenchCoreSettingsSectionProps } from './WorkbenchCoreSettingsS
 import type { WorkbenchCoreSettingsPage } from './WorkbenchCoreSettingsDialog.tsx'
 import type { WorkbenchDirectory } from './frame-settings-adapter.ts'
 import { DESKTOP_SETTINGS_CONTEXT, type SettingsViewMemory, type WorkbenchSettingsOpenOptionsV1 } from './settings-context.ts'
+import { WorkbenchCompletePackagePanel } from './WorkbenchCompletePackagePanel.tsx'
 import { WorkbenchHome } from './WorkbenchHome.tsx'
 import { WorkbenchHomeNavigation } from './WorkbenchHomeNavigation.tsx'
 import { WorkbenchManagementPage, UnsavedFormPrompt, type PendingSettingsForm } from './WorkbenchSettingsPages.tsx'
@@ -22,6 +23,7 @@ export type WorkbenchHomeCenterProps = WorkbenchCoreSettingsPage & Pick<Workbenc
   onCreated(workbenchId: string): void
   registerNavigation?: (navigate: HomeNavigation) => (() => void)
   registerBeforeLeave?: (guard: () => Promise<boolean>) => (() => void)
+  onOpenSettings?: (options?: WorkbenchSettingsOpenOptionsV1) => void
   generateContextDraft?: import('./workbench-ai.ts').WorkbenchAiDraftGeneratorV1['generateContextDraft']
 }
 
@@ -41,8 +43,12 @@ export function WorkbenchHomeCenter(props: WorkbenchHomeCenterProps) {
     return new Promise(resolve => { const request = { resolve }; pendingRef.current = request; setPending(request) })
   }, [])
   const navigate = useCallback<HomeNavigation>(options => {
-    void beforeLeave().then(ok => { if (ok) setDestination(options) })
-  }, [beforeLeave])
+    void beforeLeave().then(ok => {
+      if (!ok) return
+      if (options?.section && !['workbenches', 'sharing'].includes(options.section) && props.onOpenSettings) props.onOpenSettings(options)
+      else setDestination(options?.section === 'workbenches' && !options.workbenchId ? undefined : options)
+    })
+  }, [beforeLeave, props.onOpenSettings])
   useEffect(() => props.registerNavigation?.(navigate), [props.registerNavigation, navigate])
   useEffect(() => props.registerBeforeLeave?.(beforeLeave), [props.registerBeforeLeave, beforeLeave])
   useEffect(() => () => pendingRef.current?.resolve(false), [])
@@ -62,7 +68,7 @@ export function WorkbenchHomeCenter(props: WorkbenchHomeCenterProps) {
   const openWorkbench = async (id: string) => { if (await beforeLeave()) await props.onOpenWorkbench(id) }
   const pageProps = { ...props, workbenchDirectory: props.directory, settingsContext: DESKTOP_SETTINGS_CONTEXT,
     useWorkbenchSettings, value: snapshot.value ?? lastValue.current, editors, memory, navigate, onDirty,
-    ...(destination ? { openOptions: destination } : {}), onOpenWorkbench: openWorkbench, close: () => navigate() }
+    ...(destination ? { openOptions: destination } : {}), onOpenWorkbench: openWorkbench, onBackToOverview: () => navigate(), close: () => navigate() }
   const section = destination?.section
   const count = Object.keys(snapshot.value?.workbenches ?? {}).length + Object.keys(snapshot.value?.invalidWorkbenches ?? {}).length
   const previousCount = useRef(count)
@@ -76,10 +82,10 @@ export function WorkbenchHomeCenter(props: WorkbenchHomeCenterProps) {
       <div className={css.centerContent + ' ' + pageCss.settingsRoot} style={{ height: 'auto' }}>
         {snapshot.status !== 'ready' ? <p role="alert">工作台连接暂不可用，当前资料已保留。请恢复连接后重试。</p> : null}
         {section === 'workbenches' ? <WorkbenchManagementPage key={destination?.workbenchId ?? 'list'} {...pageProps} />
-          : props.distributionPackage ? <WorkbenchDistributionPage key={destination?.shareMode + ':' + destination?.workbenchId} {...pageProps} distributionPackage={props.distributionPackage} />
+          : props.distributionPackage ? <>{props.directory.completeRequest ? <WorkbenchCompletePackagePanel workbenchId={destination?.workbenchId ?? snapshot.value?.activeWorkbenchId ?? ''} {...(props.directory.pickParentDirectory ? { pickParentDirectory: props.directory.pickParentDirectory } : {})} /> : null}<WorkbenchDistributionPage key={destination?.shareMode + ':' + destination?.workbenchId} {...pageProps} distributionPackage={props.distributionPackage} /></>
             : <WorkbenchLayoutSharingPage key={destination?.shareMode + ':' + destination?.workbenchId} {...pageProps} />}
       </div>
-    </main> : <WorkbenchHome directory={props.directory} editors={editors} navigate={navigate} {...(props.windowController ? { windowController: props.windowController } : {})} onOpenWorkbench={openWorkbench} onCreated={props.onCreated} {...(props.generateContextDraft === undefined ? {} : { generateContextDraft: props.generateContextDraft })} />}
+    </main> : <WorkbenchHome value={snapshot.value ?? lastValue.current} directory={props.directory} editors={editors} navigate={navigate} {...(props.windowController ? { windowController: props.windowController } : {})} onOpenWorkbench={openWorkbench} onCreated={props.onCreated} {...(props.generateContextDraft === undefined ? {} : { generateContextDraft: props.generateContextDraft })} />}
     {pending && form.current ? <div className={pageCss.settingsRoot} style={{ height: 0, minHeight: 0 }}><UnsavedFormPrompt form={form.current} onContinue={() => finish(false)} onLeave={() => finish(true)} /></div> : null}
   </div>
 }

@@ -1,4 +1,5 @@
 export const WORKBENCH_WINDOW_CONTROLLER_SERVICE_NAME = 'workbenchWindowController'
+import { decodeReclaimProgress, type WorkbenchReclaimProgress } from '../workbench-reclaim.ts'
 
 export interface WorkbenchWindowRequestV1 {
   readonly workbenchId: string
@@ -6,6 +7,7 @@ export interface WorkbenchWindowRequestV1 {
   readonly windowId?: string
   readonly code?: string
   readonly runtimeMetrics?: Readonly<Record<string, unknown>>
+  readonly reclaimProgress?: WorkbenchReclaimProgress
 }
 
 export interface WorkbenchWindowSnapshotV1 {
@@ -36,7 +38,8 @@ export interface WorkbenchWindowControllerV1 {
   /** Prepare the authenticated browser URL before the user clicks the open command. */
   prepare?(workbenchId: string): Promise<boolean>
   open(workbenchId: string, popup?: Window | null): Promise<WorkbenchWindowOpenResultV1>
-  reclaim?(workbenchId: string): Promise<{ readonly status: 'reclaimed' | 'failed'; readonly code?: string }>
+  reclaim?(workbenchId: string, options?: { force?: boolean }): Promise<{ readonly status: 'reclaimed' | 'failed'; readonly code?: string }>
+  desktopRestored?(workbenchId: string, windowId: string, error?: string): void
   focus(windowId: string): Promise<WorkbenchWindowActionResultV1>
   close(windowId: string): Promise<WorkbenchWindowActionResultV1>
   subscribe(listener: () => void): () => void
@@ -97,13 +100,14 @@ export function normalizeWorkbenchWindowSnapshot(value: unknown): WorkbenchWindo
   const normalizeRequest = (value: unknown): WorkbenchWindowRequestV1 | undefined => {
     if (typeof value !== 'object' || value === null) return undefined
     const row = value as Partial<WorkbenchWindowRequestV1>
-    if (Object.keys(row).some(key => key !== 'workbenchId' && key !== 'status' && key !== 'windowId' && key !== 'code' && key !== 'runtimeMetrics')
+    if (Object.keys(row).some(key => key !== 'workbenchId' && key !== 'status' && key !== 'windowId' && key !== 'code' && key !== 'runtimeMetrics' && key !== 'reclaimProgress')
       || typeof row.workbenchId !== 'string' || row.workbenchId.length === 0
       || !statuses.includes(row.status as WorkbenchWindowRequestV1['status'])
       || (row.windowId !== undefined && (typeof row.windowId !== 'string' || !/^[A-Za-z0-9-]{36}$/u.test(row.windowId)))
       || (row.code !== undefined && typeof row.code !== 'string')
       || (row.runtimeMetrics !== undefined && (typeof row.runtimeMetrics !== 'object' || row.runtimeMetrics === null || Array.isArray(row.runtimeMetrics)))) return undefined
     return Object.freeze({ workbenchId: row.workbenchId, status: row.status as WorkbenchWindowRequestV1['status'],
+      ...(decodeReclaimProgress(row.reclaimProgress) ? { reclaimProgress: Object.freeze(decodeReclaimProgress(row.reclaimProgress)!) } : {}),
       ...(row.windowId === undefined ? {} : { windowId: row.windowId }),
       ...(row.code === undefined ? {} : { code: row.code }),
       ...(row.runtimeMetrics === undefined ? {} : { runtimeMetrics: Object.freeze({ ...row.runtimeMetrics }) }) })

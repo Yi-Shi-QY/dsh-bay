@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { WorkbenchPageLoading } from '../foundation/WorkbenchPageLoading.tsx'
 import type { Context } from '@deepseek-ai/cordis'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { SidebarRightTabClaim, SidebarRightTabInfo } from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
@@ -570,7 +571,7 @@ export function NativeSidebarAreaEditor({
     style={{ display: 'flex', minWidth: 0, minHeight: 0, height: '100%', flexDirection: 'column' }}
   >{fallback}</section>
   if (native === undefined || occurrence === undefined) {
-    return <section data-workbench-official-area-state="native-loading" role="status" style={{ padding: 20 }}>正在连接 DSH 原生内页…</section>
+    return <section data-workbench-official-area-state="native-loading" style={{ display: 'flex', flex: 1, minHeight: 0, height: '100%' }}><WorkbenchPageLoading label={title} /></section>
   }
   return <section data-workbench-native-area={kind} data-workbench-native-entry={entryKey} style={{ display: 'flex', minWidth: 0, minHeight: 0, height: '100%', flexDirection: 'column' }}>
     <div style={{ display: 'flex', minWidth: 0, minHeight: 0, flex: 1, flexDirection: 'column' }}>

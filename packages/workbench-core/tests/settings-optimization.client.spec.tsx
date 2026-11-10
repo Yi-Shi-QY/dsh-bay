@@ -30,6 +30,26 @@ function setup(overrides: Partial<WorkbenchCoreSettingsSectionProps> = {}, home 
   return { ...f, view, props, directory, close, requestClose: () => closeRequest() }
 }
 describe('settings product interactions', () => {
+  it('creates, assigns, renames and deletes an extension folder without changing the extension or existing workbenches', async () => {
+    const { view, source } = setup()
+    const previousWorkbenches = structuredClone(source.getSnapshot().value!.workbenches)
+    fireEvent.click(view.getByText('菜单分类文件夹'))
+    fireEvent.change(view.getByRole('textbox', { name: '新分类名称' }), { target: { value: '内容创作' } })
+    fireEvent.click(view.getByRole('button', { name: '新建分类' }))
+    await waitFor(() => expect(source.getSnapshot().value!.editorMenu?.folders).toHaveLength(1))
+    const id = source.getSnapshot().value!.editorMenu!.folders[0]!.id
+    fireEvent.change(view.getByRole('combobox', { name: '笔记 的菜单分类' }), { target: { value: id } })
+    await waitFor(() => expect(source.getSnapshot().value!.editorMenu!.assignments['example.notes']).toBe(id))
+    fireEvent.click(view.getByRole('button', { name: '重命名分类 内容创作' }))
+    fireEvent.change(view.getByRole('textbox', { name: '分类名称：内容创作' }), { target: { value: '知识管理' } })
+    fireEvent.click(view.getByRole('button', { name: '保存名称' }))
+    await waitFor(() => expect(source.getSnapshot().value!.editorMenu!.folders[0]!.name).toBe('知识管理'))
+    expect((view.getByRole('combobox', { name: '笔记 的菜单分类' }) as HTMLSelectElement).value).toBe(id)
+    fireEvent.click(view.getByRole('button', { name: '删除分类 知识管理' }))
+    await waitFor(() => expect(source.getSnapshot().value!.editorMenu).toEqual({ folders: [], assignments: {} }))
+    expect(source.getSnapshot().value!.workbenches).toEqual(previousWorkbenches)
+    expect(view.queryByRole('combobox', { name: '对话 的菜单分类' })).toBeNull()
+  })
   it('keeps list layout thumbnails visual-only while preserving the detailed layout preview', () => {
     const { view } = setup({ openOptions: { section: 'workbenches' } }, true)
     const thumbnail = view.container.querySelector('[class*="previewCompact"]')
@@ -177,14 +197,47 @@ describe('settings product interactions', () => {
     expect(repair).toBeTruthy()
     expect(repair?.querySelector('svg')).toBeTruthy()
     fireEvent.click(repair!)
+    expect(view.queryByRole('dialog', { name: '选择修复位置' })).toBeNull()
     await waitFor(() => expect(openCreator).toHaveBeenCalledTimes(1))
     const prompt = openCreator.mock.calls[0]?.[0] ?? ''
+    expect(openCreator.mock.calls[0]?.[1]).toBe('适配 old')
+    expect(openCreator.mock.calls[0]?.[2]).toEqual({ workbenchId: 'a', moduleId: 'old', packageName: '@example/old' })
     expect(prompt).toContain('old')
     expect(prompt).toContain('@example/old')
     expect(prompt).toContain('0.8.0')
     expect(prompt).toContain('old.page')
     expect(prompt).toContain('18.0')
     expect(prompt).toContain('offline-embedded')
+  })
+  it('shows Creator repair startup failures in the extension card', async () => {
+    const openCreator = vi.fn(async () => { throw new Error('修复区域创建失败，请检查工作台目录权限。') })
+    const extension = { key: 'incompatible-creator-error', packageName: '@example/old', moduleId: 'old', editorIds: ['old.page'], availability: 'incompatible' as const, allowed: false, detail: '需要更新扩展版本。' }
+    const snapshot = { status: 'ready' as const, extensions: [extension] }
+    const { view } = setup({
+      extensionRegistry: { getSnapshot: () => snapshot, subscribe: () => () => {}, refresh: async () => {}, dispose: () => {}, catalog: { getSnapshot: () => [], subscribe: () => () => {} } },
+      openCreator,
+    })
+    fireEvent.click(view.getByRole('button', { name: '需要处理', exact: true }))
+    const repair = [...view.container.querySelectorAll('button')].find(button => button.textContent?.includes('在创造模式中修复'))
+    fireEvent.click(repair!)
+    await waitFor(() => expect(view.getByRole('alert').textContent).toContain('修复区域创建失败'))
+  })
+  it('displays progress, ignores repeated clicks and closes Settings only after the repair opens', async () => {
+    let resolve!: () => void
+    const openCreator = vi.fn(() => new Promise<void>(done => { resolve = done }))
+    const extension = { key: 'repair', packageName: '@example/old', moduleId: 'old', editorIds: ['old.page'], availability: 'incompatible' as const, allowed: false, detail: '需要更新扩展版本。' }
+    const snapshot = { status: 'ready' as const, extensions: [extension] }
+    const { view, close } = setup({ openCreator,
+      extensionRegistry: { getSnapshot: () => snapshot, subscribe: () => () => {}, refresh: async () => {}, dispose: () => {}, catalog: { getSnapshot: () => [], subscribe: () => () => {} } },
+    })
+    const button = view.getByRole('button', { name: '在创造模式中修复' })
+    fireEvent.click(button); fireEvent.click(button)
+    expect(openCreator).toHaveBeenCalledTimes(1)
+    expect(view.getByRole('button', { name: '正在打开创造模式…' }).hasAttribute('disabled')).toBe(true)
+    expect(view.getByRole('status').textContent).toContain('正在准备修复目录')
+    expect(close).not.toHaveBeenCalled()
+    resolve()
+    await waitFor(() => expect(close).toHaveBeenCalledTimes(1))
   })
   it('protects Home metadata on navigation, keeps failed input, and retries', async () => {
     const { view, props } = setup({ openOptions: { section: 'workbenches', workbenchId: 'a' } }, true)

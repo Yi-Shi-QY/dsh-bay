@@ -1,4 +1,5 @@
 import { browserSafeUuid } from '../browser-safe-id.ts'
+import { changeEditorMenuPreferences, type EditorMenuCommand, type EditorMenuPreferences } from './editor-menu-preferences.ts'
 import { createWorkbenchPresetDocument, type WorkbenchLayoutPresetId, type WorkbenchAreaEditorChoice } from './workbench-layout-presets.ts'
 import type { SettingsScopeSnapshot, WorkbenchSettingsScope as SettingsScope } from '../client/workbench-settings-contracts.ts'
 import type { SettingsScopePathOperation, SettingsScopePatchResult } from '../client/workbench-settings-contracts.ts'
@@ -18,6 +19,8 @@ export interface WorkbenchDirectorySnapshot {
   activeWorkbenchId?: string
   openWorkbenchIds: readonly string[]
   globalHiddenEditorIds?: readonly string[]
+  editorMenu?: EditorMenuPreferences
+  sidebarShortcuts?: readonly string[]
   extensionConsents?: Readonly<Record<string, WorkbenchExtensionConsentV1>>
   rows: readonly {
     workbenchId: string
@@ -87,6 +90,8 @@ export type WorkbenchDirectoryCreateResult = WorkbenchDirectoryOperationResult |
 
 /** Named-Workbench selector backed by the same revision-aware Settings scope. */
 export interface WorkbenchDirectory {
+  /** Registered by the existing surface, including its unsaved-form guard. */
+  openInSurface?(workbenchId: string): Promise<void>
   getHiddenAreas?(workbenchId: string): readonly { areaId: string; label: string }[]
   showArea?(workbenchId: string, areaId: string): Promise<void>
   memoryRequest?<T>(input: Record<string, unknown>): Promise<T>
@@ -94,6 +99,7 @@ export interface WorkbenchDirectory {
   pickParentDirectory?(): Promise<string | undefined>
   getAreaProjects?(workbenchId: string): Readonly<Record<string, import('../workbench-directory-contract.ts').AreaProjectV1>>
   getRootPath?(workbenchId: string): string | undefined
+  getAreaLabels?(workbenchId: string): Readonly<Record<string, { label?: string }>>
   listProjectDirectories?(workbenchId: string, relativePath?: string): Promise<{ name: string; relativePath: string }[]>
   bindAreaProject?(input: { workbenchId: string; areaId: string; relativePath: string; createDirectory: boolean }): Promise<void>
   getSnapshot(): WorkbenchDirectorySnapshot
@@ -118,6 +124,7 @@ export interface WorkbenchDirectory {
   setEditorVisible?(workbenchId: string, editorId: string, visible: boolean): Promise<WorkbenchDirectoryOperationResult>
   setLayoutLocked?(workbenchId: string, locked: boolean): Promise<WorkbenchDirectoryOperationResult>
   setGlobalEditorVisible?(editorId: string, visible: boolean): Promise<WorkbenchDirectoryOperationResult>
+  updateEditorMenu?(command: EditorMenuCommand): Promise<WorkbenchDirectoryOperationResult>
   setExtensionAllowed?(input: {
     packageName: string
     moduleId: string
@@ -126,6 +133,7 @@ export interface WorkbenchDirectory {
     contractFingerprint?: string
   }, allowed: boolean): Promise<WorkbenchDirectoryOperationResult>
   setPinned(workbenchId: string, pinned: boolean): Promise<WorkbenchDirectoryOperationResult>
+  setSidebarPinned?(workbenchId: string, pinned: boolean): Promise<WorkbenchDirectoryOperationResult>
   archive(workbenchId: string): Promise<WorkbenchDirectoryOperationResult>
   restore(workbenchId: string): Promise<WorkbenchDirectoryOperationResult>
   remove(workbenchId: string): Promise<WorkbenchDirectoryOperationResult>
@@ -365,6 +373,8 @@ export function createProjectNeutralFrameSettings(
           ? []
           : [...(next.value.globalHiddenEditorIds ?? next.value.workbenches[activeId(next.value)]?.hiddenEditorIds ?? [])],
         extensionConsents: next.value === undefined ? {} : { ...(next.value.extensionConsents ?? {}) },
+        ...(next.value?.editorMenu === undefined ? {} : { editorMenu: next.value.editorMenu }),
+        sidebarShortcuts: next.value?.sidebarShortcuts ?? [],
         rows: Object.values(next.value?.workbenches ?? {}).filter(record => options.workbenchId === undefined || record.workbenchId === options.workbenchId).map(record => ({
           workbenchId: record.workbenchId, name: record.name, description: record.description,
           ...(record.tags === undefined ? {} : { tags: [...record.tags] }),
@@ -555,6 +565,10 @@ export function createProjectNeutralFrameSettings(
       if (next === undefined || decodeWorkbenchHiddenEditorIds([editorId]) === undefined) return Promise.resolve({ status: 'unavailable' })
       return rootUpdate(current => ({ ...current, globalHiddenEditorIds: next }))
     },
+    updateEditorMenu: async command => {
+      if (options.workbenchId !== undefined) return { status: 'unavailable' }
+      return rootUpdate(current => ({ ...current, editorMenu: changeEditorMenuPreferences(current.editorMenu, command) }))
+    },
     setExtensionAllowed: (input, allowed) => {
       if (options.workbenchId !== undefined) return Promise.resolve({ status: 'unavailable' })
       const editorIds = input.editorIds ?? []
@@ -666,6 +680,11 @@ export function createProjectNeutralFrameSettings(
         return { ...value, workbenches: { ...value.workbenches, [workbenchId]: { ...record, workbenchAi: normalized, updatedAt: Date.now() } } }
       })
     },
+    setSidebarPinned: (workbenchId, pinned) => options.workbenchId !== undefined
+      ? Promise.resolve({ status: 'unavailable' })
+      : rootUpdate(value => ({ ...value, sidebarShortcuts: pinned && value.workbenches[workbenchId]
+        ? [...new Set([...(value.sidebarShortcuts ?? []), workbenchId])]
+        : (value.sidebarShortcuts ?? []).filter(id => id !== workbenchId) })),
     setPinned: (workbenchId, pinned) => rootUpdate(value => {
       const record = value.workbenches[workbenchId]
       if (record !== undefined) {
@@ -709,7 +728,8 @@ export function createProjectNeutralFrameSettings(
       return rootUpdate(current => {
         const { [workbenchId]: _valid, ...workbenches } = current.workbenches
         const { [workbenchId]: _invalid, ...invalidWorkbenches } = current.invalidWorkbenches
-        return { ...current, ...fallbackFor(current, workbenchId), workbenches, invalidWorkbenches }
+        return { ...current, ...fallbackFor(current, workbenchId), workbenches, invalidWorkbenches,
+          sidebarShortcuts: (current.sidebarShortcuts ?? []).filter(id => id !== workbenchId) }
       })
     }),
     setBeforeLifecycleTransition: listener => {

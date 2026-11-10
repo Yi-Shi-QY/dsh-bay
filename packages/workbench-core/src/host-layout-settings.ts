@@ -43,6 +43,8 @@ const WorkbenchSettingsV4Schema = z.object({
   activeWorkbenchId: z.string().default('main'),
   openWorkbenchIds: z.array(z.string()).default([]),
   globalHiddenEditorIds: z.array(z.string()),
+  editorMenu: z.any(),
+  sidebarShortcuts: z.any(),
   // Strict record validation and lifecycle metadata migration live in the
   // client decoder; keep this Host envelope open for older V4 records.
   workbenches: z.dict(z.any()).default(DEFAULT_WORKBENCH_SETTINGS.workbenches),

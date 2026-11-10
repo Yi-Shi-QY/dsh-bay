@@ -146,6 +146,30 @@ describe('Core native Conversation editors', () => {
     expect(onHeaderAction).toHaveBeenCalledOnce()
   })
 
+  it('uses the shared transition while history settles without remounting the native Composer', async () => {
+    let snapshot = { blank: true, running: false, promptAttempted: false, awaitingFirstTurn: false, openState: 'loading' }
+    const listeners = new Set<() => void>()
+    const reference = {
+      sessionId: 'loading-history', ready: Promise.resolve(), release: vi.fn(),
+      binding: { session: { getSnapshot: () => snapshot, subscribe: (listener: () => void) => { listeners.add(listener); return () => listeners.delete(listener) } } },
+    }
+    const ctx = nativeConversationContext({ onOfficialWorkspaceOpen: vi.fn(), injectArgs: [] }) as unknown as { sessions: { retain: ReturnType<typeof vi.fn> } }
+    ctx.sessions = { retain: vi.fn(() => reference) }
+    const Conversation = createWorkbenchOfficialAreaEditors(ctx as never).conversation as unknown as ComponentType<Record<string, unknown>>
+    const view = render(createElement(Conversation, { instanceId: 'loading-history-tab', areaId: 'loading-history-area', areaClaim: 'loading-history-claim', sessionId: 'loading-history', state: {}, setState: vi.fn(), close: vi.fn(), focus: vi.fn() }))
+    expect(screen.getByRole('status', { name: '正在加载对话…' })).toBeTruthy()
+    await waitFor(() => expect(view.container.querySelector('[data-native-phase="settling"]')).not.toBeNull())
+    const composer = view.container.querySelector('textarea')!
+    expect(screen.queryByRole('textbox', { name: '原生 Composer' })).toBeNull()
+    act(() => { snapshot = { ...snapshot, blank: false, openState: 'open' }; listeners.forEach(listener => listener()) })
+    expect(screen.queryByRole('status', { name: '正在加载对话…' })).toBeNull()
+    expect(screen.getByRole('textbox', { name: '原生 Composer' })).toBe(composer)
+    fireEvent.change(composer, { target: { value: '继续原有对话' } })
+    expect(composer.value).toBe('继续原有对话')
+    expect(ctx.sessions.retain).toHaveBeenCalledOnce()
+    expect(reference.release).not.toHaveBeenCalled()
+  })
+
   it('routes each Start picker to its own Area placement without opening the official Session', async () => {
     const onOfficialWorkspaceOpen = vi.fn()
     const injectArgs: unknown[][] = []

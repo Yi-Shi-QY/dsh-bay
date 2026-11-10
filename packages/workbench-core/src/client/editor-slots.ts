@@ -1,4 +1,5 @@
 import type { JsonValue, SessionBindingV1 } from '../foundation/model.ts'
+import type { ReactNode } from 'react'
 import type { WorkbenchEditorBackgroundRuntimeV1 } from '../module-contract.ts'
 import type { WorkbenchEditorDeclarationV1 } from '../module-contract.ts'
 import type { WorkbenchResourceRouteResult, WorkbenchResourceSourceV1 } from './workbench-resource-opener.ts'
@@ -29,6 +30,8 @@ export interface WorkbenchEditorOwnerProps {
   }
   /** The Core-validated declaration for this editor instance. */
   readonly declaration?: WorkbenchEditorDeclarationV1
+  /** Use Core's shared loading surface while this inner page awaits data. */
+  renderLoading?(options?: { label?: string; compact?: boolean }): ReactNode
   setState(next: JsonValue): void
   placeConversation?(input: { workspaceId: string; agentPreset?: string; presentation?: 'start' | 'conversation' }): Promise<SessionBindingV1>
   completePreparedConversation?(input: {

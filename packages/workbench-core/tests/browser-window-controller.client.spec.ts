@@ -144,7 +144,7 @@ describe('browser Workbench handoff controller', () => {
     await vi.advanceTimersByTimeAsync(2_000)
     expect(await reclaimA).toEqual({ status: 'reclaimed' })
     expect(controller.getSnapshot().requests).toEqual([
-      { workbenchId: 'workbench-a', status: 'reclaimed', windowId: ids.get('workbench-a') },
+      { workbenchId: 'workbench-a', status: 'reclaimed', windowId: ids.get('workbench-a'), reclaimProgress: { phase: 'checking' } },
       { workbenchId: 'workbench-b', status: 'ready', windowId: ids.get('workbench-b') },
     ])
     controller.dispose()
@@ -180,6 +180,64 @@ describe('browser Workbench handoff controller', () => {
     expect(await reclaim).toEqual({ status: 'reclaimed' })
     expect(controller.getSnapshot().request).toMatchObject({ status: 'reclaimed', windowId })
     controller.dispose()
+  })
+
+  it('reports a desktop restoration failure immediately and retries the released view without forcing', async () => {
+    vi.useFakeTimers()
+    const windowId = '00000000-0000-4000-8000-000000000007'
+    let state = 'ready'
+    const rpc = { call: vi.fn(async (_channel: string, endpoint: string) => {
+      if (endpoint.endsWith('/prepare')) return { ok: true, value: {
+        status: 'prepared', windowId, expiresAt: Date.now() + 60_000,
+        url: `http://127.0.0.1:4200/workbench?token=dsh&workbench=${'T'.repeat(43)}`,
+      } }
+      if (endpoint.endsWith('/reclaim') && state !== 'reclaimed') {
+        state = 'reclaimed'
+        return { ok: true, value: { status: 'reclaim-requested' } }
+      }
+      return { ok: true, value: { status: state } }
+    }) }
+    const restoreDesktop = vi.fn().mockRejectedValueOnce(new Error('definition-refresh-failed')).mockResolvedValue(undefined)
+    const controller = createBrowserWindowController({ rpc: rpc as never, restoreDesktop })
+    try {
+      await controller.prepare('a')
+      await controller.open('a', { location: { replace() {} } } as never)
+      await vi.advanceTimersByTimeAsync(800)
+      const reclaim = controller.reclaim!('a')
+      await vi.advanceTimersByTimeAsync(2000)
+      expect(await reclaim).toEqual({ status: 'failed', code: 'definition-refresh-failed' })
+      expect(restoreDesktop).toHaveBeenCalledOnce()
+      expect(controller.getSnapshot().request?.reclaimProgress).toEqual({ phase: 'restoring', error: 'definition-refresh-failed' })
+      expect(await controller.reclaim!('a')).toEqual({ status: 'reclaimed' })
+      expect(restoreDesktop).toHaveBeenCalledTimes(2)
+      expect(rpc.call.mock.calls.filter(call => call[1].endsWith('/reclaim'))).toHaveLength(2)
+    } finally { controller.dispose() }
+  })
+
+  it('ignores a delayed old status response after preparing a new handoff', async () => {
+    vi.useFakeTimers()
+    const windowId = '00000000-0000-4000-8000-000000000008'
+    let release!: (value: unknown) => void
+    const restoreDesktop = vi.fn()
+    const rpc = { call: vi.fn(async (_channel: string, endpoint: string) => {
+      if (endpoint.endsWith('/prepare')) return { ok: true, value: {
+        status: 'prepared', windowId, expiresAt: Date.now() + 60_000,
+        url: `http://127.0.0.1:4200/workbench?token=dsh&workbench=${'T'.repeat(43)}`,
+      } }
+      if (endpoint.endsWith('/status')) return new Promise(resolve => { release = resolve })
+      return { ok: true, value: { status: 'requested' } }
+    }) }
+    const controller = createBrowserWindowController({ rpc: rpc as never, restoreDesktop })
+    try {
+      await controller.prepare('a')
+      await controller.open('a', { location: { replace() {} } } as never)
+      await vi.advanceTimersByTimeAsync(800)
+      await controller.prepare('a')
+      release({ ok: true, value: { status: 'reclaimed' } })
+      await vi.advanceTimersByTimeAsync(0)
+      expect(restoreDesktop).not.toHaveBeenCalled()
+      expect(controller.getSnapshot().request?.status).toBe('prepared')
+    } finally { controller.dispose() }
   })
 
   it('falls back to the Host launcher when Electron blocks window.open', async () => {

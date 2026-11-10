@@ -156,6 +156,18 @@ function WorkbenchCoreInnerPageView(props: WorkbenchCoreInnerPageProps): ReactNo
   const [surfaceView, setSurfaceView] = useState<'home' | 'workbench'>(() => (
     props.browserView === true || directory === undefined || directorySnapshot.openWorkbenchIds.length > 0 ? 'workbench' : 'home'
   ))
+  useEffect(() => {
+    if (!directory || props.browserView) return
+    const open = async (workbenchId: string) => {
+      if (!await beforeHomeLeave()) throw new Error('请先处理总览中尚未保存的修改。')
+      const result = await directory.openAndSelect(workbenchId)
+      if (result.status !== 'committed') throw new Error('无法打开工作台，请检查目录和保存状态。')
+      await props.modeController.enter({ workbenchId })
+      setSurfaceView('workbench')
+    }
+    directory.openInSurface = open
+    return () => { if (directory.openInSurface === open) delete directory.openInSurface }
+  }, [directory, props.browserView, props.modeController, beforeHomeLeave])
   const openSettings = useCallback((options?: WorkbenchSettingsOpenOptionsV1) => {
     if (props.browserView !== true && directory && (options?.section === 'workbenches' || options?.section === 'sharing')) {
       void (async () => {
@@ -277,6 +289,7 @@ function WorkbenchCoreInnerPageView(props: WorkbenchCoreInnerPageProps): ReactNo
       workbenchSettings={props.workbenchSettings}
       useSessions={props.useSessions} useWorkspaces={props.useWorkspaces}
       registerNavigation={registerHomeNavigation}
+      onOpenSettings={openSettings}
       registerBeforeLeave={registerHomeLeave}
       onOpenWorkbench={async workbenchId => {
         const result = await directory.openAndSelect(workbenchId)

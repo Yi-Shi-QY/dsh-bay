@@ -6,8 +6,7 @@ export function WorkbenchHomeNavigation({ section, navigate }: { section?: 'work
   return <nav className={css.navigation} aria-label="工作台总览导航">
     <div className={css.navigationPages}>
       {section ? <Button className={css.backButton} aria-label="返回总览" onClick={() => navigate()} icon={<IconChevronLeftOutlineMedium size={16} />}>总览</Button> : <button type="button" className={css.navLink} aria-current="page" onClick={() => navigate()}>全部工作台</button>}
-      <button type="button" className={css.navLink} aria-current={section === 'workbenches' ? 'page' : undefined} onClick={() => navigate({ section: 'workbenches' })}>工作台管理</button>
-      <button type="button" className={css.navLink} aria-current={section === 'sharing' ? 'page' : undefined} onClick={() => navigate({ section: 'sharing', shareMode: 'export' })}>导入与分发</button>
+      <button type="button" className={css.navLink} aria-current={section === 'sharing' ? 'page' : undefined} onClick={() => navigate({ section: 'sharing', shareMode: 'export' })}>分享与迁移</button>
     </div>
     {!section ? <Button size="sm" className={css.historyLink} icon={<IconClockOutlineMedium size={16} />} onClick={() => navigate({ section: 'sharing', shareMode: 'history' })}>导入记录</Button> : null}
   </nav>

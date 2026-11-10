@@ -1,6 +1,7 @@
 import type { WorkbenchLayoutDocument } from './model.ts'
 import { migrateOuterShellEditors, validateLayout } from './model.ts'
 import type { WorkbenchDocumentV3 } from './document-v3.ts'
+import { decodeEditorMenuPreferences, type EditorMenuPreferences } from './editor-menu-preferences.ts'
 import {
   normalizeWorkbenchDocument, migrateDocumentV2ToV3, removeRetiredWorkbenchEditors,
   validateWorkbenchDocumentV3, areasOf,
@@ -179,6 +180,10 @@ export interface WorkbenchSettingsV4 {
   /** Global visibility preference for the inner-page menu. Legacy per-workbench
    * values remain on records so older packages and readers continue to work. */
   globalHiddenEditorIds?: string[]
+  /** Profile-wide folders for the shared Area/floating inner-page picker. */
+  editorMenu?: EditorMenuPreferences
+  /** Local Profile navigation preferences; never part of a portable workbench. */
+  sidebarShortcuts?: string[]
   workbenches: Record<string, WorkbenchRecordV2>
   layoutTemplates: Record<string, WorkbenchLayoutTemplateV1>
   invalidWorkbenches: Record<string, InvalidWorkbenchRecordV1>
@@ -483,6 +488,10 @@ function decodeSettingsV4(value: unknown): WorkbenchSettingsV4 | undefined {
     || !isRecord(value.invalidWorkbenches) || !isRecord(value.sessionMarkers)) return undefined
   const globalHiddenEditorIds = decodeWorkbenchHiddenEditorIds(value.globalHiddenEditorIds)
   if (globalHiddenEditorIds === undefined) return undefined
+  const editorMenu = decodeEditorMenuPreferences(value.editorMenu)
+  if (editorMenu === undefined) return undefined
+  if (value.sidebarShortcuts !== undefined && (!Array.isArray(value.sidebarShortcuts)
+    || value.sidebarShortcuts.some(id => typeof id !== 'string' || !id))) return undefined
   const extensionConsents = decodeWorkbenchExtensionConsents(value.extensionConsents)
   if (extensionConsents === undefined) return undefined
   const toolGatewayPolicies = decodeToolGatewayPolicies(value.toolGatewayPolicies)
@@ -549,7 +558,7 @@ function decodeSettingsV4(value: unknown): WorkbenchSettingsV4 | undefined {
     const areaIds = [...new Set([...areasOf(normalizeWorkbenchDocument(document).root).map(area => area.areaId), ...Object.keys(isRecord(raw.areaDefinitions) ? raw.areaDefinitions : {})])]
     if ((raw.areaDefinitions !== undefined && (!isRecord(raw.areaDefinitions) || Object.entries(raw.areaDefinitions).some(([id, row]) => !isRecord(row) || row.areaId !== id)))
       || (raw.areaProjects !== undefined && (!isRecord(raw.areaProjects) || Object.entries(raw.areaProjects).some(([id, row]) => !areaIds.includes(id) || !isRecord(row) || typeof row.relativePath !== 'string' || !Number.isSafeInteger(row.generation) || Number(row.generation) < 1)))
-      || (raw.sessionCatalog !== undefined && (!isRecord(raw.sessionCatalog) || Object.entries(raw.sessionCatalog).some(([id, row]) => !isRecord(row) || row.sessionKey !== id || typeof row.relativePath !== 'string' || !['main', 'user', 'worker', 'subagent'].includes(String(row.role)) || (row.role !== 'main' && !areaIds.includes(String(row.areaId))))))
+      || (raw.sessionCatalog !== undefined && (!isRecord(raw.sessionCatalog) || Object.entries(raw.sessionCatalog).some(([id, row]) => !isRecord(row) || row.sessionKey !== id || typeof row.relativePath !== 'string' || !['main', 'user', 'worker', 'subagent'].includes(String(row.role)) || (row.role !== 'main' && !(row.role === 'user' && row.areaId === undefined) && !areaIds.includes(String(row.areaId))))))
       || (raw.fileWorkbench !== undefined && (!isRecord(raw.fileWorkbench) || raw.fileWorkbench.schemaVersion !== 1 || !Number.isSafeInteger(raw.fileWorkbench.revision)))
       || (raw.executionPaused !== undefined && typeof raw.executionPaused !== 'boolean')) {
       invalidWorkbenches[key] = retainedInvalid(key, raw); continue
@@ -643,6 +652,8 @@ function decodeSettingsV4(value: unknown): WorkbenchSettingsV4 | undefined {
     : globalHiddenEditorIds
   return { version: 4, activeWorkbenchId, openWorkbenchIds: open,
     globalHiddenEditorIds: migratedGlobalHiddenEditorIds,
+    ...(value.editorMenu === undefined ? {} : { editorMenu }),
+    ...(value.sidebarShortcuts === undefined ? {} : { sidebarShortcuts: [...new Set(value.sidebarShortcuts as string[])] }),
     workbenches, layoutTemplates: {}, invalidWorkbenches, sessionMarkers: decodeSessionMarkers(value.sessionMarkers),
     interactionPolicy: migrateWorkbenchInteractionPolicy(value.interactionPolicy),
     ...(backgroundAi === undefined ? {} : { backgroundAi }),

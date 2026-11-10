@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { applyWorkbenchCoreFoundation } from '../src/foundation/apply-core.ts'
 import { inject as foundationInject } from '../src/foundation/apply-core.ts'
+import { createWorkbenchModeController } from '../src/mode-controller.ts'
 import { WorkbenchCoreEntryAction } from '../src/foundation/WorkbenchCoreEntryAction.tsx'
 import { WorkbenchCoreInnerPage } from '../src/foundation/WorkbenchCoreInnerPage.tsx'
 import { inject } from '../src/client/index.ts'
@@ -54,7 +55,7 @@ function settingsScope() {
   }
 }
 
-async function bench(configForms?: unknown) {
+async function bench(configForms?: unknown, modeController?: Parameters<typeof applyWorkbenchCoreFoundation>[1]) {
   const file = await fileAuthority()
   const bind = vi.fn(() => settingsScope())
   const open = vi.fn()
@@ -101,8 +102,8 @@ async function bench(configForms?: unknown) {
     },
     settingsScope: { bind },
   }
-  applyWorkbenchCoreFoundation(ctx as never)
-  return { slots, bind, open, ctx, ...file }
+  const foundation = applyWorkbenchCoreFoundation(ctx as never, modeController)
+  return { slots, bind, open, ctx, foundation, ...file }
 }
 
 describe('Core additive browser foundation', () => {
@@ -129,6 +130,84 @@ describe('Core additive browser foundation', () => {
     expect(using).toHaveBeenCalledWith('closed-session', { source: 'controllerOperation' }, expect.any(Function))
     expect(rename).toHaveBeenCalledWith('本机标题')
     expect(b.open).not.toHaveBeenCalled()
+  })
+  async function repairBench() {
+    const mode = createWorkbenchModeController(), exit = vi.spyOn(mode, 'exit'), enter = vi.spyOn(mode, 'enter')
+    const b = await bench(undefined, mode)
+    await b.foundation.ready()
+    const rename = vi.fn(async () => ({ ok: true, value: undefined }))
+    const binding = { sessionId: 'repair-session', session: { rename } }
+    const release = vi.fn()
+    const create = vi.fn(async (options: { sessionId: string }) => options.sessionId)
+    const retain = vi.fn((id: string) => ({ sessionId: id, binding, ready: Promise.resolve(binding), release }))
+    const draft = vi.fn(() => 'applied' as 'applied' | 'blocked')
+    Object.assign(b.ctx.sessions, { create, retain })
+    Object.assign(b.ctx, { conversation: { input: { requestDraftInitialization: draft } } })
+    const page = (b.slots.entries('settings.section').at(-1)!.inject as () => WorkbenchCoreSettingsSectionProps)()
+    const target = { workbenchId: 'a', moduleId: 'old.plugin', packageName: '@local/old' }
+    const open = () => page.openCreator!('Repair old.plugin', '适配 old.plugin', target)
+    return { ...b, exit, enter, binding, rename, release, create, retain, draft, open, target }
+  }
+  it('opens a cordis repair in an independent project without adding Areas or leaving Workbench', async () => {
+    const b = await repairBench()
+    const upstream = await readFile(join(process.cwd(), 'node_modules/@deepseek-ai/dsh-web-app/presets/cordis.patch.yml'), 'utf8')
+    expect(upstream).toMatch(/^        id: cordis\r?$/mu)
+    const before = structuredClone(b.directory.getSnapshot().value.workbenches.a!.document)
+    await Promise.all([b.open(), b.open()])
+    expect(b.create).toHaveBeenCalledTimes(1)
+    const project = await b.directory.prepareCreatorRepair(b.target)
+    expect(b.create).toHaveBeenCalledWith({ workspaceId: project.workspaceId, agentPreset: 'cordis', sessionId: project.sessionId })
+    expect(b.rename).toHaveBeenCalledWith('适配 old.plugin')
+    expect(b.draft).toHaveBeenCalledWith(b.binding, { prompt: expect.stringContaining(project.relativePath), whenDraftExists: 'keep' })
+    expect(b.draft.mock.calls[0]?.[1].prompt).toContain('不包含插件源码')
+    expect(b.directory.getSnapshot().value.workbenches.a!.document).toEqual(before)
+    expect(b.directory.getSnapshot().value.workbenches.a!.areaProjects).toEqual({})
+    expect(b.directory.getSnapshot().value.workbenches.a!.sessionCatalog?.[project.sessionKey]).toMatchObject({ role: 'user', relativePath: project.relativePath, agentPreset: 'cordis' })
+    expect(b.directory.getSnapshot().value.workbenches.a!.sessionCatalog?.[project.sessionKey]?.areaId).toBeUndefined()
+    expect(b.foundation.floatingRuntime.find(project.sessionKey, 'a')?.tab).toMatchObject({
+      editorId: 'workbench.conversation', lastKnownTitle: '适配 old.plugin', binding: { sessionId: project.sessionId, workspaceId: project.workspaceId },
+    })
+    expect(b.foundation.floatingRuntime.workspace('a')).toMatchObject({ activeId: project.sessionKey, expanded: true })
+    await b.open()
+    expect(b.create).toHaveBeenCalledTimes(1)
+    expect(b.draft).toHaveBeenCalledTimes(1)
+    expect(b.exit).not.toHaveBeenCalled()
+    expect(b.enter).toHaveBeenCalledWith({ workbenchId: 'a' })
+    expect(b.ctx.sessions.open).not.toHaveBeenCalled()
+    await b.foundation.floatingRuntime.close(project.sessionKey, 'a')
+    await b.open()
+    expect(b.create).toHaveBeenCalledTimes(1)
+    expect(b.draft).toHaveBeenCalledTimes(1)
+    expect(b.retain).toHaveBeenLastCalledWith(project.sessionId, { source: 'workbenchFloatingCreator' })
+    const pinned = b.foundation.floatingRuntime.find(project.sessionKey, 'a')!
+    pinned.location = 'area'
+    await b.open()
+    expect(pinned.location).toBe('area')
+    expect([...b.foundation.floatingRuntime.instances.values()].filter(row => row.location === 'floating')).toHaveLength(1)
+    expect(b.create).toHaveBeenCalledTimes(1)
+  })
+  it('retries failed creation with the reserved identity and unchanged layout', async () => {
+    const b = await repairBench()
+    b.create.mockRejectedValueOnce(new Error('preset temporarily unavailable'))
+    await expect(b.open()).rejects.toThrow('preset temporarily unavailable')
+    await b.open()
+    expect(b.create).toHaveBeenCalledTimes(2)
+    expect(b.create.mock.calls[0]).toEqual(b.create.mock.calls[1])
+    expect(Object.keys(b.directory.getSnapshot().value.workbenches.a!.sessionCatalog!)).toHaveLength(1)
+  })
+  it('retains registration and retries the same blank conversation after draft initialization fails', async () => {
+    const b = await repairBench()
+    b.draft.mockReturnValueOnce('blocked')
+    await expect(b.open()).rejects.toThrow('输入区')
+    const project = await b.directory.prepareCreatorRepair(b.target)
+    expect(project.registered).toBe(true)
+    expect(b.release).toHaveBeenCalledTimes(1)
+    expect(b.foundation.floatingRuntime.find(project.sessionKey, 'a')).toBeUndefined()
+    b.ctx.sessions.list.getSnapshot = () => ({ byId: { [project.sessionId]: { blank: true } }, ids: [], current: undefined }) as never
+    await b.open()
+    expect(b.create).toHaveBeenCalledTimes(1)
+    expect(b.draft).toHaveBeenCalledTimes(2)
+    expect(b.foundation.floatingRuntime.find(project.sessionKey, 'a')).toBeDefined()
   })
   it('declares only the official services it reads', () => {
     expect(inject).toEqual([

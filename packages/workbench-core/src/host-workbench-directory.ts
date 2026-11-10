@@ -8,11 +8,11 @@ import { areasOf, validateWorkbenchDocumentV3 } from './foundation/document-v3.t
 import type { WorkbenchRecordV2, WorkbenchSettingsV4 } from './foundation/persistence.ts'
 import { renderWorkbenchContextMarkdown, renderAreaContextMarkdown, workbenchContextOf, areaContextOf } from './foundation/workbench-context.ts'
 import { portableRelativePath, resolvePortablePath } from './host-native-session-portability.ts'
-import type { DirectoryPatch, FileWorkbenchSnapshot, FileWorkbenchV1, WorkbenchSessionEntryV1 } from './workbench-directory-contract.ts'
+import type { CreatorRepairProjectV1, CreatorRepairTargetV1, DirectoryPatch, FileWorkbenchSnapshot, FileWorkbenchV1, WorkbenchSessionEntryV1 } from './workbench-directory-contract.ts'
 import { acquireFileLock } from './host-file-lock.ts'
 import { workbenchAreas, showWorkbenchArea, validateWorkbenchRelations } from './foundation/area-identity.ts'
 
-interface Registration { rootPath: string; workspaces: Record<string, string>; sessions: Record<string, string>; sessionRequests?: Record<string, { areaId: string; relativePath: string; agentPreset: string; sessionId: string }> }
+interface Registration { rootPath: string; workspaces: Record<string, string>; sessions: Record<string, string>; creatorRepairs?: Record<string, string>; sessionRequests?: Record<string, { areaId: string; relativePath: string; agentPreset: string; sessionId: string }> }
 interface Registry {
   schemaVersion: 1
   revision: number
@@ -187,7 +187,7 @@ export class HostWorkbenchDirectory {
       }
     }
     for (const entry of Object.values(next.sessionCatalog ?? {})) {
-      if (entry.role !== 'main' && (!entry.areaId || !next.areaDefinitions[entry.areaId])) throw new Error('对话所属区域缺失，无法保存工作台。')
+      if (entry.role !== 'main' && (entry.areaId ? !next.areaDefinitions[entry.areaId] : entry.role !== 'user')) throw new Error('对话所属区域缺失，无法保存工作台。')
     }
     return next
   }
@@ -332,6 +332,30 @@ export class HostWorkbenchDirectory {
       registry.revision++
       this.commit(registry, [{ file: filename(registration.rootPath), value: envelope }]); this.records.set(input.workbenchId, envelope); this.publish()
       return { status: 'committed' as const, revision: registry.revision }
+    })
+  }
+  /** A repair project belongs to the workbench, independently of its Areas. */
+  async prepareCreatorRepair(input: CreatorRepairTargetV1): Promise<CreatorRepairProjectV1> {
+    return this.serial(async () => {
+      const record = this.snapshot.value.workbenches[input.workbenchId]
+      if (!record || record.archivedAt !== undefined) throw new Error('请先打开一个可用的工作台。')
+      if (!input.moduleId.trim() || input.moduleId.length > 512 || (input.packageName?.length ?? 0) > 512) throw new Error('插件身份无效。')
+      const identity = createHash('sha256').update(JSON.stringify([input.packageName ?? '', input.moduleId])).digest('hex').slice(0, 20)
+      const sessionKey = 'creator-repair:' + identity
+      const entry = record.sessionCatalog?.[sessionKey]
+      const slug = input.moduleId.normalize('NFKC').replace(/[^a-zA-Z0-9_-]+/gu, '-').slice(0, 64) || 'extension'
+      const relativePath = entry?.relativePath ?? `repairs/${slug}-${identity}`
+      const resolved = await this.resolveDirectory(input.workbenchId, relativePath, !entry)
+      const registry = clone(this.registry), registration = registry.registrations[input.workbenchId]!
+      const workspaceId = (await this.workspaces.create(resolved)).id
+      const existingSession = registration.sessions[sessionKey]
+      const sessionId = existingSession ?? registration.creatorRepairs?.[sessionKey] ?? randomUUID()
+      registration.workspaces[relativePath] = workspaceId
+      registration.creatorRepairs ??= {}; registration.creatorRepairs[sessionKey] = sessionId
+      if (!isDeepStrictEqual(registration, this.registry.registrations[input.workbenchId])) {
+        registry.revision++; this.commit(registry, []); this.publish()
+      }
+      return { workspaceId, relativePath, sessionKey, sessionId, registered: !!existingSession }
     })
   }
   workspaceId(id: string, areaId?: string): string {

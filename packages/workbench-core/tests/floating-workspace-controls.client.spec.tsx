@@ -34,8 +34,82 @@ function setup(bayAgent?: ComponentProps<typeof WorkbenchFloatingWorkspace>['bay
     editors={[{ id: 'workbench.conversation', scope: 'session', label: '对话', icon: 'message' }]} hidden={[]} extensionAccess={{} as never} frame={frame} layout={layout} policy={policy} commit={() => true} pin={pin}
     sessionMarkers={{ project: { first: { label: 'A', accentToken: 'accent-1', customized: false }, second: { label: 'B', accentToken: 'accent-2', customized: false } } }} />
   const view = render(content(), { container: canvas.appendChild(document.createElement('div')) })
-  return { runtime, pin, header, body, canvas, view, selectArea: (sessionId?: string) => view.rerender(content(sessionId ? { workspaceId: 'project', sessionId } : undefined)) }
+  return { runtime, pin, header, body, area, canvas, view, layout, selectArea: (sessionId?: string) => view.rerender(content(sessionId ? { workspaceId: 'project', sessionId } : undefined)) }
 }
+
+const openPlacement = () => {
+  fireEvent.click(screen.getByRole('button', { name: '浮动工作区菜单' }))
+  fireEvent.click(screen.getByRole('button', { name: '放入区域' }))
+}
+
+it('previews the chosen area and split without moving until confirmed', async () => {
+  const { layout, selectArea, pin, runtime, area } = setup()
+  vi.spyOn(area, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 900, 700))
+  layout.root = { kind: 'split', id: 'split', axis: 'horizontal', ratio: .35, first: layout.root,
+    second: { kind: 'group', id: 'other', tabs: [] } }
+  selectArea()
+  openPlacement()
+  expect(screen.getByRole('dialog', { name: '放入区域' })).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: '区域 2：空区域' }))
+  fireEvent.click(screen.getByRole('button', { name: '下方分屏' }))
+  expect(document.querySelector('[data-placement-area=other] [data-placement-edge=bottom]')).toBeTruthy()
+  expect(pin).not.toHaveBeenCalled()
+  fireEvent.change(screen.getByRole('combobox', { name: '目标区域' }), { target: { value: 'target' } })
+  fireEvent.click(screen.getByRole('button', { name: '右侧分屏' }))
+  expect(document.querySelector('[data-placement-area=target] [data-placement-edge=right]')).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: '确认放入' }))
+  await waitFor(() => expect(pin).toHaveBeenCalledWith(expect.objectContaining({ id: 'second' }), 'target', 'right'))
+  expect(pin).toHaveBeenCalledTimes(1)
+  expect(runtime.find('second', 'one')?.location).toBe('area')
+})
+
+it('explains blocked joining but permits a new split for a different project, and preserves content on transfer failure', async () => {
+  const { layout, selectArea, area, pin, runtime } = setup()
+  if (layout.root.kind !== 'group') throw new Error('fixture')
+  layout.root.project = { relativePath: 'projects/other', generation: 1, workspaceId: 'other' }
+  vi.spyOn(area, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 900, 300))
+  selectArea()
+  openPlacement()
+  expect(screen.getByRole('status').textContent).toContain('来自另一个项目')
+  expect(screen.getByRole('button', { name: '确认放入' }).hasAttribute('disabled')).toBe(true)
+  fireEvent.click(screen.getByRole('button', { name: '上方分屏' }))
+  expect(screen.getByRole('status').textContent).toContain('空间不足')
+  fireEvent.click(screen.getByRole('button', { name: '右侧分屏' }))
+  expect(screen.getByRole('button', { name: '确认放入' }).hasAttribute('disabled')).toBe(false)
+  pin.mockResolvedValueOnce(false)
+  fireEvent.click(screen.getByRole('button', { name: '确认放入' }))
+  await waitFor(() => expect(screen.getByRole('status').textContent).toContain('未能放入区域'))
+  expect(runtime.find('second', 'one')?.location).toBe('floating')
+})
+
+it('cancels preview and invalidates a removed destination instead of silently moving elsewhere', () => {
+  const { layout, selectArea, pin, runtime } = setup()
+  openPlacement()
+  fireEvent.click(screen.getByRole('button', { name: '取消' }))
+  expect(screen.queryByRole('dialog', { name: '放入区域' })).toBeNull()
+  expect(pin).not.toHaveBeenCalled()
+  openPlacement()
+  layout.root = { kind: 'group', id: 'replacement', tabs: [] }
+  selectArea()
+  expect(screen.getByRole('status').textContent).toContain('目标区域已关闭')
+  expect(screen.getByRole('button', { name: '确认放入' }).hasAttribute('disabled')).toBe(true)
+  fireEvent.keyDown(screen.getByRole('combobox', { name: '目标区域' }), { key: 'Escape' })
+  expect(screen.queryByRole('dialog', { name: '放入区域' })).toBeNull()
+  expect(pin).not.toHaveBeenCalled()
+  expect(runtime.find('second', 'one')?.location).toBe('floating')
+})
+
+it('revalidates the rendered area size when confirming a previously available split', () => {
+  const { area, pin } = setup()
+  const bounds = vi.spyOn(area, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 900, 700))
+  openPlacement()
+  fireEvent.click(screen.getByRole('button', { name: '左侧分屏' }))
+  expect(screen.getByRole('button', { name: '确认放入' }).hasAttribute('disabled')).toBe(false)
+  bounds.mockReturnValue(new DOMRect(0, 0, 400, 300))
+  fireEvent.click(screen.getByRole('button', { name: '确认放入' }))
+  expect(pin).not.toHaveBeenCalled()
+  expect(screen.getByRole('button', { name: '确认放入' }).hasAttribute('disabled')).toBe(true)
+})
 
 it('uses shared conversation states for Bay Agent and floating duplicates, keeping identity and unread separate', async () => {
   let states: ReadonlyMap<string, ConversationTabStatus> = new Map([['main-one', { status: 'attention', label: '等待审批' }]])
@@ -190,6 +264,37 @@ it('keeps Bay Agent in the existing floating workspace with no binding, close or
   expect(screen.getByRole('button', { name: '选择来源对话' }).hasAttribute('disabled')).toBe(true)
   expect(screen.getByRole('button', { name: '放入区域' }).hasAttribute('disabled')).toBe(true)
   expect(pin).not.toHaveBeenCalled()
+})
+
+it.each([true, false])('toggles the persistent Bay Agent tab without collapsing the floating workspace (other tabs: %s)', async hasOtherTabs => {
+  const snapshot = { workbenchId: 'one', bayAgentSessionId: 'main-one', areas: [], workItems: [], assignments: [], attention: [] }
+  const ensureMainSession = vi.fn(async () => 'main-one')
+  const controller = { subscribe: () => () => {}, getSnapshot: () => snapshot, ensureMainSession } as unknown as NonNullable<ComponentProps<typeof WorkbenchFloatingWorkspace>['bayAgent']>
+  const { runtime } = setup(controller)
+  if (!hasOtherTabs) act(() => { runtime.forget('first', 'one'); runtime.forget('second', 'one') })
+
+  const reveal = screen.getByRole('button', { name: '唤出 Bay Agent' })
+  expect(reveal.getAttribute('aria-pressed')).toBe('false')
+  fireEvent.click(reveal)
+  await waitFor(() => expect(screen.getByRole('button', { name: '收回 Bay Agent' }).getAttribute('aria-pressed')).toBe('true'))
+  expect(runtime.find('bay-agent-main', 'one')?.tab.sessionId).toBe('main-one')
+
+  fireEvent.click(screen.getByRole('button', { name: '收回 Bay Agent' }))
+  await waitFor(() => expect(screen.queryByRole('tab', { name: /Bay Agent/ })).toBeNull())
+  expect(runtime.find('bay-agent-main', 'one')).toBeUndefined()
+  expect(ensureMainSession).toHaveBeenCalledTimes(1)
+  expect(runtime.workspace('one').expanded).toBe(true)
+  expect(screen.getByRole('region', { name: '浮动工作区' })).toBeTruthy()
+  expect(screen.queryByRole('button', { name: '展开浮动工作区' })).toBeNull()
+  if (hasOtherTabs) expect(screen.getAllByRole('tab')).toHaveLength(2)
+  else {
+    expect(screen.queryAllByRole('tab')).toHaveLength(0)
+    expect(screen.getByRole('button', { name: '添加内页' })).toBeTruthy()
+  }
+
+  fireEvent.click(screen.getByRole('button', { name: '唤出 Bay Agent' }))
+  await waitFor(() => expect(runtime.find('bay-agent-main', 'one')?.tab.sessionId).toBe('main-one'))
+  expect(ensureMainSession).toHaveBeenCalledTimes(2)
 })
 
 it('shows recoverable Main creation errors without replacing the floating workspace', async () => {

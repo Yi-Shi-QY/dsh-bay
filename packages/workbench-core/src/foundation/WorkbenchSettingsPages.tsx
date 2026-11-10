@@ -15,6 +15,8 @@ import { DEFAULT_WORKBENCH_CONVERSATION_INTERACTION_POLICY, normalizeWorkbenchCo
 import type { WorkbenchConversationResourcePlacementV1 } from '../workbench-interaction-policy.ts'
 import css from './WorkbenchSettings.module.css'
 import { WorkbenchBackgroundAiSettings } from './WorkbenchBackgroundAiSettings.tsx'
+import { WorkbenchEditorFolders, WorkbenchEditorFolderSelect } from './WorkbenchEditorFolders.tsx'
+import { editorMenuFolder, isBuiltinEditor } from './editor-menu-preferences.ts'
 
 export interface PendingSettingsForm { save(): Promise<boolean>; discard(): void }
 export type SettingsPageProps = WorkbenchCoreSettingsSectionProps & {
@@ -25,6 +27,7 @@ export type SettingsPageProps = WorkbenchCoreSettingsSectionProps & {
   memory: SettingsViewMemory
   navigate(options: WorkbenchSettingsOpenOptionsV1): void
   onDirty(form: PendingSettingsForm | undefined): void
+  onBackToOverview?(): void
 }
 export function useSettingsAction(messages = { busy: '正在保存…', success: '已保存' }) {
   const [states, setStates] = useState<Record<string, { busy: boolean; message: string; error: boolean }>>({})
@@ -110,8 +113,8 @@ export function WorkbenchManagementPage(props: SettingsPageProps) {
       {filtered.length === 0 ? <div className={css.empty}>没有符合条件的工作台。</div> : null}
       {Object.values(props.value?.invalidWorkbenches ?? {}).length ? <details open={props.openOptions?.workbenchId !== undefined && props.value?.invalidWorkbenches[props.openOptions.workbenchId] !== undefined ? true : undefined}><summary>无法解析的历史布局</summary>{Object.values(props.value!.invalidWorkbenches).map(row => <div key={row.workbenchId}><strong>{row.name}</strong><p>布局尚未检查，原始记录已保留。</p><button className={css.secondaryButton} onClick={() => downloadSettingsFile(`${row.name}-诊断.json`, JSON.stringify(row.rawRecord, null, 2), 'application/json')}>导出原始诊断配置</button></div>)}</details> : null}
     </> : <>
-      {!browser ? <button className={css.backButton} onClick={() => select()}>‹ 返回工作台列表</button> : null}
-      <WorkbenchDetails key={selected.workbenchId} {...props} record={selected} onDirty={reportDirty} onRemoved={() => select()} action={actions} />
+      {!browser ? <button className={css.backButton} onClick={() => props.onBackToOverview ? props.onBackToOverview() : select()}>‹ 返回工作台列表</button> : null}
+      <WorkbenchDetails key={selected.workbenchId} {...props} record={selected} onDirty={reportDirty} onRemoved={() => props.onBackToOverview ? props.onBackToOverview() : select()} action={actions} />
     </>}
     {pendingSelection ? <UnsavedFormPrompt form={pendingForm.current!} onContinue={() => setPendingSelection(undefined)} onLeave={() => { const next = pendingSelection; setPendingSelection(undefined); next() }} /> : null}
     {directory ? null : <p role="alert">工作台管理服务暂不可用，请恢复连接后重试。</p>}
@@ -268,7 +271,7 @@ function SettingsSwitch({ label, checked, disabled, onChange }: {
 function InnerPageSettingsCard({ editor, props }: { editor: WorkbenchEditorCatalogRow; props: SettingsPageProps }) {
   const browser = props.settingsContext?.mode === 'browser-workbench'
   const actions = useSettingsAction()
-  const builtin = editor.id.startsWith('workbench.')
+  const builtin = isBuiltinEditor(editor.id)
   return <article className={css.catalogCard} data-page-kind={builtin ? 'builtin' : 'extension'}>
     <div className={css.catalogCardHeader}><PageIcon editor={editor} /><div className={css.catalogIdentity}>
       <strong>{editor.label}</strong><p><BindingRequirement editor={editor} /></p>
@@ -280,6 +283,7 @@ function InnerPageSettingsCard({ editor, props }: { editor: WorkbenchEditorCatal
         onChange={visible => void actions.run('entry', () => props.workbenchDirectory!.setGlobalEditorVisible!(editor.id, visible))} />
     </div> : null}
     {actions.feedback('entry')}
+    {!browser && !builtin && !editor.resourceOnly ? <WorkbenchEditorFolderSelect editorId={editor.id} label={editor.label} preferences={props.value?.editorMenu} directory={props.workbenchDirectory} writable={props.settingsWritable === true} /> : null}
     <details className={css.cardDetails}><summary>用途与声明详情</summary><p>{editor.declaration?.label ?? editor.label}</p>
       <p>内页标识：{editor.id}</p><p>状态分享：{editor.portability?.exportState ? '通过已声明处理器迁移' : '仅分享内页引用'}</p>
     </details>
@@ -290,6 +294,7 @@ function ExtensionSettingsCard({ extension, props, inventoryReady }: { extension
   const browser = props.settingsContext?.mode === 'browser-workbench'
   const actions = useSettingsAction()
   const [confirmRevoke, setConfirmRevoke] = useState(false)
+  const repairActions = useSettingsAction({ busy: '正在准备修复目录与创造模式会话…', success: '修复会话已打开' })
   const editors = props.editors.filter(editor => extension.editorIds.includes(editor.id))
   const leadEditor = editors[0] ?? { id: extension.editorIds[0] ?? extension.moduleId, scope: 'session' as const, label: extension.moduleId }
   const consent = props.value?.extensionConsents?.[extension.key]
@@ -320,19 +325,35 @@ function ExtensionSettingsCard({ extension, props, inventoryReady }: { extension
         onChange={allowed => { if (!allowed && count > 0) setConfirmRevoke(true); else void commit(allowed) }} />
     </div> : null}
     {extension.availability !== 'ready' ? <p className={css.cardHint}>{extension.detail}</p> : null}
-    {!browser && extension.availability === 'incompatible' && props.openCreator ? <div className={css.noticeActions}>
-      <button type="button" className={css.secondaryButton} disabled={actions.states.creator?.busy}
-        onClick={() => void actions.run('creator', () => props.openCreator!(creatorRepairPrompt(extension)))}>
-        <IconAgentPresetOutlineMedium size={16} />
-        在创造模式中修复
-      </button>
-    </div> : null}
+    {!browser && extension.availability === 'incompatible' && props.openCreator ? <>
+      <div className={css.noticeActions}>
+        <button type="button" className={css.secondaryButton} disabled={repairActions.states.creator?.busy}
+          onClick={() => void repairActions.run('creator', async () => {
+            const workbenchId = props.value?.activeWorkbenchId
+            if (!workbenchId) throw new Error('请先打开一个工作台，再启动插件修复。')
+            await props.openCreator!(creatorRepairPrompt(extension), '适配 ' + extension.moduleId, {
+              workbenchId, moduleId: extension.moduleId,
+              ...(extension.packageName === undefined ? {} : { packageName: extension.packageName }),
+            })
+            props.close()
+          })}>
+          <IconAgentPresetOutlineMedium size={16} />
+          {repairActions.states.creator?.busy ? '正在打开创造模式…' : '在创造模式中修复'}
+        </button>
+      </div>
+      <p className={css.cardHint}>在工作台内准备独立修复目录，并在浮动工作区打开会话。修复说明预填后由你发送。</p>
+      {repairActions.feedback('creator')}
+    </> : null}
     {confirmRevoke ? <div className={css.notice} role="group" aria-label="确认停用扩展">
       <p>停用将影响 {affected.length} 个工作台中的 {count} 个内页，布局引用会保留。</p>
       <div className={css.noticeActions}><button className={css.dangerButton} disabled={actions.states.permission?.busy} onClick={() => void commit(false)}>确认停用</button>
         <button className={css.secondaryButton} disabled={actions.states.permission?.busy} onClick={() => setConfirmRevoke(false)}>取消</button></div>
     </div> : null}
     {actions.feedback('permission')}
+    {!browser ? extension.editorIds.filter(id => !editors.find(editor => editor.id === id)?.resourceOnly).map(id => <div key={id} className={css.extensionFolderRow}>
+      {extension.editorIds.length > 1 ? <span>{editors.find(editor => editor.id === id)?.label ?? id}</span> : null}
+      <WorkbenchEditorFolderSelect editorId={id} label={editors.find(editor => editor.id === id)?.label ?? id} preferences={props.value?.editorMenu} directory={props.workbenchDirectory} writable={props.settingsWritable === true} />
+    </div>) : null}
     <details className={css.cardDetails}><summary>内页与权限详情</summary>
       <p>此开关允许扩展向工作台提供内页。安装、更新与 DSH 中的运行状态由 DSH 插件管理控制。</p>
       <p>{affected.length} 个工作台中引用 {count} 次</p>
@@ -366,11 +387,11 @@ export function InnerPagesSettingsPage(props: SettingsPageProps) {
   const normalizedQuery = query.trim().toLocaleLowerCase()
   const matches = (values: (string | undefined)[]) => values.filter(Boolean).join(' ').toLocaleLowerCase().includes(normalizedQuery)
   const pages = props.editors.filter(editor => !extensionIds.has(editor.id) && (!browser || used.has(editor.scope + ':' + editor.id)))
-    .filter(editor => matches([editor.label, editor.declaration?.label, editor.id])
-      && (browser || filter === 'all' || (filter === 'builtin' && editor.id.startsWith('workbench.')) || (filter === 'extension' && !editor.id.startsWith('workbench.'))))
+    .filter(editor => matches([editor.label, editor.declaration?.label, editor.id, editorMenuFolder(editor, props.value?.editorMenu).name])
+      && (browser || filter === 'all' || (filter === 'builtin' && isBuiltinEditor(editor.id)) || (filter === 'extension' && !isBuiltinEditor(editor.id))))
   const extensions = access.extensions.filter(extension => !browser || extension.editorIds.some(id => usedIds.has(id)))
     .filter(extension => matches([extension.packageName, extension.packageVersion, extension.moduleId, extension.detail, extensionAvailabilityLabel(extension),
-      ...extension.editorIds, ...props.editors.filter(editor => extension.editorIds.includes(editor.id)).map(editor => editor.label)])
+      ...extension.editorIds, ...extension.editorIds.map(id => props.value?.editorMenu?.folders.find(folder => folder.id === props.value?.editorMenu?.assignments[id])?.name), ...props.editors.filter(editor => extension.editorIds.includes(editor.id)).map(editor => editor.label)])
       && (browser || filter === 'all' || filter === 'extension' || (filter === 'attention' && (extension.availability !== 'ready' || !extension.allowed))))
   return <section className={css.page + ' ' + css.innerPagesPage} data-workbench-settings-page="inner-pages">
     <header className={css.pageHeader}><div><h3>{browser ? '使用中的内页' : '内页与扩展'}</h3><p>{browser ? '查看当前工作台使用的内页。' : '管理添加入口，在卡片上直接启用扩展。'}</p></div>
@@ -379,6 +400,7 @@ export function InnerPagesSettingsPage(props: SettingsPageProps) {
         await props.nativePluginNavigation.open()
       })}><IconSettingsOutlineMedium size={16} /> DSH 插件管理</button> : null}</header>
     {actions.feedback('plugins')}
+    {!browser ? <WorkbenchEditorFolders preferences={props.value?.editorMenu} directory={props.workbenchDirectory} writable={props.settingsWritable === true} /> : null}
     <div className={css.settingsToolbar}>
       <label className={css.search}><IconSearchOutlineRegular aria-hidden="true" /><input type="search" aria-label="搜索内页与扩展" placeholder="搜索名称、扩展或状态"
         value={query} onChange={event => { setQuery(event.target.value); props.memory.searches.pages = event.target.value }} /></label>

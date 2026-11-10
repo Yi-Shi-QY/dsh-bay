@@ -22,7 +22,7 @@ const WORKBENCH_ROUTES = new Set([
   '/api/workbench/directory/v1', '/api/workbench/bay-agent', '/api/workbench/bay-agent/draft', '/api/workbench/access/v1',
   '/api/workbench/complete/v5', '/api/workbench/complete/v5/upload', '/api/workbench/complete/v5/download',
 ])
-const VIEW_ACTIONS = new Set(['opened', 'ready', 'failed', 'status', 'heartbeat', 'metrics', 'attach', 'suspend', 'reclaim', 'reclaimed', 'floating-read', 'floating-stage'])
+const VIEW_ACTIONS = new Set(['opened', 'ready', 'failed', 'status', 'heartbeat', 'watch-reclaim', 'reclaim-progress', 'metrics', 'attach', 'suspend', 'reclaim', 'reclaimed', 'floating-read', 'floating-stage'])
 const SHARE_ACTIONS = new Set(['start', 'stop', 'status', 'presence', 'guest-rename', 'guest-kick', 'reduce'])
 const BOOT_READS = new Set(['/api/session/list', '/api/session/search', '/api/session/modelCatalog', '/api/session/page', '/api/session/projections', '/api/session/state', '/api/session/attachment', '/api/agentPresets/list'])
 const BOOT_STREAMS = new Set(['$events', 'remoteAccess/follow', 'session/control', 'session/follow', 'session/observeEvent', 'session/observeState', 'session/observeProjections', 'workspace/follow'])

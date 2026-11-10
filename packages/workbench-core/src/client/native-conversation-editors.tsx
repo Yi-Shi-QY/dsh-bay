@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { WorkbenchPageLoading, WorkbenchPageTransition } from '../foundation/WorkbenchPageLoading.tsx'
 import type { Context } from '@deepseek-ai/cordis'
 import type { SessionReference } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
@@ -296,10 +297,7 @@ export function createWorkbenchNativeConversationEditors(ctx: Context) {
       aria-busy={placement.phase === 'placing' || undefined}
       style={{ display: 'flex', minHeight: 0, height: '100%', flexDirection: 'column' }}
     >
-      {content}
-      {placement.phase === 'placing' ? <p role="status" aria-live="polite" style={{ margin: 0, padding: '8px 12px', color: 'var(--dsw-alias-label-secondary, currentColor)' }}>
-        {'\u6b63\u5728\u51c6\u5907\u5de5\u4f5c\u533a\u5bf9\u8bdd\u2026'}
-      </p> : null}
+      <WorkbenchPageTransition loading={placement.phase === 'placing'} label="对话" icon="message">{content}</WorkbenchPageTransition>
       {placement.phase === 'failed' ? <p role="alert" style={{ margin: 0, padding: '8px 12px', color: 'var(--dsw-alias-state-error-primary, #b42318)' }}>
         {placement.message}
       </p> : null}
@@ -357,14 +355,13 @@ export function createWorkbenchNativeConversationEditors(ctx: Context) {
     return <section
       data-workbench-native-start
       data-workbench-prepared-session={owner.sessionId}
+      data-workbench-session-id={owner.sessionId}
+      data-workbench-conversation-ready={presentation.phase !== 'settling'}
       data-workbench-placement-state={placement.phase}
       aria-busy={placement.phase === 'placing' || undefined}
       style={{ display: 'flex', minHeight: 0, height: '100%', flexDirection: 'column' }}
     >
-      {content}
-      {placement.phase === 'placing' ? <p role="status" aria-live="polite" style={{ margin: 0, padding: '8px 12px', color: 'var(--dsw-alias-label-secondary, currentColor)' }}>
-        {'\u6b63\u5728\u51c6\u5907\u5de5\u4f5c\u533a\u5bf9\u8bdd\u2026'}
-      </p> : null}
+      <WorkbenchPageTransition loading={placement.phase === 'placing' || presentation.phase === 'settling'} label="对话" icon="message">{content}</WorkbenchPageTransition>
       {placement.phase === 'failed' ? <p role="alert" style={{ margin: 0, padding: '8px 12px', color: 'var(--dsw-alias-state-error-primary, #b42318)' }}>
         {placement.message}
       </p> : null}
@@ -464,7 +461,7 @@ export function createWorkbenchNativeConversationEditors(ctx: Context) {
 
     if (owner.sessionId !== undefined) {
       if (retained?.sessionId !== owner.sessionId || retained.areaClaim !== owner.areaClaim) {
-        return <p role="status">{'\u6b63\u5728\u8fde\u63a5 DSH \u539f\u751f\u5bf9\u8bdd\u2026'}</p>
+        return <WorkbenchPageLoading label="对话" icon="message" />
       }
       if (retained.failed || retained.reference === undefined) {
         return <p role="alert">{'\u5f53\u524d\u5bf9\u8bdd\u6682\u65f6\u65e0\u6cd5\u8fde\u63a5\uff0c\u8bf7\u91cd\u65b0\u8fdb\u5165\u6b64\u5de5\u4f5c\u53f0\u3002'}</p>
@@ -515,9 +512,9 @@ export function createWorkbenchNativeConversationEditors(ctx: Context) {
       ? <SessionProvider session={reference}>{content}</SessionProvider>
       : <>{header}{content}</>
     const scopeRef = useRef<HTMLDivElement>(null)
-    return <div ref={scopeRef} data-workbench-native-conversation={view} style={{ display: 'flex', minHeight: 0, height: '100%', flexDirection: 'column' }}>
+    return <div ref={scopeRef} data-workbench-native-conversation={view} data-workbench-session-id={owner.sessionId} data-workbench-conversation-ready={presentation.phase !== 'settling'} style={{ display: 'flex', minHeight: 0, height: '100%', flexDirection: 'column' }}>
       {view === 'chat' ? <SharePresenceBar ctx={ctx} owner={owner} binding={reference.binding} scopeRef={scopeRef} /> : null}
-      {renderedContent}
+      <WorkbenchPageTransition loading={presentation.phase === 'settling'} label={view === 'trajectory' ? '轨迹' : owner.instanceId === 'bay-agent-main' ? 'Bay Agent' : '对话'} icon={view === 'trajectory' ? 'trajectory' : 'message'}>{renderedContent}</WorkbenchPageTransition>
     </div>
   }
 
@@ -584,7 +581,7 @@ export function createWorkbenchNativeConversationEditors(ctx: Context) {
       }), [ctx, onInspectCall, owner.areaId, owner.instanceId, onOpenResource, owner.sessionId, reference])
     useNativeRendererLifetime(nativeRenderer)
     if (error) return <div role="alert"><p>暂时无法连接此对话：{error}</p><button type="button" onClick={() => setRetry(value => value + 1)}>重新连接对话</button></div>
-    if (!reference) return <p role="status">正在连接 DSH 原生对话…</p>
+    if (!reference) return <WorkbenchPageLoading label={view === 'trajectory' ? '轨迹' : owner.instanceId === 'bay-agent-main' ? 'Bay Agent' : '对话'} icon={view === 'trajectory' ? 'trajectory' : 'message'} />
     return <Content owner={owner} reference={reference} view={view} nativeRenderer={nativeRenderer} />
   }
 

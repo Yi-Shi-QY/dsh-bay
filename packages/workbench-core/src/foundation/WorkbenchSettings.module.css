@@ -269,6 +269,8 @@
 .extensionPageRow { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px 12px; font-size: 12px; }
 .extensionPageRow > span:first-child { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .extensionPageRow .feedback { flex-basis: 100%; }
+.extensionFolderRow { display: grid; gap: 6px; min-width: 0; }
+.extensionFolderRow > span { color: var(--dsw-alias-label-secondary, #69707b); font-size: 11px; }
 .catalogCard .notice { padding: 10px; border-radius: 8px; font-size: 12px; }
 .catalogCard .notice button { min-height: 30px; padding-inline: 10px; font-size: 12px; }
 .cardHint, .settingsFootnote { font-size: 12px; line-height: 18px; }

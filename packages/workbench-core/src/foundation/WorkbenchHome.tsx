@@ -9,7 +9,9 @@ import type { WorkbenchWindowControllerV1 } from '../client/workbench-window-con
 import { useSettingsAction } from './WorkbenchSettingsPages.tsx'
 import type { WorkbenchDirectory } from './frame-settings-adapter.ts'
 import type { WorkbenchEditorCatalogRow } from './catalog.ts'
-import { WorkbenchHomeCard } from './WorkbenchHomeCard.tsx'
+import { WorkbenchOverviewDetail } from './WorkbenchOverviewDetail.tsx'
+import type { WorkbenchSettingsV4 } from './persistence.ts'
+import { IconPinOutlineMedium, Menu, IconEllipsisOutlineMedium } from '@deepseek-ai/dsh-client-ui-primitives'
 import { WorkbenchCreateDialog } from './WorkbenchCreateDialog.tsx'
 import { WorkbenchCreateMenu } from './WorkbenchCreateMenu.tsx'
 import type { WorkbenchLayoutPresetId } from './workbench-layout-presets.ts'
@@ -17,19 +19,23 @@ import { WorkbenchHomeNavigation } from './WorkbenchHomeNavigation.tsx'
 import css from './WorkbenchHome.module.css'
 
 export interface WorkbenchHomeProps {
+  value?: WorkbenchSettingsV4 | undefined
+  initialSelectedId?: string
   directory: WorkbenchDirectory
   editors?: readonly WorkbenchEditorCatalogRow[]
-  navigate?: (options?: WorkbenchSettingsOpenOptionsV1) => void
-  windowController?: WorkbenchWindowControllerV1
+  navigate?: ((options?: WorkbenchSettingsOpenOptionsV1) => void) | undefined
+  windowController?: WorkbenchWindowControllerV1 | undefined
   onOpenWorkbench: (workbenchId: string) => Promise<void>
   onCreated: (workbenchId: string) => void
-  generateContextDraft?: (input: import('./workbench-ai.ts').WorkbenchCreationDraftInputV1) => Promise<string>
+  generateContextDraft?: ((input: import('./workbench-ai.ts').WorkbenchAiDraftInputV1) => Promise<string>) | undefined
 }
 
-export function WorkbenchHome({ directory, editors = [], navigate, windowController, onOpenWorkbench, onCreated, generateContextDraft }: WorkbenchHomeProps) {
+export function WorkbenchHome({ value, initialSelectedId, directory, editors = [], navigate, windowController, onOpenWorkbench, onCreated, generateContextDraft }: WorkbenchHomeProps) {
   const snapshot = useSyncExternalStore(directory.subscribe, directory.getSnapshot, directory.getSnapshot)
   const [createPreset, setCreatePreset] = useState<WorkbenchLayoutPresetId>()
   const [busyId, setBusyId] = useState<string>()
+  const [menuId, setMenuId] = useState<string>()
+  const [selectedId, setSelectedId] = useState(initialSelectedId ?? snapshot.activeWorkbenchId)
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState('all')
   const action = useSettingsAction({ busy: '正在处理…', success: '已完成' })
@@ -93,13 +99,21 @@ export function WorkbenchHome({ directory, editors = [], navigate, windowControl
           <div className={css.filters} role="group" aria-label="按工作台状态筛选">{filters.map(([id, label, count]) => <Pill key={id} active={filter === id} aria-pressed={filter === id} onClick={() => setFilter(id)}>{label}<span className={css.filterCount}>{count}</span></Pill>)}</div>
           <Input className={css.search ?? ''} icon={<IconSearchOutlineMedium size={16} />} type="search" aria-label="搜索工作台" placeholder="搜索工作台" value={query} onChange={event => setQuery(event.target.value)} />
         </div>
-        {filtered.length ? <div className={css.cards}>{filtered.map(row => <WorkbenchHomeCard key={row.workbenchId}
-          row={row} document={directory.getDocument?.(row.workbenchId)} editors={editors}
-          opened={activeIds.has(row.workbenchId)} writable={settingsTargetWritable(DESKTOP_SETTINGS_CONTEXT, row.workbenchId, windowController)} busy={busyId !== undefined}
-          onOpen={() => void open(row.workbenchId)} onRestore={() => void restore(row.workbenchId)} onArchive={() => void archive(row.workbenchId)}
-          onExport={() => navigate?.({ section: 'sharing', workbenchId: row.workbenchId, shareMode: 'export' })}
-          onManage={() => navigate?.({ section: 'workbenches', workbenchId: row.workbenchId })} feedback={action.feedback(row.workbenchId)} />)}</div>
-          : <div className={css.noResults} role="status"><IconSearchOutlineMedium size={24} /><h2>没有找到工作台</h2><p>{query ? '试试其他名称、简介或标签。' : '这个分类里还没有工作台。'}</p><Button variant="outline" onClick={() => { setFilter('all'); setQuery('') }}>查看全部工作台</Button></div>}
+        {filtered.length ? <div className={css.masterDetail}>
+          <aside className={css.workbenchList} aria-label="选择工作台">{filtered.map(row => {
+            const selected = (filtered.some(item => item.workbenchId === selectedId) ? selectedId : filtered[0]?.workbenchId) === row.workbenchId
+            const pinned = snapshot.sidebarShortcuts?.includes(row.workbenchId) === true
+            const browser = !settingsTargetWritable(DESKTOP_SETTINGS_CONTEXT, row.workbenchId, windowController)
+            return <article key={row.workbenchId} className={css.workbenchRow} aria-label={row.name} data-selected={selected || undefined}>
+              <button className={css.workbenchSelect} aria-pressed={selected} onClick={() => setSelectedId(row.workbenchId)}><span className={css.rowMark}><IconPanelLeftOutlineMedium size={18} /></span><span><strong>{row.name}</strong><small>{row.description || '暂无简介'}</small></span></button>
+              <div className={css.workbenchRowFooter}><button className={css.sidebarPin} aria-label={pinned ? '已固定到 DSH 侧栏' : '固定到 DSH 侧栏'} title={pinned ? '已固定到 DSH 侧栏' : '固定到 DSH 侧栏'} aria-pressed={pinned} disabled={!directory.setSidebarPinned || !!action.states['pin-' + row.workbenchId]?.busy} onClick={() => void action.run('pin-' + row.workbenchId, () => directory.setSidebarPinned!(row.workbenchId, !pinned))}><IconPinOutlineMedium size={14} />{pinned ? '已固定' : '固定到侧栏'}</button><span>{row.archivedAt ? '已归档' : browser ? '浏览器中' : activeIds.has(row.workbenchId) ? '已打开' : '未打开'}</span></div>
+              {row.archivedAt ? <Button size="sm" disabled={busyId !== undefined} onClick={() => void restore(row.workbenchId)}>恢复工作台</Button> : null}
+              <div className={css.rowUtilities}><Button size="sm" onClick={() => navigate?.({ section: 'workbenches', workbenchId: row.workbenchId })}>管理</Button><Menu open={menuId === row.workbenchId} onClose={() => setMenuId(undefined)} align="end" portal autoFocus anchor={<Button size="sm" aria-label={'更多操作：' + row.name} aria-haspopup="menu" aria-expanded={menuId === row.workbenchId} onClick={() => setMenuId(row.workbenchId)}><IconEllipsisOutlineMedium size={16} /></Button>} items={[{ id: 'export', label: '导出工作台', disabled: browser || !!row.archivedAt }, { id: 'archive', label: row.archivedAt ? '恢复工作台' : '归档工作台', disabled: browser || busyId !== undefined }]} onSelect={id => { setMenuId(undefined); if (id === 'export') navigate?.({ section: 'sharing', workbenchId: row.workbenchId, shareMode: 'export' }); else if (row.archivedAt) void restore(row.workbenchId); else void archive(row.workbenchId) }} /></div>
+              {action.feedback('pin-' + row.workbenchId)}{action.feedback(row.workbenchId)}
+            </article>
+          })}</aside>
+          {(() => { const row = filtered.find(row => row.workbenchId === selectedId) ?? filtered[0]!; const record = value?.workbenches[row.workbenchId]; return record ? <WorkbenchOverviewDetail key={row.workbenchId} record={record} directory={directory} editors={editors} navigate={navigate} windowController={windowController} onOpenWorkbench={onOpenWorkbench} onCreated={onCreated} generateContextDraft={generateContextDraft} onOpen={() => void open(row.workbenchId)} writable={settingsTargetWritable(DESKTOP_SETTINGS_CONTEXT, row.workbenchId, windowController)} busy={busyId !== undefined} /> : <section className={css.selectedDetail}><h2>{row.name}</h2><p>正在读取工作台详情…</p><Button onClick={() => void open(row.workbenchId)}>打开工作台</Button></section> })()}
+        </div> : <div className={css.noResults} role="status"><IconSearchOutlineMedium size={24} /><h2>没有找到工作台</h2><p>{query ? '试试其他名称、简介或标签。' : '这个分类里还没有工作台。'}</p><Button variant="outline" onClick={() => { setFilter('all'); setQuery('') }}>查看全部工作台</Button></div>}
         <p className={css.librarySummary}>{rows.length} 个工作台 · {snapshot.openWorkbenchIds.length} 个已打开<span>布局和内页会自动保留</span></p>
       </section>}
 

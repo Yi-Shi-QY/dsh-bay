@@ -1,4 +1,5 @@
 import { areasOf } from './document-v3.ts'
+import type { CreatorRepairTargetV1 } from '../workbench-directory-contract.ts'
 import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore, type ComponentProps } from 'react'
 import { IconPanelLeftOutlineMedium, IconCordisPluginOutlineMedium, IconShareOutlineMedium, IconSettingsOutlineMedium } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { WorkbenchModuleManagerV1 } from '../module-manager.ts'
@@ -35,9 +36,8 @@ export type WorkbenchCoreSettingsSectionProps = ComponentProps<typeof WorkbenchS
   updateInteractionPolicy?: (policy: WorkbenchConversationInteractionPolicyV1) => Promise<boolean>
   loadModelCatalog?: () => Promise<import('@deepseek-ai/dsh-api-session-controller').ModelCatalog>
   saveBackgroundAi?: (value: import('./background-ai-preferences.ts').BackgroundAiPreferencesV1, expectedRevision?: number) => Promise<boolean | { status: string; revision?: number }>
-  openCreator?: (prompt: string) => Promise<void>
+  openCreator?: (prompt: string, title: string | undefined, target: CreatorRepairTargetV1) => Promise<void>
 }
-
 
 /** One settings view shared by the native DSH entry and the Workbench dialog. */
 export function WorkbenchCoreSettingsSection(props: WorkbenchCoreSettingsSectionProps) {

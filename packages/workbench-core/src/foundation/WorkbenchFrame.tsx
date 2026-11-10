@@ -1,3 +1,4 @@
+import { WorkbenchReclaimProgress } from './WorkbenchReclaimProgress.tsx'
 import { WorkbenchImportDirectoryRequests } from './WorkbenchCompletePackagePanel.tsx'
 import { WorkbenchCollaborationApprovals, WorkbenchShareGrantControls } from './WorkbenchSharePermissions.tsx'
 import { workbenchAccess } from '../client/workbench-access.ts'
@@ -7,6 +8,7 @@ import type { FloatingWorkspaceRuntime } from '../client/floating-workspace-runt
 import { floatingInstanceKey } from '../client/floating-workspace-runtime.ts'
 import { WorkbenchFloatingWorkspace, FloatingWorkspaceToolbarButton } from './WorkbenchFloatingWorkspace.tsx'
 import { WorkbenchEmptyArea } from './WorkbenchEmptyArea.tsx'
+import { WorkbenchPageLoading } from './WorkbenchPageLoading.tsx'
 import { WorkbenchEditorPicker } from './WorkbenchEditorPicker.tsx'
 import type { WorkbenchEditorSvgIconV1 } from './workbench-editor-icons.ts'
 import { WorkbenchCreateDialog } from './WorkbenchCreateDialog.tsx'
@@ -23,7 +25,7 @@ import type { WorkbenchTabInformationSession } from './tab-information.ts'
 import type { ConversationTabStatusSource } from '../client/conversation-tab-status.ts'
 import { useConversationTabStatus } from '../client/use-conversation-tab-status.ts'
 import {
-  memo, Profiler, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore,
+  memo, Profiler, Suspense, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore,
   type ChangeEvent, type CSSProperties, type KeyboardEvent, type MutableRefObject, type ProfilerOnRenderCallback, type ReactNode, type RefObject,
 } from 'react'
 import { createPortal } from 'react-dom'
@@ -2568,7 +2570,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
       setStateDiagnostic('打开工作台页面失败；当前工作台和对话未受影响。')
     }
   }, [windowController, workbenchDirectory])
-  const reclaimWorkbenchWindow = useCallback(async (workbenchId: string) => {
+  const reclaimWorkbenchWindow = useCallback(async (workbenchId: string, options?: { force?: boolean }) => {
     if (props.browserView === true) {
       if (workbenchId !== props.browserWorkbenchId || props.requestBrowserReclaim === undefined) {
         setStateDiagnostic('无法确认此浏览器工作台的收回身份；请返回 DSH 客户端处理。')
@@ -2593,13 +2595,16 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
     const snapshot = windowController.getSnapshot()
     const request = snapshot.requests?.find(row => row.workbenchId === workbenchId)
       ?? (snapshot.request?.workbenchId === workbenchId ? snapshot.request : undefined)
-    if (request?.status !== 'ready' && request?.status !== 'reclaiming') return
+    if (request?.status !== 'ready' && request?.status !== 'reclaiming' && request?.status !== 'failed') return false
     setReclaimingBrowserWorkbench(true)
     try {
-      await windowController.reclaim?.(workbenchId)
+      const result = await windowController.reclaim?.(workbenchId, options)
+      if (result?.status !== 'reclaimed') { setStateDiagnostic(`收回尚未完成（${result?.code ?? '连接不可用'}），请重试或检查浏览器。`); return false }
       setStateDiagnostic(undefined)
+      return true
     } catch {
       setStateDiagnostic('收回请求仍在确认中；浏览器页面保持锁定，请稍后重试。')
+      return false
     } finally { setReclaimingBrowserWorkbench(false) }
   }, [props.browserView, props.browserWorkbenchId, props.requestBrowserReclaim, shareController, workbenchShareSnapshot.sessions, windowController])
   const reportBrowserActionTransition = useCallback((workbenchId: string, phase: 'preparing' | 'opening' | 'reclaiming' | 'idle') => {
@@ -2670,6 +2675,45 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
   const activeBrowserOwned = props.browserView !== true
     && (browserHandoffRequest?.status === 'ready' || browserHandoffRequest?.status === 'reclaiming'
       || (browserHandoffRequest?.status === 'failed' && (browserHandoffRequest.code === 'browser-view-heartbeat-timeout' || browserHandoffRequest.code === 'browser-view-reclaim-timeout')))
+  const reclaimWindowId = browserHandoffRequest && 'windowId' in browserHandoffRequest ? browserHandoffRequest.windowId : undefined
+  const reclaimProgress = browserHandoffRequest && 'reclaimProgress' in browserHandoffRequest ? browserHandoffRequest.reclaimProgress : undefined
+  useEffect(() => {
+    if (props.browserView || browserHandoffRequest?.status !== 'reclaimed' || !reclaimWindowId || reclaimProgress?.phase !== 'checking' || surfaceView !== 'workbench') return
+    const { workbenchId } = browserHandoffRequest
+    const windowId = reclaimWindowId
+    let finished = false
+    const finish = (error?: string) => {
+      if (finished) return
+      finished = true
+      windowController.desktopRestored?.(workbenchId, windowId, error)
+    }
+    const inspect = () => {
+      const canvas = resizeCanvasRef.current
+      if (!canvas || frameTransition || !canvas.querySelector('[data-workbench-group]')) return
+      const inputReady = (root: HTMLElement, sessionId: string) => {
+        const bound = [...root.querySelectorAll<HTMLElement>('[data-workbench-session-id]')].find(element => element.dataset.workbenchSessionId === sessionId && element.dataset.workbenchConversationReady === 'true')
+        const input = bound?.querySelector<HTMLElement>('[contenteditable="true"], textarea:not(:disabled)')
+        return !!input && input.getAttribute('aria-disabled') !== 'true'
+      }
+      const areas = [...canvas.querySelectorAll<HTMLElement>('[data-workbench-group]:not([data-area-collapsed="true"])')]
+      const waiting = areas.some(area => {
+        const group = groupsOf(documentRef.current.root).find(group => group.id === area.dataset.workbenchGroup)
+        const current = group && activeTab(group)
+        if (!current || !['workbench.conversation', 'workbench.conversation.start'].includes(current.editorId) || !current.binding) return false
+        return !inputReady(area, current.binding.sessionId)
+      })
+      const floatingWaiting = [...canvas.querySelectorAll<HTMLElement>('[data-workbench-floating-visible="true"]')].some(element => {
+        const sessionId = element.dataset.workbenchFloatingSession
+        return sessionId && ['workbench.conversation', 'workbench.conversation.start'].includes(element.dataset.workbenchFloatingEditor ?? '') && !inputReady(element, sessionId)
+      })
+      if (!waiting && !floatingWaiting) finish()
+    }
+    const observer = new MutationObserver(inspect)
+    if (resizeCanvasRef.current) observer.observe(resizeCanvasRef.current, { subtree: true, childList: true, attributes: true, attributeFilter: ['contenteditable', 'disabled', 'aria-disabled', 'data-workbench-session-id', 'data-workbench-conversation-ready', 'data-workbench-floating-visible', 'data-workbench-floating-session'] })
+    const frame = requestAnimationFrame(inspect)
+    const timeout = setTimeout(() => finish('控制权已收回，部分对话尚未恢复输入，请在对应内页重新连接。'), 12_000)
+    return () => { observer.disconnect(); cancelAnimationFrame(frame); clearTimeout(timeout) }
+  }, [browserHandoffRequest?.status, reclaimWindowId, reclaimProgress?.phase, frameTransition, surfaceView, props.browserView, windowController])
   const browserOpening = props.browserView !== true
     && ['preparing', 'prepared', 'requested', 'redeemed'].includes(browserHandoffRequest?.status ?? '')
   const browserActionPhase = browserActionTransition?.workbenchId === handoffWorkbenchId
@@ -2869,14 +2913,14 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
           {projectNeutral ? (
             <div className={css.workbenchRail}>
               <div className={css.workbenchTabs} role="tablist" aria-label="工作台总览">
+                <div className={css.workbenchTab} data-active={surfaceView === 'home' || undefined} role="presentation">
                 <button
                   type="button"
-                  className={`${css.workbenchTab} ${css.workbenchTabTrigger}`}
+                  className={css.workbenchTabTrigger}
                   role={props.workbenchDirectory === undefined ? undefined : 'tab'}
                   aria-selected={surfaceView === 'home'}
                   tabIndex={surfaceView === 'home' ? 0 : -1}
                   data-workbench-home-entry
-                  data-active={surfaceView === 'home' || undefined}
                   onClick={() => { void flushCurrentWorkbench().then(ok => { if (ok) props.onShowHome?.() }) }}
                   onKeyDown={(event) => {
                     if (event.key === 'Enter' || event.key === ' ') {
@@ -2885,13 +2929,15 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
                     }
                   }}
                 >工作台总览</button>
+                </div>
               </div>
               <div className={css.workbenchTabs} role="tablist" aria-label="工作台" data-workbench-tabs>
                 {openWorkbenchRows.map((row) => {
-                  const active = row.workbenchId === displayedWorkbenchId
+                  const displayed = row.workbenchId === displayedWorkbenchId
+                  const active = surfaceView === 'workbench' && displayed
                   const renaming = row.workbenchId === renamingWorkbenchId
                   const browserOwned = isBrowserOwnedWorkbench(row.workbenchId)
-                  const canReadTargetDocument = active || workbenchDirectory.getDocument !== undefined
+                  const canReadTargetDocument = displayed || workbenchDirectory.getDocument !== undefined
                   return (
                     <div
                       key={row.workbenchId}
@@ -3099,7 +3145,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
                               windowSnapshot={workbenchWindowSnapshot}
                               onPrepareOpen={prepareWorkbenchWindow}
                               onOpenWindow={openWorkbenchWindow}
-                              onReclaim={reclaimWorkbenchWindow}
+                              onReclaim={async id => { if (!await reclaimWorkbenchWindow(id)) throw new Error('收回未完成，请在管理页查看进度。') }}
                               onTransition={(workbenchId, phase) => {
                                 setWorkbenchMenuOpenId(undefined)
                                 setWorkbenchMenuPosition(undefined)
@@ -3197,7 +3243,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
             ><IconSettingsOutlineMedium size={16} /></button> : null}
           </div>
         </header>}
-        {frameTransition !== undefined || browserOpening || browserActionPhase !== undefined
+        {frameTransition !== undefined || browserOpening || (browserActionPhase !== undefined && browserActionPhase !== 'reclaiming')
           || (props.browserView === true && browserHandoffRequest?.status === 'reclaiming') ? (
           <div className={css.transitionWait} role="status" aria-live="polite" aria-busy="true" data-workbench-transition-wait>
             <section className={css.transitionWaitPanel}>
@@ -3217,18 +3263,20 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
             </section>
           </div>
         ) : null}
+        {browserHandoffRequest?.status === 'reclaimed' && reclaimProgress && (reclaimProgress.phase !== 'complete' || reclaimProgress.forced || reclaimProgress.recovery) ? <WorkbenchReclaimProgress value={reclaimProgress} /> : null}
         <div
           ref={resizeCanvasRef}
           className={css.canvas}
           data-workbench-canvas
           data-layout-locked={layoutLocked ? 'true' : undefined}
           data-session-accent-frames={props.showSessionAccentFrames === false ? 'hidden' : undefined}
-          {...(frameTransition !== undefined || browserOpening || browserActionPhase !== undefined ? { inert: '' } : {})}
+          {...(frameTransition !== undefined || browserOpening || (browserActionPhase !== undefined && browserActionPhase !== 'reclaiming') ? { inert: '' } : {})}
         >
           {props.floatingRuntime && selectedWorkbenchId ? <WorkbenchFloatingWorkspace
             runtime={props.floatingRuntime} workbenchId={selectedWorkbenchId} canvasRef={resizeCanvasRef}
             visible={surfaceView === 'workbench' && !activeBrowserOwned && !browserOpening}
             editors={editors} hidden={workbenchDirectorySnapshot.globalHiddenEditorIds ?? []} extensionAccess={extensionAccess}
+            editorMenu={workbenchDirectorySnapshot.editorMenu}
             frame={props} layout={layout} policy={conversationResourcePolicy} sessionMarkers={allWorkspaceSessionMarkers}
             selectedAreaBinding={activePageSessionBinding(groupsOf(layout.root).find(group => group.id === layout.activeGroupId), workspaces, projectNeutral, account)}
             commit={commit} pin={pinFloatingTab} {...(props.bayAgent === undefined ? {} : { bayAgent: props.bayAgent })} /> : null}
@@ -3269,11 +3317,11 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
             layout={layout}
             layoutLocked={layoutLocked}
             {...(desktopControls === undefined ? {} : { onOpenSettings: desktopControls.openSettings })}
-            requestReclaim={async () => {
-              if (workbenchShareSnapshot.sessions.some(session => session.workbenchId === browserHandoffRequest.workbenchId)) throw new Error('请先停止局域网分享，再收回 Workbench')
-              await reclaimWorkbenchWindow(browserHandoffRequest.workbenchId)
-              return true
-            }}
+            editors={editors}
+            areaLabels={workbenchDirectory.getAreaLabels?.(browserHandoffRequest.workbenchId)}
+            reclaimProgress={'reclaimProgress' in browserHandoffRequest ? browserHandoffRequest.reclaimProgress : undefined}
+            requestReclaim={async options => (await reclaimWorkbenchWindow(browserHandoffRequest.workbenchId, options)) === true}
+
           /> : <Profiler id="workbench-layout" onRender={reportWorkbenchLayoutCommit}>
           <LayoutView
             activeBayAgentAreaIds={activeBayAgentAreaIds}
@@ -3297,6 +3345,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
             extensionAccess={extensionAccess}
             editors={editors} currentSession={current} account={account} workspaces={workspaces}
             hiddenEditorIds={workbenchDirectorySnapshot.globalHiddenEditorIds}
+            editorMenu={workbenchDirectorySnapshot.editorMenu}
             conversationResourcePolicy={conversationResourcePolicy}
             projectNeutral={projectNeutral}
             openOfficialSession={openOfficialSession === undefined ? undefined : (areaId, sessionId, expectedClaim) => {
@@ -3512,6 +3561,7 @@ interface LayoutViewProps {
   editors: readonly import('./catalog.ts').WorkbenchEditorCatalogRow[]
   extensionAccess?: WorkbenchExtensionAccessSnapshotV1 | undefined
   hiddenEditorIds?: readonly string[] | undefined
+  editorMenu?: import('./editor-menu-preferences.ts').EditorMenuPreferences | undefined
   conversationResourcePolicy?: WorkbenchConversationInteractionPolicyV1 | undefined
   currentSession: SessionId | undefined
   account: WorkspaceAccountKey
@@ -6124,7 +6174,7 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
         ) : null}
         {menu === 'editor' ? (
           <WorkbenchFloatingMenu kind="editor" ownerId={group.id} anchorRef={editorMenuAnchorRef} surfaceRef={editorMenuSurfaceRef} side={floatingMenuSide} align="start" className={css.editorMenu}>
-            <WorkbenchEditorPicker key={editorMenuMode} editors={selectableEditors} mode={editorMenuMode}
+            <WorkbenchEditorPicker key={editorMenuMode} editors={selectableEditors} mode={editorMenuMode} preferences={props.editorMenu}
               onSelect={editor => editorMenuMode === 'replace' ? replaceEditor(editor) : addEditor(editor)} />
           </WorkbenchFloatingMenu>
         ) : null}
@@ -6640,6 +6690,7 @@ function Editor({
     state: persistedStateFailure === undefined ? tab.state : {},
     lifecycle: effectiveLifecycle,
     ...(editor?.declaration === undefined ? {} : { declaration: editor.declaration }),
+    renderLoading: (options?: { label?: string; compact?: boolean }) => <WorkbenchPageLoading label={options?.label ?? editor?.label ?? tab.lastKnownTitle} icon={editor?.icon ?? 'extension'} compact={options?.compact ?? false} />,
     ...(commands.placeConversation === undefined ? {} : { placeConversation: (input: Parameters<NonNullable<typeof commands.placeConversation>>[0]) => {
       if (!actionable()) return Promise.reject(new Error('来源工作台或绑定已失效，请重新打开内页。'))
       return commands.placeConversation!(input)
@@ -6775,11 +6826,11 @@ function Editor({
   // task. A registered close guard keeps an unsaved view mounted instead.
   if (effectiveLifecycle.visibility !== 'visible' && effectiveLifecycle[effectiveLifecycle.visibility] === 'dispose'
     && !floating?.hasGuard(tab.id, workbenchId)) return null
-  return <MountedEditorOutlet metrics={runtimeMetrics}>{tab.editorScope === 'session' && tab.sessionId !== undefined
+  return <MountedEditorOutlet metrics={runtimeMetrics}><Suspense fallback={<WorkbenchPageLoading label={editor?.label ?? tab.lastKnownTitle} icon={editor?.icon ?? 'extension'} />}>{tab.editorScope === 'session' && tab.sessionId !== undefined
     ? renderSlot('workbench.editor.session', props, {
       only: tab.editorId, fallback: unavailable,
     })
-    : renderSlot('workbench.editor.root', props, { only: tab.editorId, fallback: unavailable })}</MountedEditorOutlet>
+    : renderSlot('workbench.editor.root', props, { only: tab.editorId, fallback: unavailable })}</Suspense></MountedEditorOutlet>
 }
 
 function AreaEditorTarget({ id, children }: { id: string; children: ReactNode }) {

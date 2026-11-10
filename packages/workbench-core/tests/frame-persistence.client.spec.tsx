@@ -164,7 +164,11 @@ function setup(
     for (const listener of directoryListeners) listener()
     return { status: 'committed' as const, revision: 2 }
   })
-  const view = render(<WorkbenchFrame {...{
+  function TestFrame() {
+    const [surfaceView, setSurfaceView] = React.useState<'home' | 'workbench'>('workbench')
+    return <WorkbenchFrame {...{
+    surfaceView, onShowHome: () => setSurfaceView('home'), onShowWorkbench: () => setSurfaceView('workbench'),
+    renderHome: <div>工作台总览内容</div>,
     projectNeutral: projectNeutralOverride ?? desktopControls === undefined,
     ...(desktopControls === undefined ? {} : { embeddedDesktop: true, desktopControls }),
     renderSidebar: () => null,
@@ -208,7 +212,9 @@ function setup(
     },
     editorCatalog: { getSnapshot: () => entries, subscribe: () => () => {} },
     sidebarCompatibility: { getSnapshot: () => undefined, subscribe: () => () => {} },
-  } as never} />)
+  } as never} />
+  }
+  const view = render(<TestFrame />)
   return {
     view, settings, metrics, owners, persistedLayout: layout, reorder, saveTemplate, setLayoutLocked, unload, documents,
     edit: (value: number) => act(() => owner!.setState({ value })),
@@ -233,6 +239,32 @@ function setup(
 async function advance(ms: number) { await act(async () => { await vi.advanceTimersByTimeAsync(ms) }) }
 
 describe('Frame layout persistence', () => {
+  it('highlights only the visible surface when switching between Home and Workbench tabs', async () => {
+    const h = setup(async () => ({ status: 'committed', revision: 2 }))
+    const home = h.view.getByRole('tab', { name: '工作台总览' })
+    const first = h.view.getByRole('tab', { name: 'Workbench A' })
+    const second = h.view.getByRole('tab', { name: 'Workbench B' })
+    const rail = home.closest('header')!
+    const selected = () => rail.querySelectorAll('[role="tab"][aria-selected="true"]')
+    const highlighted = () => rail.querySelectorAll('[data-active="true"]')
+    expect([...selected()]).toEqual([first])
+    expect(highlighted()).toHaveLength(1)
+    fireEvent.click(home)
+    await h.view.findByText('工作台总览内容')
+    expect([...selected()]).toEqual([home])
+    expect(highlighted()).toHaveLength(1)
+    expect(first.closest('[data-workbench-tab]')?.hasAttribute('data-active')).toBe(false)
+    expect(second.closest('[data-workbench-tab]')?.hasAttribute('data-active')).toBe(false)
+    fireEvent.click(first)
+    await waitFor(() => expect([...selected()]).toEqual([first]))
+    expect(highlighted()).toHaveLength(1)
+    fireEvent.click(home)
+    await h.view.findByText('工作台总览内容')
+    fireEvent.click(second)
+    await waitFor(() => expect([...selected()]).toEqual([second]))
+    expect(highlighted()).toHaveLength(1)
+    expect(h.view.queryByText('工作台总览内容')).toBeNull()
+  })
   it('applies tab label preferences and keeps Area menu close available', () => {
     const h = setup(async () => ({ status: 'committed', revision: 2 }), undefined, ['偏好验证'],
       undefined, undefined, undefined, undefined, false, false, false, true, undefined,

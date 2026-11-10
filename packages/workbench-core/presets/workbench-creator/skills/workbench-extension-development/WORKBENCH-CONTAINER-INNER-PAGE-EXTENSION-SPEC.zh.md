@@ -255,6 +255,8 @@ Core 对 Slot metadata 做运行时校验。声明无效、ID 冲突、扩展内
 
 Core 传给编辑器的 owner 可能包含 `instanceId`、`areaId`、`workspaceId`、`sessionId`、`bindingGeneration`、`areaClaim`、`state`、`lifecycle` 以及受支持的回调。session 编辑器只使用当前实例传入的精确 ID。空 `sessionId` 时应渲染声明的 pending/恢复 UI，不要查全局 current Session、扫描 Session 列表或根据焦点/区域顺序猜测。
 
+异步读取内容时使用 `owner.renderLoading?.({ label: '内容名称' })` 返回 Core 的统一加载画面；列表局部读取可传 `compact: true`。它自动沿用工作台主题和内页图标，无需引用 Core 内部文件或复制 CSS。仅在实际请求未完成时显示，失败后展示错误和重试入口，不能把空结果、未绑定或永久缺失的资源当成加载。Core 也为使用 React.lazy/Suspense 的内页提供统一 fallback；扩展自行管理的请求仍需主动使用 `renderLoading`。已存在的输入组件和原生会话不能为展示过渡而反复卸载重建。
+
 ## 8. 状态、恢复与分享
 
 扩展状态必须是小型、版本化、JSON-safe 数据。不要写入 DOM 节点、函数、循环引用、凭据、完整消息/对话历史、绝对路径、Profile 身份、进程句柄、实时连接或只能在作者机器工作的本地资源标识。

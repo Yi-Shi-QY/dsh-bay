@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React, { createRef } from 'react'
-import { cleanup, fireEvent, render, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { WorkbenchEmptyArea } from '../src/foundation/WorkbenchEmptyArea.tsx'
 import { WorkbenchEditorPicker } from '../src/foundation/WorkbenchEditorPicker.tsx'
@@ -34,6 +34,33 @@ function renderEmptyFrame() {
   return { view, selectSession, renderSlot }
 }
 describe('Empty Area launch surface', () => {
+  it('folds category folders, searches inside folded folders, and restores their state after searching and reopening', () => {
+    const preferences = { folders: [{ id: 'picker-test-notes', name: '内容创作' }], assignments: { 'private.notes': 'picker-test-notes' } }
+    const onSelect = vi.fn()
+    const content = <WorkbenchEditorPicker editors={[...editors,
+      { id: 'workbench.conversation', scope: 'session', label: '对话', category: '对话' },
+      { id: 'workbench.conversation.start', scope: 'root', label: '新建对话' },
+      { id: 'workbench.agent-trajectory', scope: 'session', label: '轨迹分析' }]} preferences={preferences} mode="add" onSelect={onSelect} />
+    const view = render(content)
+    const official = within(view.getByRole('group', { name: '官方内置' }))
+    expect(official.getByRole('menuitem', { name: '添加为标签 对话' })).toBeTruthy()
+    expect(official.getByRole('menuitem', { name: '添加为标签 新建对话' })).toBeTruthy()
+    expect(official.getByRole('menuitem', { name: '添加为标签 轨迹分析' })).toBeTruthy()
+    fireEvent.click(view.getByRole('button', { name: '内容创作' }))
+    expect(view.queryByRole('menuitem', { name: '添加为标签 团队笔记' })).toBeNull()
+    const input = view.getByRole('searchbox', { name: '搜索内页' })
+    fireEvent.change(input, { target: { value: '笔记' } })
+    expect(view.getByRole('menuitem', { name: '添加为标签 团队笔记' })).toBeTruthy()
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(onSelect).toHaveBeenCalledWith(editors[0])
+    fireEvent.change(input, { target: { value: '' } })
+    expect(view.getByRole('button', { name: '内容创作' }).getAttribute('aria-expanded')).toBe('false')
+    view.unmount()
+    const reopened = render(content)
+    expect(reopened.queryByRole('menuitem', { name: '添加为标签 团队笔记' })).toBeNull()
+    fireEvent.keyDown(reopened.getByRole('button', { name: '内容创作' }), { key: 'ArrowRight' })
+    expect(reopened.getByRole('menuitem', { name: '添加为标签 团队笔记' })).toBeTruthy()
+  })
   it('adds a root editor only to the chosen Area and retains its SVG in the tab', async () => {
     const { view, selectSession } = renderEmptyFrame()
     fireEvent.click((await view.findAllByRole('button', { name: '添加内页：团队笔记' }))[0]!)

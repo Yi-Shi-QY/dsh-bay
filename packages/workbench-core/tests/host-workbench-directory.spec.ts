@@ -1,11 +1,12 @@
 import { afterEach, expect, it } from 'vitest'
-import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { HostWorkbenchDirectory } from '../src/host-workbench-directory.ts'
 import type { WorkbenchRecordV2 } from '../src/foundation/persistence.ts'
 import { createWorkbenchContext } from '../src/foundation/workbench-context.ts'
 import { areasOf } from '../src/foundation/document-v3.ts'
+import { decodeWorkbenchSettingsV4 } from '../src/foundation/persistence.ts'
 
 const roots: string[] = []
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }) })
@@ -20,6 +21,47 @@ async function setup() {
   const input = { requestId: 'request-1', parentPath: root, folderName: 'Research', record: record() }
   return { root, workspaces, directory, input }
 }
+it('retains profile-wide menu folders across host restarts without rewriting workbench files', async () => {
+  const f = await setup(); await f.directory.create(f.input)
+  const workbenchFile = join(f.directory.rootPath('workbench-one'), '.bay', 'workbench.json')
+  const before = await readFile(workbenchFile, 'utf8')
+  const editorMenu = { folders: [{ id: 'tools', name: '开发工具' }], assignments: { 'example.notes': 'tools' } }
+  await f.directory.patch({ operation: 'set', path: ['editorMenu'], value: editorMenu, expectedRevision: f.directory.getSnapshot().revision })
+  const reopened = new HostWorkbenchDirectory(join(f.root, 'profile'), f.workspaces as never)
+  expect(decodeWorkbenchSettingsV4(reopened.getSnapshot().value)?.editorMenu).toEqual(editorMenu)
+  expect(await readFile(workbenchFile, 'utf8')).toBe(before)
+})
+it('persists sidebar shortcuts in the local registry without placing them in the portable workbench definition', async () => {
+  const f = await setup(); await f.directory.create(f.input)
+  const file = join(f.directory.rootPath('workbench-one'), '.bay', 'workbench.json')
+  const before = await readFile(file, 'utf8')
+  await f.directory.patch({ operation: 'set', path: ['sidebarShortcuts'], value: ['workbench-one'], expectedRevision: f.directory.getSnapshot().revision })
+  const reopened = new HostWorkbenchDirectory(join(f.root, 'profile'), f.workspaces as never)
+  expect(decodeWorkbenchSettingsV4(reopened.getSnapshot().value)?.sidebarShortcuts).toEqual(['workbench-one'])
+  expect(await readFile(file, 'utf8')).toBe(before)
+  expect(JSON.stringify(reopened.definition('workbench-one'))).not.toContain('sidebarShortcuts')
+})
+it('persists one independent repair project and session reservation across retries and restarts', async () => {
+  const f = await setup(); await f.directory.create(f.input)
+  const before = f.directory.getSnapshot().value.workbenches['workbench-one']!
+  const input = { workbenchId: 'workbench-one', moduleId: 'local.pomodoro', packageName: '@local/pomodoro' }
+  const [first, repeated] = await Promise.all([f.directory.prepareCreatorRepair(input), f.directory.prepareCreatorRepair(input)])
+  expect(repeated).toEqual(first)
+  expect((await stat(join(f.directory.rootPath(input.workbenchId), first.relativePath))).isDirectory()).toBe(true)
+  const reopened = new HostWorkbenchDirectory(join(f.root, 'profile'), f.workspaces as never)
+  expect(await reopened.prepareCreatorRepair(input)).toEqual(first)
+  await reopened.registerSession(input.workbenchId, first.sessionId, {
+    sessionKey: first.sessionKey, role: 'user', relativePath: first.relativePath, title: 'Plugin repair', agentPreset: 'cordis', createdAt: 1,
+  })
+  const snapshot = reopened.getSnapshot()
+  const saved = snapshot.value.workbenches[input.workbenchId]!
+  expect(saved.document).toEqual(before.document)
+  expect(saved.areaProjects).toEqual(before.areaProjects)
+  expect(saved.sessionCatalog?.[first.sessionKey]?.areaId).toBeUndefined()
+  expect(decodeWorkbenchSettingsV4(snapshot.value)?.workbenches[input.workbenchId]?.sessionCatalog).toEqual(saved.sessionCatalog)
+  expect(await reopened.prepareCreatorRepair(input)).toEqual({ ...first, registered: true })
+  expect(await reopened.prepareCreatorRepair({ ...input, packageName: '@another/pomodoro' })).not.toMatchObject({ relativePath: first.relativePath })
+})
 it('creates one file-authoritative workbench and reopens without a second profile copy', async () => {
   const f = await setup()
   const first = await f.directory.create(f.input)

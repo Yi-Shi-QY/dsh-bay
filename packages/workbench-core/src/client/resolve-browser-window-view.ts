@@ -216,7 +216,12 @@ export function startBrowserWorkbenchHeartbeat(
       reclaimRequested = true
       onReclaimState?.('requested')
     }
-    if (!await flushWorkbench()) return
+    try { await call(rpc, 'reclaim-progress', { ...proof(view), phase: 'saving' }) } catch { /* Heartbeat remains the fallback on older Hosts. */ }
+    if (!await flushWorkbench()) {
+      try { await call(rpc, 'reclaim-progress', { ...proof(view), phase: 'saving', error: 'save-failed' }) } catch { /* retry through heartbeat */ }
+      return
+    }
+    try { await call(rpc, 'reclaim-progress', { ...proof(view), phase: 'releasing' }) } catch { /* the receipt is authoritative */ }
     try {
       const result = await call(rpc, 'reclaimed', { closeToken: view.closeToken, ...(floatingSnapshot ? { floating: floatingSnapshot() } : {}) }) as { status?: unknown }
       if (result.status !== 'reclaimed' || stopped) return
@@ -255,20 +260,52 @@ export function startBrowserWorkbenchHeartbeat(
   const wake = () => heartbeat()
   window.addEventListener('workbench-browser-reclaim-wake', wake)
   const timer = window.setInterval(heartbeat, HEARTBEAT_INTERVAL_MS)
+  let watchTimer: number | undefined
+  const watch = async () => {
+    if (stopped) return
+    let delay = 250
+    const startedAt = Date.now()
+    try {
+      const result = await call(rpc, 'watch-reclaim', proof(view)) as { status?: string }
+      if (stopped) return
+      delay = Math.max(250, 5_000 - (Date.now() - startedAt))
+      if (result.status === 'reclaim-requested' || ['reclaimed', 'closed', 'expired', 'failed'].includes(result.status ?? '')) {
+        heartbeat(); delay = 2_000
+      }
+    } catch { delay = HEARTBEAT_INTERVAL_MS }
+    if (!stopped) watchTimer = window.setTimeout(() => { void watch() }, delay)
+  }
+  void watch()
   return () => {
     stopped = true
     window.clearInterval(timer)
+    window.clearTimeout(watchTimer)
     window.removeEventListener('workbench-browser-reclaim-wake', wake)
   }
 }
 
 /** Best-effort lifecycle handoff when the browser view is closed or unloaded. */
 export function reportBrowserWorkbenchClosed(ctx: ClientContext, view: WorkbenchWindowViewV1, floatingSnapshot?: () => FloatingHandoffV1): void {
-  if (typeof navigator === 'undefined' || typeof navigator.sendBeacon !== 'function') return
+  if (typeof navigator === 'undefined') return
   try {
-    let floating: FloatingHandoffV1 | undefined
-    try { floating = floatingSnapshot?.() } catch { /* Preserve the source copy when a busy tab cannot transfer. */ }
-    const payload = new Blob([JSON.stringify({ action: 'suspend', closeToken: view.closeToken, pageId: PAGE_ID, ...(floating ? { floating } : {}) })], { type: 'text/plain;charset=UTF-8' })
-    navigator.sendBeacon('/api/workbench-window-close', payload)
+    const notice = { action: 'suspend', closeToken: view.closeToken, pageId: PAGE_ID }
+    const encode = (value: unknown) => new Blob([JSON.stringify(value)], { type: 'text/plain;charset=UTF-8' })
+    const compact = encode(notice)
+    const send = (body: Blob) => {
+      try { return typeof navigator.sendBeacon === 'function' && navigator.sendBeacon('/api/workbench-window-close', body) } catch { return false }
+    }
+    try {
+      const floating = floatingSnapshot?.()
+      if (floating) {
+        const payload = encode({ ...notice, floating })
+        // Beacon/keepalive queues are commonly capped at 64 KiB. The full
+        // handoff permits 512 KiB; it must never crowd out the close notice.
+        if (payload.size <= 48 * 1024 && send(payload)) return
+      }
+    } catch { /* A busy/unserializable tab must not prevent lease suspension. */ }
+    if (send(compact)) return
+    if (typeof fetch === 'function') void fetch('/api/workbench-window-close', {
+      method: 'POST', body: compact, credentials: 'same-origin', keepalive: true,
+    }).catch(() => {})
   } catch { /* page teardown must never affect DSH or Workbench state */ }
 }

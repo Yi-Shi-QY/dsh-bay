@@ -60,6 +60,7 @@ describe('file workbench / control lease / guest integration', () => {
     const f = await setup()
     const current = structuredClone(f.directory.getSnapshot().value)
     current.globalHiddenEditorIds = ['example.hidden']
+    current.editorMenu = { folders: [{ id: 'tools', name: '工具' }], assignments: { 'example.ins': 'tools' } }
     current.extensionConsents = {
       '@example/ins::example.ins': {
         packageName: '@example/ins', moduleId: 'example.ins', apiVersion: 1,
@@ -70,6 +71,7 @@ describe('file workbench / control lease / guest integration', () => {
     const owner = await f.open()
     const scoped = f.access.snapshot(owner.context)
     expect(scoped.value.globalHiddenEditorIds).toEqual(['example.hidden'])
+    expect(scoped.value.editorMenu).toEqual(current.editorMenu)
     expect(scoped.value.extensionConsents?.['@example/ins::example.ins']).toMatchObject({ allowed: true })
 
     const mirror = createFileWorkbenchSettings((async (_input, init) => f.call(JSON.parse(String(init?.body)), owner.token)) as typeof fetch)
@@ -77,6 +79,7 @@ describe('file workbench / control lease / guest integration', () => {
     await mirror.refresh()
     expect(mirror.scope.getSnapshot().value?.extensionConsents?.['@example/ins::example.ins']).toMatchObject({ allowed: true })
     expect(mirror.scope.getSnapshot().value?.globalHiddenEditorIds).toEqual(['example.hidden'])
+    expect(mirror.scope.getSnapshot().value?.editorMenu).toEqual(current.editorMenu)
   })
 
   it('keeps exactly one active page, supports refresh grace, and rejects revoked epochs and late heartbeats', async () => {

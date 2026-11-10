@@ -8,9 +8,36 @@ afterEach(() => {
   window.sessionStorage.clear()
   ;(window as unknown as { __WORKBENCH_WINDOW_VIEW__?: unknown }).__WORKBENCH_WINDOW_VIEW__ = undefined
   vi.restoreAllMocks()
+  vi.unstubAllGlobals()
 })
 
 describe('browser Workbench view lifecycle', () => {
+  it.each(['oversized', 'rejected'] as const)('still sends the close notice when the floating snapshot is %s', async reason => {
+    const accepted: Blob[] = [], attempted: Blob[] = []
+    const sendBeacon = vi.fn((_url: string, body: Blob) => {
+      attempted.push(body)
+      if (body.size > 64 * 1024 || reason === 'rejected' && attempted.length === 1) return false
+      accepted.push(body); return true
+    })
+    Object.defineProperty(navigator, 'sendBeacon', { configurable: true, value: sendBeacon })
+    const view = { schemaVersion: 1 as const, windowId: '00000000-0000-4000-8000-000000000000', workbenchId: 'a', mode: 'browser-workbench' as const, closeToken: 'T'.repeat(43) }
+    reportBrowserWorkbenchClosed({} as never, view, () => ({ version: 1, expanded: true, pinnedIds: [], tabs: [
+      { id: 'one', editorId: 'example.notes', editorScope: 'root', lastKnownTitle: '笔记', state: { draft: 'x'.repeat(reason === 'oversized' ? 70 * 1024 : 1024) } },
+    ] }))
+    expect(accepted).toHaveLength(1)
+    const body = JSON.parse(await accepted[0]!.text())
+    expect(body).toMatchObject({ action: 'suspend', closeToken: view.closeToken })
+    expect(body.floating).toBeUndefined()
+  })
+
+  it('uses a small keepalive request if the browser cannot queue a beacon', async () => {
+    Object.defineProperty(navigator, 'sendBeacon', { configurable: true, value: vi.fn(() => false) })
+    const fetch = vi.fn(async () => new Response(null, { status: 204 }))
+    vi.stubGlobal('fetch', fetch)
+    reportBrowserWorkbenchClosed({} as never, { schemaVersion: 1, windowId: '00000000-0000-4000-8000-000000000000', workbenchId: 'a', mode: 'browser-workbench', closeToken: 'T'.repeat(43) })
+    expect(fetch).toHaveBeenCalledWith('/api/workbench-window-close', expect.objectContaining({ method: 'POST', keepalive: true, credentials: 'same-origin' }))
+  })
+
   it('redeems the dedicated document query before render, stores the close receipt, and reports it on page close', async () => {
     const ticket = 'A'.repeat(43)
     const closeToken = 'B'.repeat(43)
@@ -64,18 +91,18 @@ describe('browser Workbench view lifecycle', () => {
 
   it('sends browser liveness heartbeats and stops them when the view is disposed', async () => {
     vi.useFakeTimers()
-    const rpc = { call: vi.fn(async () => ({ ok: true, value: { status: 'ready' } })) }
+    const rpc = { call: vi.fn(async (_channel: string, endpoint: string) => endpoint === 'workbench-window/watch-reclaim' ? { ok: false, error: { code: 'unsupported-watch' } } : ({ ok: true, value: { status: 'ready' } })) }
     const stop = startBrowserWorkbenchHeartbeat({ connection: { rpc } } as never, {
       schemaVersion: 1, windowId: '00000000-0000-4000-8000-000000000000', workbenchId: 'workbench-a', mode: 'browser-workbench', closeToken: 'B'.repeat(43),
     })
     await vi.advanceTimersByTimeAsync(15_000)
-    expect(rpc.call).toHaveBeenCalledOnce()
+    expect(rpc.call.mock.calls.filter(call => call[1] === 'workbench-window/heartbeat')).toHaveLength(1)
     expect(rpc.call).toHaveBeenCalledWith('/api', 'workbench-window/heartbeat', {
       windowId: '00000000-0000-4000-8000-000000000000', closeToken: 'B'.repeat(43), pageId: expect.any(String),
     }, expect.any(AbortSignal))
     stop()
     await vi.advanceTimersByTimeAsync(30_000)
-    expect(rpc.call).toHaveBeenCalledOnce()
+    expect(rpc.call.mock.calls.filter(call => call[1] === 'workbench-window/heartbeat')).toHaveLength(1)
     vi.useRealTimers()
   })
 
@@ -95,7 +122,7 @@ describe('browser Workbench view lifecycle', () => {
     await vi.advanceTimersByTimeAsync(15_000)
     await vi.advanceTimersByTimeAsync(0)
     expect(states).toEqual(['requested', 'reclaimed'])
-    expect(rpc.call.mock.calls.map(call => call[1])).toEqual(['workbench-window/heartbeat', 'workbench-window/reclaimed'])
+    expect(rpc.call.mock.calls.map(call => call[1])).toEqual(['workbench-window/watch-reclaim', 'workbench-window/heartbeat', 'workbench-window/reclaim-progress', 'workbench-window/reclaim-progress', 'workbench-window/reclaimed'])
     expect(window.sessionStorage.getItem('dsh-workbench.browser-view.v1')).toBeNull()
     stop()
     window.removeEventListener('workbench-browser-reclaim-flush', onFlush)
@@ -126,9 +153,9 @@ describe('browser Workbench view lifecycle', () => {
     await vi.advanceTimersByTimeAsync(0)
     await vi.advanceTimersByTimeAsync(0)
     expect(calls.map(call => call.endpoint)).toEqual([
-      'workbench-window/reclaim', 'workbench-window/heartbeat', 'workbench-window/reclaimed',
+      'workbench-window/watch-reclaim', 'workbench-window/reclaim', 'workbench-window/heartbeat', 'workbench-window/reclaim-progress', 'workbench-window/reclaim-progress', 'workbench-window/reclaimed',
     ])
-    expect(calls[0]?.payload).toEqual({ windowId: view.windowId })
+    expect(calls.find(call => call.endpoint === 'workbench-window/reclaim')?.payload).toEqual({ windowId: view.windowId })
     expect(states).toEqual(['requested', 'reclaimed'])
     expect(window.sessionStorage.getItem('dsh-workbench.browser-view.v1')).toBeNull()
 
@@ -166,7 +193,7 @@ describe('browser Workbench view lifecycle', () => {
     expect(await requestBrowserWorkbenchReclaim(context as never, view as never)).toBe(true)
     await vi.advanceTimersByTimeAsync(0)
     await vi.advanceTimersByTimeAsync(0)
-    expect(await host.handle('status', { windowId: view.windowId })).toEqual({ ok: true, value: { status: 'reclaimed' } })
+    expect(await host.handle('status', { windowId: view.windowId })).toEqual({ ok: true, value: { status: 'reclaimed', reclaimProgress: { phase: 'restoring' } } })
     const next = await host.handle('prepare', { workbenchId: 'workbench-a' })
     expect(next.ok).toBe(true)
     if (!next.ok) throw new Error('expected reclaimed workbench to be available')

@@ -63,10 +63,17 @@ describe('official Area editor interactions', () => {
     const frame = screen.getByTitle('example.com') as HTMLIFrameElement
     expect(frame.src).toBe('https://example.com/')
     expect(frame.getAttribute('sandbox')).toContain('allow-scripts')
+    expect(screen.getByRole('status', { name: '正在加载网页…' })).toBeTruthy()
+    fireEvent.load(frame)
+    expect(screen.queryByRole('status', { name: '正在加载网页…' })).toBeNull()
 
     fireEvent.change(address, { target: { value: 'https://second.example/path' } })
     fireEvent.submit(address.closest('form')!)
     expect((screen.getByTitle('second.example') as HTMLIFrameElement).src).toBe('https://second.example/path')
+    expect(screen.getByRole('status', { name: '正在加载网页…' })).toBeTruthy()
+    fireEvent.error(screen.getByTitle('second.example'))
+    expect(screen.queryByRole('status', { name: '正在加载网页…' })).toBeNull()
+    expect(screen.getByText(/页面报告加载失败/)).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: '后退' }))
     expect((screen.getByTitle('example.com') as HTMLIFrameElement).src).toBe('https://example.com/')
     fireEvent.click(screen.getByRole('button', { name: '前进' }))

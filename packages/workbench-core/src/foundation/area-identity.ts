@@ -20,7 +20,10 @@ export function validateWorkbenchRelations(record: WorkbenchRecordV2): void {
     // Closed sessions retain the project they were created in. Only pages
     // still present in the layout must match the area's current project.
     const relativePathValid = entry.relativePath !== '' && !entry.relativePath.includes('\\') && entry.relativePath.split('/').every(part => part && part !== '.' && part !== '..' && part.toLowerCase() !== '.bay' && !part.includes(':'))
-    if (entry.sessionKey !== key || (entry.role === 'main' ? entry.relativePath !== '' : !entry.areaId || !areas.has(entry.areaId) || !relativePathValid)) throw new Error('对话归属或项目引用无效：' + key)
+    // Floating user sessions (for example extension repairs) own a project,
+    // but do not need an Area container. Worker ownership remains explicit.
+    const ownerValid = entry.areaId ? areas.has(entry.areaId) : entry.role === 'user'
+    if (entry.sessionKey !== key || (entry.role === 'main' ? entry.relativePath !== '' : !ownerValid || !relativePathValid)) throw new Error('对话归属或项目引用无效：' + key)
   }
   for (const area of areasOf(record.document.root)) for (const page of area.moduleHistory) {
     if (page.binding) {

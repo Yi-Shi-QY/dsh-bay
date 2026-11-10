@@ -27,6 +27,7 @@ export function scopeSettingsSnapshot(snapshot: SettingsScopeSnapshot<WorkbenchS
     value: { version: 4, activeWorkbenchId: context.workbenchId, openWorkbenchIds: record ? [context.workbenchId] : [],
       workbenches: record ? { [context.workbenchId]: record } : {}, invalidWorkbenches: {}, layoutTemplates: {}, sessionMarkers: {},
       ...(snapshot.value.globalHiddenEditorIds === undefined ? {} : { globalHiddenEditorIds: [...snapshot.value.globalHiddenEditorIds] }),
+      ...(snapshot.value.editorMenu === undefined ? {} : { editorMenu: structuredClone(snapshot.value.editorMenu) }),
       ...(snapshot.value.extensionConsents === undefined ? {} : { extensionConsents: structuredClone(snapshot.value.extensionConsents) }),
       ...(backgroundAi ? { backgroundAi } : {}) } }
 }

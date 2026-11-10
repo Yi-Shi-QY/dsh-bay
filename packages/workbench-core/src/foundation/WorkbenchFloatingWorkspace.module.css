@@ -61,11 +61,13 @@
 
 .header button:hover,
 .header button[aria-expanded='true'],
+.header button[aria-pressed='true'],
 .tab:hover,
 .tab button:hover,
 .menu button:hover {
   background: var(--dsw-alias-bg-layer-2, #8882);
 }
+.headerActions > button[aria-pressed='true'] { color: var(--dsw-alias-state-business-primary, #4268c7); }
 
 .header button:focus-visible,
 .tab:focus-visible,
@@ -333,6 +335,11 @@
   color: var(--dsw-alias-label-secondary, #777);
   font-size: 11px;
   line-height: 1;
+}
+
+.menu[data-floating-menu-view=pin] {
+  width: min(380px, calc(100% - 18px));
+  overflow: hidden;
 }
 
 .menuHeader > strong {

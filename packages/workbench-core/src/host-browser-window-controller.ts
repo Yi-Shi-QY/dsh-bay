@@ -1,3 +1,4 @@
+import type { WorkbenchReclaimProgress } from './workbench-reclaim.ts'
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
@@ -55,6 +56,7 @@ interface ViewRecord {
   floating?: FloatingHandoffV1
   floatingReturned?: boolean
   pageId?: string
+  reclaimProgress?: WorkbenchReclaimProgress
   suspendedUntil?: number
 }
 
@@ -135,6 +137,8 @@ export function createHostBrowserWindowController(options: HostBrowserWindowCont
   const tickets = new Map<string, ViewRecord>()
   const closeTokens = new Map<string, ViewRecord>()
   const runtimeMetricsByWindow = new Map<string, { readonly workbenchId: string; readonly snapshot: Record<string, unknown>; readonly updatedAt: number }>()
+  const watchers = new Map<string, Set<() => void>>()
+  const wake = (id: string) => { for (const done of watchers.get(id) ?? []) done() }
   let disposed = false
 
   const expire = (view: ViewRecord) => {
@@ -161,7 +165,7 @@ export function createHostBrowserWindowController(options: HostBrowserWindowCont
     const at = now()
     for (const view of views.values()) {
       if (view.suspendedUntil !== undefined && at >= view.suspendedUntil) {
-        delete view.suspendedUntil; view.status = 'closed'; view.updatedAt = at; releaseActive(view)
+        delete view.suspendedUntil; view.status = 'closed'; view.updatedAt = at; releaseActive(view); wake(view.windowId)
       }
       if (at >= view.expiresAt) expire(view)
       if ((view.status === 'ready' || view.status === 'reclaim-requested')
@@ -313,12 +317,12 @@ export function createHostBrowserWindowController(options: HostBrowserWindowCont
         view.pageId = body.pageId; delete view.suspendedUntil; view.updatedAt = now()
       } else {
         if (view.pageId !== body.pageId) return fail('browser-view-not-authorized')
-        view.suspendedUntil = now() + 10_000
         if (body.floating !== undefined) {
           const floating = decodeFloatingHandoff(body.floating)
           if (!floating) return fail('invalid-floating-handoff')
           view.floating = floating; view.floatingReturned = true
         }
+        view.suspendedUntil ??= now() + 10_000
       }
       return ok({ status: view.status })
     }
@@ -334,16 +338,49 @@ export function createHostBrowserWindowController(options: HostBrowserWindowCont
       return ok({ status: 'launched' })
     }
 
+    if (endpoint === 'watch-reclaim' || endpoint === 'reclaim-progress') {
+      const view = typeof body.windowId === 'string' ? views.get(body.windowId) : undefined
+      if (!view || view.shared || typeof body.closeToken !== 'string' || ticketDigest(body.closeToken) !== view.closeTokenHash || view.pageId !== body.pageId) return fail('browser-view-not-authorized')
+      if (endpoint === 'reclaim-progress') {
+        if (view.status !== 'reclaim-requested' || !['saving', 'releasing'].includes(String(body.phase))) return fail('browser-view-reclaim-stale')
+        // Saving can repeat after a failed flush; it cannot regress a release.
+        if (view.reclaimProgress?.phase !== 'releasing' || body.phase === 'releasing') view.reclaimProgress = {
+          phase: body.phase as 'saving' | 'releasing', ...(body.error === 'save-failed' ? { error: '浏览器未能保存布局，请检查浏览器中的保存冲突后重试。' } : {}),
+        }
+        return ok({ status: view.status })
+      }
+      if (view.status === 'ready') await new Promise<void>(resolve => {
+        const listeners = watchers.get(view.windowId) ?? new Set<() => void>()
+        const done = () => { clearTimeout(timer); listeners.delete(done); if (!listeners.size) watchers.delete(view.windowId); resolve() }
+        const timer = setTimeout(done, 5_000)
+        listeners.add(done); watchers.set(view.windowId, listeners)
+      })
+      return ok({ status: view.status })
+    }
+
     if (endpoint === 'reclaim') {
       if (Object.keys(body).some(key => !['windowId', 'force'].includes(key)) || typeof body.windowId !== 'string'
         || !/^[A-Za-z0-9-]{36}$/u.test(body.windowId)) return fail('invalid-window-id')
       const view = views.get(body.windowId)
       if (view === undefined) return fail('browser-view-not-found')
       if (view.shared === true) return fail('browser-view-reclaim-not-allowed')
+      if (view.status === 'reclaimed') return ok({ status: 'reclaimed', ...(view.reclaimProgress?.recovery ? { reclaimProgress: view.reclaimProgress } : {}) })
       const at = now()
+      if (view.status === 'closed' || view.suspendedUntil !== undefined) {
+        // The browser has already left. An explicit desktop reclaim ends the
+        // refresh grace period; no acknowledgement can arrive from that page.
+        delete view.suspendedUntil
+        view.status = 'reclaimed'; view.updatedAt = at
+        view.reclaimProgress = { phase: 'restoring', recovery: 'page-closed' }
+        delete view.failureCode
+        releaseActive(view); wake(view.windowId)
+        return ok({ status: 'reclaimed', reclaimProgress: view.reclaimProgress })
+      }
       if (body.force === true) {
+        delete view.suspendedUntil
         releaseActive(view)
         view.status = 'reclaimed'; view.updatedAt = at
+        view.reclaimProgress = { phase: 'restoring', forced: true }; wake(view.windowId)
         delete view.failureCode
         return ok({ status: view.status })
       }
@@ -353,18 +390,13 @@ export function createHostBrowserWindowController(options: HostBrowserWindowCont
         view.updatedAt = at
       }
       if (view.status === 'failed' && (view.failureCode === 'browser-view-heartbeat-timeout' || view.failureCode === 'browser-view-reclaim-timeout')) {
-        view.status = 'reclaimed'
-        view.updatedAt = at
-        releaseActive(view)
-        runtimeMetricsByWindow.delete(view.windowId)
-        delete view.failureCode
-        if (view.closeTokenHash !== undefined) closeTokens.delete(view.closeTokenHash)
-        delete view.closeTokenHash
-        return ok({ status: view.status })
+        return fail('browser-view-force-required')
       }
       if (view.status !== 'ready' && view.status !== 'reclaim-requested') return fail('browser-view-not-ready')
+      if (view.status === 'ready') view.reclaimProgress = { phase: 'notifying' }
       view.status = 'reclaim-requested'
       view.updatedAt = at
+      wake(view.windowId)
       return ok({ status: view.status })
     }
 
@@ -389,7 +421,10 @@ export function createHostBrowserWindowController(options: HostBrowserWindowCont
       }
       // Retain the receipt until normal expiry so a lost response can be retried.
       view.status = 'reclaimed'
+      delete view.suspendedUntil
+      view.reclaimProgress = { phase: 'restoring' }
       view.updatedAt = now()
+      wake(view.windowId)
       releaseActive(view)
       runtimeMetricsByWindow.delete(view.windowId)
       return ok({ status: view.status })
@@ -459,7 +494,7 @@ export function createHostBrowserWindowController(options: HostBrowserWindowCont
         const metrics = [...runtimeMetricsByWindow.values()]
           .filter(value => value.workbenchId === view.workbenchId)
           .sort((left, right) => right.updatedAt - left.updatedAt)[0]
-        return ok({ status: view.status, ...(view.failureCode === undefined ? {} : { code: view.failureCode }), ...(metrics === undefined ? {} : { metrics: { ...metrics.snapshot, reportedAt: metrics.updatedAt } }) })
+        return ok({ status: view.status, ...(view.reclaimProgress ? { reclaimProgress: view.reclaimProgress } : {}), ...(view.failureCode === undefined ? {} : { code: view.failureCode }), ...(metrics === undefined ? {} : { metrics: { ...metrics.snapshot, reportedAt: metrics.updatedAt } }) })
       }
       if (endpoint === 'opened') {
         if (view.status === 'prepared') { view.status = 'requested'; view.updatedAt = now() }
@@ -503,7 +538,7 @@ export function createHostBrowserWindowController(options: HostBrowserWindowCont
         .sort((left, right) => right.updatedAt - left.updatedAt)[0]
       return latest === undefined ? undefined : { ...latest.snapshot, reportedAt: latest.updatedAt }
     },
-    dispose() { disposed = true; views.clear(); tickets.clear(); closeTokens.clear(); activeByWorkbenchId.clear(); runtimeMetricsByWindow.clear() },
+    dispose() { disposed = true; for (const id of watchers.keys()) wake(id); watchers.clear(); views.clear(); tickets.clear(); closeTokens.clear(); activeByWorkbenchId.clear(); runtimeMetricsByWindow.clear() },
   }
 }
 
@@ -669,7 +704,7 @@ export function createWorkbenchDocumentHandler(
 }
 
 const BROWSER_WINDOW_RPC_ACTIONS = [
-  'prepare', 'launch', 'redeem', 'opened', 'ready', 'failed', 'status', 'heartbeat', 'reclaim', 'reclaimed', 'metrics', 'attach', 'suspend',
+  'prepare', 'launch', 'redeem', 'opened', 'ready', 'failed', 'status', 'heartbeat', 'reclaim', 'reclaimed', 'metrics', 'attach', 'suspend', 'watch-reclaim', 'reclaim-progress',
   'floating-stage', 'floating-read',
 ] as const
 

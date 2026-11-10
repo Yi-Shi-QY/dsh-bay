@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
 import { WORKBENCH_DIRECTORY_ROUTE } from '../workbench-directory-contract.ts'
+import { WorkbenchPageLoading } from '../foundation/WorkbenchPageLoading.tsx'
 
 interface Listing { project: string; truncated?: boolean; entries: { name: string; relativePath: string; kind: 'directory' | 'file' | 'unavailable' }[] }
 /** Project files are available before the first conversation exists. */
 export function ProjectFilesEditor({ workbenchId, areaId }: { workbenchId?: string | undefined; areaId?: string | undefined }) {
   const [path, setPath] = useState(''), [listing, setListing] = useState<Listing>(), [error, setError] = useState('')
-  const [preview, setPreview] = useState<{ path: string; text: string; truncated: boolean }>(), [attempt, setAttempt] = useState(0)
+  const [preview, setPreview] = useState<{ path: string; text?: string; truncated?: boolean }>(), [attempt, setAttempt] = useState(0)
   const [busy, setBusy] = useState(false)
   const request = async <T,>(action: string, relativePath: string, signal: AbortSignal): Promise<T> => {
     const response = await fetch(WORKBENCH_DIRECTORY_ROUTE, { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, signal, body: JSON.stringify({ action, workbenchId, areaId, relativePath }) })
@@ -35,9 +36,9 @@ export function ProjectFilesEditor({ workbenchId, areaId }: { workbenchId?: stri
       <button style={button} disabled={busy} onClick={() => { setPreview(undefined); setAttempt(value => value + 1) }}>刷新</button>
     </div>
     {error ? <p role="alert" style={{ padding: 12 }}>{error}</p> : null}
-    {busy ? <p role="status" style={{ padding: 12 }}>正在读取项目文件…</p> : null}
+    {busy ? <WorkbenchPageLoading label="项目文件" icon="folder" /> : null}
     {listing?.truncated ? <p role="status" style={{ padding: 12 }}>此目录内容较多，当前显示前 2,000 项。</p> : null}
-    {preview ? <div style={{ overflow: 'auto', padding: 12 }}><strong>{preview.path}</strong><pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', fontSize: 12 }}>{preview.text}</pre>{preview.truncated ? <p>文件较大，当前显示前 256 KB。</p> : null}</div>
-      : <div style={{ overflow: 'auto', padding: 8 }}>{listing?.entries.length === 0 ? <p>此文件夹为空。可在此项目中新建对话开始工作。</p> : null}{listing?.entries.map(entry => <button key={entry.relativePath} disabled={entry.kind === 'unavailable'} style={{ ...button, display: 'block', width: '100%', textAlign: 'left', border: 0, padding: '8px 10px' }} onClick={() => entry.kind === 'directory' ? setPath(entry.relativePath) : setPreview({ path: entry.relativePath, text: '正在读取…', truncated: false })}>{entry.kind === 'directory' ? '▸ ' : '· '}{entry.name}{entry.kind === 'unavailable' ? '（目标不可用）' : ''}</button>)}</div>}
+    {busy ? null : preview ? preview.text === undefined && !error ? <WorkbenchPageLoading label="文件预览" icon="file-preview" /> : <div style={{ overflow: 'auto', padding: 12 }}><strong>{preview.path}</strong><pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', fontSize: 12 }}>{preview.text}</pre>{preview.truncated ? <p>文件较大，当前显示前 256 KB。</p> : null}</div>
+      : <div style={{ overflow: 'auto', padding: 8 }}>{listing?.entries.length === 0 ? <p>此文件夹为空。可在此项目中新建对话开始工作。</p> : null}{listing?.entries.map(entry => <button key={entry.relativePath} disabled={entry.kind === 'unavailable'} style={{ ...button, display: 'block', width: '100%', textAlign: 'left', border: 0, padding: '8px 10px' }} onClick={() => { setError(''); if (entry.kind === 'directory') setPath(entry.relativePath); else setPreview({ path: entry.relativePath }) }}>{entry.kind === 'directory' ? '▸ ' : '· '}{entry.name}{entry.kind === 'unavailable' ? '（目标不可用）' : ''}</button>)}</div>}
   </section>
 }

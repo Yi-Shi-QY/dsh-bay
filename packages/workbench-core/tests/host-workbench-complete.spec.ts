@@ -52,13 +52,15 @@ it('restores hidden task ownership, logical session mappings and final cwd; retr
     const directory = new HostWorkbenchDirectory(join(root, 'profile'), workspaces as never)
     await directory.create({ requestId: 'create-task', parentPath: root, folderName: 'source', record: { ...record(), areaDefinitions: { hidden: { areaId: 'hidden' } } } })
     for (const areaId of ['area-a', 'hidden']) await directory.bindArea({ workbenchId: 'complete-wb', areaId, relativePath: 'app', createDirectory: true, expectedRevision: directory.getSnapshot().revision })
-    for (const id of ['native-main', 'native-worker']) {
-      const main = id === 'native-main'
-      const session = Session.create(SessionId(id), [], { version: SESSION_FORMAT_VERSION, id: SessionId(id), cwd: join(directory.rootPath('complete-wb'), main ? '' : 'app'), createdAt: 1, isSeeded: false })
+    const repair = await directory.prepareCreatorRepair({ workbenchId: 'complete-wb', moduleId: 'local.pomodoro' })
+    for (const id of ['native-main', 'native-worker', repair.sessionId]) {
+      const main = id === 'native-main', isRepair = id === repair.sessionId
+      const relativePath = main ? '' : isRepair ? repair.relativePath : 'app'
+      const session = Session.create(SessionId(id), [], { version: SESSION_FORMAT_VERSION, id: SessionId(id), cwd: join(directory.rootPath('complete-wb'), relativePath), createdAt: 1, isSeeded: false })
       session.append('user/message', createUserMessage({ content: [{ type: 'text', text: 'Preserved task history' }], source: { kind: 'user' } }), { surfaceOp: 'append' })
       const log = await source.sessionPersistence.create(session.header)
       try { await log.append(session.snapshotEvents()); await log.flush() } finally { await log.close() }
-      await directory.registerSession('complete-wb', id, { sessionKey: main ? 'main:key' : 'worker:key', role: main ? 'main' : 'worker', ...(main ? {} : { areaId: 'hidden' }), relativePath: main ? '' : 'app', title: id, agentPreset: main ? 'bay-agent' : 'standard', createdAt: 1 })
+      await directory.registerSession('complete-wb', id, { sessionKey: main ? 'main:key' : isRepair ? repair.sessionKey : 'worker:key', role: main ? 'main' : isRepair ? 'user' : 'worker', ...(main || isRepair ? {} : { areaId: 'hidden' }), relativePath, title: id, agentPreset: main ? 'bay-agent' : isRepair ? 'cordis' : 'standard', createdAt: 1 })
     }
     const sourceRecord = directory.getSnapshot().value.workbenches['complete-wb']!
     if (sourceRecord.document.root.kind !== 'area') throw new Error('Expected Area')
@@ -105,7 +107,12 @@ it('restores hidden task ownership, logical session mappings and final cwd; retr
     expect(restored.document.root.moduleHistory.map(page => page.binding?.sessionId)).toEqual([workerId, workerId])
     expect(restored.document.root.moduleHistory[0]?.state).toEqual({ resourceAddress: 'dsh-resource://file/session/' + workerId + '/result.txt' })
     expect(restored.document.root.moduleHistory[0]?.sessionStateOrder).toEqual([JSON.stringify([join(root, 'recipient', 'app'), workerId])])
-    expect(await target.sessionPersistence.list()).toHaveLength(2)
+    expect(await target.sessionPersistence.list()).toHaveLength(3)
+    const restoredRepair = await recipient.prepareCreatorRepair({ workbenchId: 'complete-wb', moduleId: 'local.pomodoro' })
+    expect(restoredRepair).toMatchObject({ registered: true, relativePath: repair.relativePath, sessionKey: repair.sessionKey })
+    expect(restoredRepair.sessionId).not.toBe(repair.sessionId)
+    const repairLog = await target.sessionPersistence.open(SessionId(restoredRepair.sessionId), 'read')
+    try { expect(repairLog.header.cwd).toBe(join(root, 'recipient', repair.relativePath)); expect((await repairLog.read(0, 10)).events.some(event => event.type === 'user/message')).toBe(true) } finally { await repairLog.close() }
     const handle = await target.sessionPersistence.open(SessionId(workerId), 'read')
     try { expect(handle.header.cwd).toBe(join(root, 'recipient', 'app')); expect((await handle.read(0, 10)).events.filter(event => event.type === 'user/message')).toHaveLength(1) } finally { await handle.close() }
   } finally { await source.fiber.dispose(); await target.fiber.dispose() }

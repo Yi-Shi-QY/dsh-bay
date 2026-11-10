@@ -79,11 +79,11 @@ export function editorPresentationFor(
 ): WorkbenchEditorPresentation {
   switch (id) {
     case 'workbench.conversation.start':
-      return { icon: 'plus-message', category: '对话', categoryOrder: 10 }
+      return { icon: 'plus-message', category: '官方内置', categoryOrder: 30 }
     case 'workbench.conversation':
-      return { icon: 'message', category: '对话', categoryOrder: 10 }
+      return { icon: 'message', category: '官方内置', categoryOrder: 30 }
     case 'workbench.agent-trajectory':
-      return { icon: 'trajectory', category: '分析', categoryOrder: 20 }
+      return { icon: 'trajectory', category: '官方内置', categoryOrder: 30 }
     case 'workbench.workspace-files':
       return { icon: 'folder', category: '官方内置', categoryOrder: 30 }
     case 'workbench.terminal':

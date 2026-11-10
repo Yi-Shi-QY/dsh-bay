@@ -192,6 +192,7 @@ export class HostWorkbenchAccess {
     // field: they use the explicit share projection below.
     const ownerGlobals = context.actor === 'browser-owner' ? {
       ...(source.value.globalHiddenEditorIds === undefined ? {} : { globalHiddenEditorIds: [...source.value.globalHiddenEditorIds] }),
+      ...(source.value.editorMenu === undefined ? {} : { editorMenu: structuredClone(source.value.editorMenu) }),
       ...(source.value.extensionConsents === undefined ? {} : { extensionConsents: structuredClone(source.value.extensionConsents) }),
     } : {}
     return { ...source, writable: context.actor !== 'lan-guest' || this.capabilities(context).some(c => ['layout', 'context', 'tasks'].includes(c)), value: {
