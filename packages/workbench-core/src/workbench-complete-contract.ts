@@ -24,6 +24,8 @@ export interface CompletePackageJob {
   path: string
   parentPath?: string
   folderName?: string
+  name?: string
+  replacementDirectoryId?: string
   /** Durable import staging directory. Kept until the job reaches complete. */
   stageDir?: string
   /** Durable destination path. The path is stable while native cwd values are rebuilt. */
@@ -42,10 +44,13 @@ export interface CompletePackageJob {
   report: CompletePackageReport
 }
 
-/** Public job projection: never exposes Host paths, tokens or native Session maps. */
+/** Public job projection: destination display only; no archive paths, tokens or native Session maps. */
 export type CompletePackageJobView = Pick<CompletePackageJob, 'version' | 'id' | 'kind' | 'requestId' | 'workbenchId' | 'stage' | 'files' | 'bytes' | 'updatedAt' | 'error' | 'report'> & {
   running: boolean
   recoverable: boolean
+  name?: string
+  targetDisplayPath?: string
+  canChangeDestination?: boolean
 }
 
 export interface CompletePackageUpload {
@@ -65,6 +70,9 @@ export interface CompletePackageDirectoryRequest {
   workbenchId: string
   state: 'pending' | 'selected' | 'cancelled' | 'consumed'
   updatedAt: number
+  /** Display only; operations use the Host-held directory permission. */
+  displayPath?: string
+  jobId?: string
 }
 
 export interface CompletePackagePreflight {
@@ -72,4 +80,16 @@ export interface CompletePackagePreflight {
   workbenchId: string
   sessionCount: number
   manifestSha256: string
+  overview?: {
+    name: string
+    description: string
+    layout: import('./foundation/document-v3.ts').WorkbenchNodeV3
+    projectCount: number
+    areaCount: number
+    pageCount: number
+    fileCount: number
+    bytes: number
+    memoryCount: number
+    taskCount: number
+  }
 }

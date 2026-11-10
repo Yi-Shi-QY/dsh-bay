@@ -11,6 +11,54 @@ const client = vi.hoisted(() => ({ request: vi.fn(), upload: vi.fn(), download: 
 vi.mock('../src/client/workbench-complete.ts', () => ({ createWorkbenchCompleteClient: () => client }))
 afterEach(() => { cleanup(); vi.resetAllMocks(); sessionStorage.clear() })
 
+const importReport = { data: 'complete', environment: 'needs-setup', tasks: 'waiting-for-user', blockers: [], exclusions: ['cache/'], environmentSteps: ['选择本机模型连接'] }
+function savedImport(extra: object = {}) {
+  sessionStorage.setItem('bay.complete-transfer.v1.', JSON.stringify({ folderName: 'product', name: '产品研发', upload: { id: 'upload', workbenchId: '', name: 'product.tgz', size: 20, received: 20, state: 'ready' }, preflight: { valid: true, workbenchId: 'source', sessionCount: 3 }, selection: { id: 'selection', uploadId: 'upload', workbenchId: '', state: 'selected', displayPath: 'C:\\Imports' }, ...extra }))
+}
+
+it('keeps destination fields editable after a target conflict and reuses the uploaded package', async () => {
+  savedImport()
+  client.request.mockImplementation(async input => {
+    if (input.action === 'jobs') return []
+    if (input.action === 'start-import') {
+      if (input.folderName === 'product') throw new Error('目标工作台文件夹已存在，请修改文件夹名称或重新选择位置。')
+      return { id: 'job', requestId: input.requestId, workbenchId: 'new', kind: 'import', stage: 'queued', files: 0, bytes: 0, running: true }
+    }
+  })
+  const view = render(<WorkbenchCompletePackagePanel workbenchId="other" mode="import" />)
+  expect(view.getByText('C:\\Imports\\product')).toBeTruthy()
+  fireEvent.click(view.getByRole('button', { name: '导入并保持暂停' }))
+  await view.findByRole('alert')
+  expect((view.getByLabelText('新工作台文件夹名称') as HTMLInputElement).disabled).toBe(false)
+  expect((view.getByRole('button', { name: '选择目标父目录' }) as HTMLButtonElement).disabled).toBe(false)
+  fireEvent.change(view.getByLabelText('新工作台文件夹名称'), { target: { value: 'product-copy' } })
+  fireEvent.click(view.getByRole('button', { name: '导入并保持暂停' }))
+  await waitFor(() => expect(client.request).toHaveBeenCalledWith(expect.objectContaining({ action: 'start-import', workbenchId: '', uploadId: 'upload', folderName: 'product-copy' })))
+  expect(client.upload).not.toHaveBeenCalled()
+})
+
+it('restores the completed result after remount and opens only when explicitly requested', async () => {
+  savedImport({ jobId: 'job' })
+  const open = vi.fn()
+  client.request.mockResolvedValue([{ id: 'job', workbenchId: 'new', name: '产品研发', kind: 'import', stage: 'complete', files: 12, bytes: 20, report: importReport }])
+  const view = render(<WorkbenchCompletePackagePanel workbenchId="other" mode="import" onOpenWorkbench={open} />)
+  const button = await view.findByRole('button', { name: '打开工作台' })
+  expect(view.getByText('选择本机模型连接')).toBeTruthy()
+  expect(view.getByText('cache/')).toBeTruthy()
+  expect(open).not.toHaveBeenCalled()
+  expect(client.request.mock.calls.every(([input]) => input.action === 'jobs')).toBe(true)
+  fireEvent.click(button)
+  await waitFor(() => expect(open).toHaveBeenCalledWith('new'))
+})
+
+it('does not tie a new desktop import to the browser-owned current workbench', async () => {
+  client.request.mockResolvedValue([])
+  const value = settingsFixture()
+  const view = render(<WorkbenchSharingPage {...{ value, editors: [], openOptions: { shareMode: 'import' }, workbenchDirectory: { completeRequest: vi.fn() }, windowController: { getSnapshot: () => ({ requests: [{ workbenchId: value.activeWorkbenchId, status: 'ready' }] }) }, useSessions: () => ({ ids: [], byId: {} }) } as never} />)
+  expect((view.getByLabelText('接收完整包') as HTMLInputElement).disabled).toBe(false)
+  await waitFor(() => expect(client.request).toHaveBeenCalledWith({ action: 'jobs', workbenchId: '', allImports: true }, expect.anything()))
+})
+
 it('keeps browser import disabled until desktop selection is confirmed and retains data across a remount', async () => {
   const selection = { id: 'selection', uploadId: 'upload', workbenchId: 'wb', state: 'pending', updatedAt: 1 }
   client.request.mockImplementation(async input => input.action === 'jobs' ? [] : input.action === 'directory-status' ? selection : undefined)
@@ -45,9 +93,10 @@ it('exposes browser complete import and export for the current workbench from th
     workbenchDirectory: { completeRequest: vi.fn() },
     useSessions: (select: (value: object) => unknown) => select({ ids: [], byId: {} }),
   } as never} />)
-  expect(view.getByRole('heading', { name: '导入与分享' })).toBeTruthy()
+  expect(view.getByRole('heading', { name: '分享与迁移' })).toBeTruthy()
   expect(view.getByLabelText('接收完整包').hasAttribute('disabled')).toBe(false)
   expect(view.queryByLabelText('分享来源工作台')).toBeNull()
+  fireEvent.click(view.getByRole('button', { name: '导出工作台', exact: true }))
   fireEvent.click(view.getByRole('button', { name: '生成完整包' }))
   await waitFor(() => expect(client.request).toHaveBeenCalledWith(expect.objectContaining({ action: 'start-export', workbenchId: 'current' })))
   expect(client.request.mock.calls.some(([input]) => input.workbenchId === 'other')).toBe(false)
@@ -60,9 +109,10 @@ it('offers first-workbench import on an empty desktop without enabling export', 
     useSessions: (select: (value: object) => unknown) => select({ ids: [], byId: {} }),
   } as never} />)
   expect(view.getByRole('option', { name: '接收第一个工作台' })).toBeTruthy()
-  expect(view.getByLabelText('接收完整包').hasAttribute('disabled')).toBe(false)
   expect(view.getByRole('button', { name: '生成完整包' }).hasAttribute('disabled')).toBe(true)
-  await waitFor(() => expect(client.request).toHaveBeenCalledWith({ action: 'jobs', workbenchId: '' }, expect.anything()))
+  fireEvent.click(view.getByRole('button', { name: '导入工作台', exact: true }))
+  expect(view.getByLabelText('接收完整包').hasAttribute('disabled')).toBe(false)
+  await waitFor(() => expect(client.request).toHaveBeenCalledWith({ action: 'jobs', workbenchId: '', allImports: true }, expect.anything()))
 })
 
 it('uses the selected workbench for complete export and retains it when switching package types', async () => {
@@ -83,7 +133,7 @@ it('uses the selected workbench for complete export and retains it when switchin
   expect(await view.findByText('fixture-preview-unavailable')).toBeTruthy()
 })
 
-it('keeps an upload alive while switching package types and restores the checked import form', async () => {
+it('keeps an upload alive across operation tabs without exposing the unsupported layout importer', async () => {
   client.request.mockResolvedValue([])
   let finish!: (value: unknown) => void
   let uploadSignal: AbortSignal | undefined
@@ -99,10 +149,11 @@ it('keeps an upload alive while switching package types and restores the checked
   } as never} />)
   fireEvent.change(view.getByLabelText('接收完整包'), { target: { files: [new File(['data'], 'received.tgz')] } })
   expect(view.getByRole('progressbar', { name: '完整包上传进度' }).getAttribute('value')).toBe('50')
-  fireEvent.click(view.getByRole('button', { name: '布局与扩展', exact: true }))
+  expect(view.queryByRole('button', { name: '布局与扩展', exact: true })).toBeNull()
+  fireEvent.click(view.getByRole('button', { name: '导入记录', exact: true }))
   expect(uploadSignal?.aborted).toBe(false)
   await act(async () => { finish({ upload: { id: 'upload', name: 'received.tgz', size: 20, received: 20, state: 'ready' }, preflight: { valid: true, workbenchId: 'received', sessionCount: 2 } }) })
-  fireEvent.click(view.getByRole('button', { name: '完整工作台包', exact: true }))
+  fireEvent.click(view.getByRole('button', { name: '导入工作台', exact: true }))
   expect((view.getByLabelText('新工作台文件夹名称') as HTMLInputElement).value).toBe('received')
   expect(view.getByRole('button', { name: '导入并保持暂停' }).hasAttribute('disabled')).toBe(true)
   expect(client.upload).toHaveBeenCalledOnce()

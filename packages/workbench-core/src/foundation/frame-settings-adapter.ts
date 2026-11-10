@@ -90,6 +90,7 @@ export type WorkbenchDirectoryCreateResult = WorkbenchDirectoryOperationResult |
 
 /** Named-Workbench selector backed by the same revision-aware Settings scope. */
 export interface WorkbenchDirectory {
+  checkCreateLocation?(parentPath: string, folderName: string): Promise<unknown>
   getProjects?(workbenchId: string): Readonly<Record<string, import('../workbench-directory-contract.ts').WorkbenchProjectV1>>
   getProjectSessions?(workbenchId: string, projectId: string): readonly import('../workbench-directory-contract.ts').WorkbenchSessionEntryV1[]
   openProject?(workbenchId: string, projectId: string): Promise<void>
@@ -229,6 +230,8 @@ export function createProjectNeutralFrameSettings(
   let directorySource: SettingsScopeSnapshot<WorkbenchSettingsV4> | undefined
   let directorySnapshot: WorkbenchDirectorySnapshot = { openWorkbenchIds: [], globalHiddenEditorIds: [], extensionConsents: {}, rows: [], invalidRows: [], templates: [] }
   let beforeLifecycleTransition: (() => Promise<boolean>) | undefined
+  // Preserve the payload across lost responses and post-commit initialization failures.
+  const creations = new Map<string, { fingerprint: string; record: import('./persistence.ts').WorkbenchRecordV2 }>()
 
   const project = (): SettingsScopeSnapshot<WorkbenchSettings> => {
     const next = source.getSnapshot()
@@ -471,6 +474,10 @@ export function createProjectNeutralFrameSettings(
       const value = snapshot.value
       const requestId = requested?.requestId ?? browserSafeUuid()
       const workbenchId = `workbench-${requestId}`
+      const fingerprint = JSON.stringify(requested ?? {})
+      const prior = creations.get(requestId)
+      if (prior && prior.fingerprint !== fingerprint) throw new Error('此创建请求已提交，请继续原操作。修改内容需要重新开始创建。')
+      if (prior && options.createFileWorkbench) return options.createFileWorkbench({ record: prior.record, parentPath: requested!.parentPath!, folderName: requested!.folderName?.trim() || prior.record.name, requestId })
       const now = Date.now()
       const template = requested?.templateId === undefined || value === undefined ? undefined
         : value.layoutTemplates[requested.templateId] ?? value.workbenches[requested.templateId]
@@ -481,7 +488,7 @@ export function createProjectNeutralFrameSettings(
       const existingNames = Object.values(value?.workbenches ?? {}).map(record => record.name)
       const requestedName = acceptedName(requested?.name ?? '')
       if (requested?.name !== undefined && requestedName === undefined) return Promise.resolve({ status: 'rejected', reason: 'invalid-name' })
-      if (requestedName !== undefined && existingNames.some(existing => nameKey(existing) === nameKey(requestedName))) {
+      if (requestedName !== undefined && Object.values(value?.workbenches ?? {}).some(existing => existing.workbenchId !== workbenchId && nameKey(existing.name) === nameKey(requestedName))) {
         return Promise.resolve({ status: 'rejected', reason: 'duplicate-name' })
       }
       const name = requestedName === undefined
@@ -497,6 +504,8 @@ export function createProjectNeutralFrameSettings(
       }
       if (options.createFileWorkbench) {
         if (!requested?.parentPath) throw new Error('请选择工作台存放位置。')
+        creations.set(requestId, { fingerprint, record })
+        if (creations.size > 128) creations.delete(creations.keys().next().value!)
         return options.createFileWorkbench({ record, parentPath: requested.parentPath, folderName: requested.folderName?.trim() || name, requestId })
       }
       const next: WorkbenchSettingsV4 = value === undefined

@@ -87,20 +87,32 @@ it('requires desktop directory selection and imports a browser upload as an iner
   const archive = new Uint8Array(await (await f.routes.get(WORKBENCH_COMPLETE_DOWNLOAD_ROUTE)!(new Request('http://localhost' + ticket))).arrayBuffer())
   const upload = (await f.call<CompletePackageUpload>({ action: 'upload-begin', workbenchId: 'wb', requestId: 'browser-upload', name: 'source.tar.gz', size: archive.length })).value
   expect((await f.sendChunk(upload.id, 0, archive)).status).toBe(200)
-  expect(await f.call({ action: 'upload-finish', id: upload.id })).toMatchObject({ status: 200, value: { valid: true, workbenchId: 'wb' } })
+  expect(await f.call({ action: 'upload-finish', id: upload.id })).toMatchObject({ status: 200, value: { valid: true, workbenchId: 'wb', overview: { name: 'Workbench', areaCount: 1, projectCount: 0, memoryCount: 0, taskCount: 0, fileCount: expect.any(Number), layout: { kind: 'area', moduleHistory: [] } } } })
   await f.call({ action: 'directory-request', uploadId: upload.id, requestId: 'pick-parent' })
   expect((await f.call({ action: 'directory-complete', id: 'pick-parent', parentPath: f.root })).status).toBe(403)
-  expect(await f.call({ action: 'directory-complete', id: 'pick-parent', parentPath: f.root }, null)).toMatchObject({ status: 200, value: { state: 'selected' } })
-  const request = { action: 'start-import', requestId: 'import-once', workbenchId: 'wb', uploadId: upload.id, directoryRequestId: 'pick-parent', folderName: 'received' }
+  expect(await f.call({ action: 'directory-complete', id: 'pick-parent', parentPath: f.root }, null)).toMatchObject({ status: 200, value: { state: 'selected', displayPath: f.root } })
+  const request = { action: 'start-import', requestId: 'import-once', workbenchId: 'wb', uploadId: upload.id, directoryRequestId: 'pick-parent', folderName: 'received', name: '接收工作台' }
+  expect(await f.call({ ...request, folderName: 'source' })).toMatchObject({ status: 409, error: expect.stringContaining('目标工作台文件夹已存在') })
+  expect(await f.call({ action: 'directory-status', id: 'pick-parent' })).toMatchObject({ value: { state: 'selected' } })
   const imported = await f.call<CompletePackageJobView>(request)
   const completed = await f.until(imported.value.id, 'complete')
   expect((await f.call<CompletePackageJobView>(request)).value.id).toBe(completed.id)
   expect((await f.call({ ...request, requestId: 'different-import' })).status).toBe(409)
   expect(await readFile(join(f.root, 'received', 'result.txt'), 'utf8')).toBe('portable result')
   expect(f.directory.getSnapshot().value.workbenches[completed.workbenchId]?.executionPaused).toBe(true)
+  expect(f.directory.getSnapshot().value.workbenches[completed.workbenchId]?.name).toBe('接收工作台')
   expect(f.directory.getSnapshot().value.workbenches[completed.workbenchId]?.backgroundAi).toEqual(backgroundAi)
   expect(completed.workbenchId).not.toBe('wb')
   expect(completed.report).toMatchObject({ data: 'complete', environment: 'needs-setup', tasks: 'waiting-for-user' })
+  expect((await f.call<CompletePackageJobView[]>({ action: 'jobs', workbenchId: '', allImports: true }, null)).value.map(job => job.id)).toContain(completed.id)
+  // A pre-existing failed job that never wrote destination data can return to
+  // location selection without uploading again or leaving two runnable jobs.
+  const failedId = 'legacy-failed-import'
+  await writeFile(join(f.root, 'profile', '.dsh-workbench', 'complete-v5', failedId + '.json'), JSON.stringify({ version: 5, id: failedId, kind: 'import', requestId: 'failed-import', workbenchId: 'wb', accessWorkbenchId: 'wb', ownerAccessId: 'browser-1', uploadId: upload.id, path: join(f.root, 'profile', '.dsh-workbench', 'complete-v5', 'uploads', upload.id + '.tar.gz'), parentPath: f.root, folderName: 'source', stage: 'failed', files: 0, bytes: 0, updatedAt: 1, report: completed.report }))
+  const corrected = await f.call<{ selection: { id: string; state: string }; upload: { id: string } }>({ action: 'reset-import-location', id: failedId })
+  expect(corrected).toMatchObject({ status: 200, value: { selection: { state: 'selected' }, upload: { id: upload.id } } })
+  expect((await f.call({ action: 'reset-import-location', id: failedId })).value).toEqual(corrected.value)
+  expect((await f.call({ action: 'resume', id: failedId })).status).toBe(409)
   const guest = f.access.registerGuest('guest-1', 'wb', COLLABORATION_GRANT, () => true)
   expect((await f.call({ action: 'jobs', workbenchId: 'wb' }, guest)).status).toBe(403)
 })

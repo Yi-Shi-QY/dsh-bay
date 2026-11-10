@@ -27,6 +27,23 @@ function fixture() {
 }
 
 describe('Core directory data protection', () => {
+  it('retries the identical creation payload after a committed directory fails to initialize', async () => {
+    const f = fixture()
+    const createFileWorkbench = vi.fn(async (input: { record: import('../src/foundation/persistence.ts').WorkbenchRecordV2 }) => {
+      const current = f.source.getSnapshot()
+      await f.source.patch!({ operation: 'set', path: [], value: { ...current.value!, workbenches: { ...current.value!.workbenches, [input.record.workbenchId]: input.record } }, expectedRevision: current.revision })
+      if (createFileWorkbench.mock.calls.length === 1) throw new Error('Main initialization interrupted')
+      return { status: 'committed' as const, workbenchId: input.record.workbenchId, revision: f.source.getSnapshot().revision! }
+    })
+    const adapter = createProjectNeutralFrameSettings(f.source, { createFileWorkbench })
+    const input = { requestId: 'create-retry', name: '研发工作台', parentPath: 'C:/Projects', folderName: 'product', layoutPresetId: 'columns' as const }
+    await expect(adapter.directory.create(input)).rejects.toThrow('Main initialization interrupted')
+    expect(f.value().workbenches['workbench-create-retry']).toBeDefined()
+    expect(await adapter.directory.create(input)).toMatchObject({ status: 'committed', workbenchId: 'workbench-create-retry' })
+    expect(createFileWorkbench).toHaveBeenCalledTimes(2)
+    expect(createFileWorkbench.mock.calls[1]![0]).toEqual(createFileWorkbench.mock.calls[0]![0])
+    expect(await adapter.directory.create({ ...input, requestId: 'different-create' })).toMatchObject({ status: 'rejected', reason: 'duplicate-name' })
+  })
   it('commits a preset and its modules atomically, preserving old layouts and CAS safety', async () => {
     const f = fixture(), before = structuredClone(f.value())
     const request = { name: '预设工作台', layoutPresetId: 'four-grid' as const, areaEditors: [null, { editorId: 'test.session', scope: 'session' as const, label: '会话内页' }, null, { editorId: 'test.root', scope: 'root' as const, label: '全局内页' }] }

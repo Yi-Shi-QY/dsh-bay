@@ -2,20 +2,20 @@ import { browserSafeUuid } from '../browser-safe-id.ts'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createWorkbenchCompleteClient } from '../client/workbench-complete.ts'
 import type { CompletePackageDirectoryRequest, CompletePackageJobView, CompletePackagePreflight, CompletePackageUpload } from '../workbench-complete-contract.ts'
-import { IconArchiveOutlineMedium, IconDownloadOutlineMedium, IconFolderOpenOutlineMedium, IconNewChatOutlineMedium, IconDatabaseOutlineMedium, IconBranchOutlineMedium, IconClockOutlineMedium, IconCheckCircleOutlineMedium, IconWarningOutlineMedium, IconRefreshOutlineMedium, IconPauseOutlineMedium, IconPlusOutlineMedium } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconArchiveOutlineMedium, IconFolderOpenOutlineMedium, IconNewChatOutlineMedium, IconDatabaseOutlineMedium, IconBranchOutlineMedium, IconClockOutlineMedium, IconWarningOutlineMedium } from '@deepseek-ai/dsh-client-ui-primitives'
+import { suggestedWorkbenchFolder } from '../workbench-folder-name.ts'
+import type { WorkbenchEditorCatalogRow } from './catalog.ts'
+import { WorkbenchImportFlow, type WorkbenchImportTransfer } from './WorkbenchImportFlow.tsx'
+import { WorkbenchCompleteJob } from './WorkbenchCompleteJob.tsx'
 import css from './WorkbenchSettings.module.css'
 import sharing from './WorkbenchSharing.module.css'
 
-const labels: Record<CompletePackageJobView['stage'], string> = { queued: '等待处理', preflight: '检查内容', snapshot: '生成快照', files: '处理文件', sessions: '恢复对话', relations: '恢复关联', publish: '登记工作台', complete: '已完成', cancelled: '已取消，可继续', failed: '需要处理' }
-type Transfer = { upload?: CompletePackageUpload; uploadRequest?: { name: string; size: number; lastModified: number; requestId: string }; preflight?: CompletePackagePreflight; selection?: CompletePackageDirectoryRequest; folderName: string }
-const storageKey = (workbenchId: string) => 'bay.complete-transfer.v1.' + workbenchId
-function savedTransfer(workbenchId: string): Transfer {
-  try { return JSON.parse(sessionStorage.getItem(storageKey(workbenchId)) ?? 'null') as Transfer ?? { folderName: '' } }
+const storageKey = (id: string) => 'bay.complete-transfer.v1.' + id
+function savedTransfer(id: string): WorkbenchImportTransfer {
+  try { return JSON.parse(sessionStorage.getItem(storageKey(id)) ?? 'null') as WorkbenchImportTransfer ?? { folderName: '' } }
   catch { return { folderName: '' } }
 }
 const errorText = (error: unknown) => error instanceof Error ? error.message : String(error)
-
-/** Shared desktop/browser panel. Bytes stay in File slices and the browser download manager. */
 interface CompletePanelProps {
   workbenchId: string
   mode?: 'export' | 'import' | 'history'
@@ -23,144 +23,119 @@ interface CompletePanelProps {
   summary?: ReactNode
   browser?: boolean
   disabled?: boolean
+  editors?: readonly WorkbenchEditorCatalogRow[]
   pickParentDirectory?: () => Promise<string | undefined>
+  onOpenWorkbench?: ((id: string) => void | Promise<unknown>) | undefined
+  onImport?: (() => void) | undefined
 }
 export function WorkbenchCompletePackagePanel(props: CompletePanelProps) {
-  return <CompletePackagePanel key={props.workbenchId} {...props} />
+  return <CompletePackagePanel key={props.browser ? props.workbenchId : 'desktop'} {...props} />
 }
-function CompletePackagePanel({ workbenchId, mode, sourceControl, summary, browser = false, disabled = false, pickParentDirectory }: CompletePanelProps) {
+function CompletePackagePanel({ workbenchId, mode = 'import', sourceControl, summary, browser = false, disabled = false, editors, pickParentDirectory, onOpenWorkbench, onImport }: CompletePanelProps) {
+  const scope = browser ? workbenchId : ''
   const client = useMemo(() => createWorkbenchCompleteClient(), [])
-  const [transfer, setTransfer] = useState<Transfer>(() => savedTransfer(workbenchId))
+  const [transfer, setTransfer] = useState<WorkbenchImportTransfer>(() => savedTransfer(scope))
   const [jobs, setJobs] = useState<CompletePackageJobView[]>([])
   const [error, setError] = useState<string>()
   const [busy, setBusy] = useState(false)
+  const pending = useRef(false)
   const uploadAbort = useRef<AbortController>()
   const exportRequestId = useRef('export-' + browserSafeUuid())
-  const activeWorkbench = useRef(workbenchId)
-  activeWorkbench.current = workbenchId
-  useEffect(() => { try { sessionStorage.setItem(storageKey(workbenchId), JSON.stringify(transfer)) } catch { /* Host records retain every committed operation. */ } }, [workbenchId, transfer])
-  useEffect(() => () => { uploadAbort.current?.abort() }, [])
+  const mounted = useRef(true)
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; uploadAbort.current?.abort() } }, [])
+  useEffect(() => { try { sessionStorage.setItem(storageKey(scope), JSON.stringify(transfer)) } catch { /* Host keeps committed operations. */ } }, [scope, transfer])
   useEffect(() => {
-    const controller = new AbortController(); let pending = false
+    const controller = new AbortController(); let loading = false
     const refresh = async () => {
-      if (pending) return
-      pending = true
+      if (loading) return
+      loading = true
       try {
-        const values = await client.request<CompletePackageJobView[]>({ action: 'jobs', workbenchId }, controller.signal)
+        const values = await client.request<CompletePackageJobView[]>({ action: 'jobs', workbenchId: mode === 'export' ? workbenchId : scope, ...(!browser && mode !== 'export' ? { allImports: true } : {}) }, controller.signal)
         if (!controller.signal.aborted) setJobs(values.sort((a, b) => b.updatedAt - a.updatedAt))
       } catch (reason) { if (!controller.signal.aborted) setError(errorText(reason)) }
-      finally { pending = false }
+      finally { loading = false }
     }
     void refresh(); const timer = setInterval(() => { void refresh() }, 1500)
     return () => { controller.abort(); clearInterval(timer) }
-  }, [client, workbenchId])
+  }, [client, workbenchId, scope, mode, browser])
   const selectionId = transfer.selection?.id
   useEffect(() => {
     if (!selectionId || transfer.selection?.state !== 'pending') return
-    const controller = new AbortController(); let pending = false
+    const controller = new AbortController(); let loading = false
     const refresh = async () => {
-      if (pending) return
-      pending = true
+      if (loading) return
+      loading = true
       try {
         const selection = await client.request<CompletePackageDirectoryRequest>({ action: 'directory-status', id: selectionId }, controller.signal)
         if (!controller.signal.aborted) setTransfer(current => ({ ...current, selection }))
       } catch (reason) { if (!controller.signal.aborted) setError(errorText(reason)) }
-      finally { pending = false }
+      finally { loading = false }
     }
     void refresh(); const timer = setInterval(() => { void refresh() }, 1500)
     return () => { controller.abort(); clearInterval(timer) }
   }, [client, selectionId, transfer.selection?.state])
   const run = async (operation: () => Promise<void>) => {
-    setBusy(true); setError(undefined)
-    try { await operation() } catch (reason) { setError(errorText(reason)) } finally { setBusy(false) }
+    if (pending.current) return
+    pending.current = true; setBusy(true); setError(undefined)
+    try { await operation() } catch (reason) { if (mounted.current) setError(errorText(reason)) }
+    finally { pending.current = false; if (mounted.current) setBusy(false) }
   }
-  const chooseFile = (file: File) => run(async () => {
-    const sourceId = workbenchId, abort = new AbortController(); uploadAbort.current = abort
+  const rememberJob = (job: CompletePackageJobView) => setJobs(current => [job, ...current.filter(row => row.id !== job.id)])
+  const chooseFile = (file: File) => void run(async () => {
+    const abort = new AbortController(); uploadAbort.current = abort
     const same = transfer.uploadRequest?.name === file.name && transfer.uploadRequest.size === file.size && transfer.uploadRequest.lastModified === file.lastModified && transfer.upload?.state !== 'cancelled'
     const requestId = same ? transfer.uploadRequest!.requestId : 'upload-' + browserSafeUuid()
     const uploadRequest = { name: file.name, size: file.size, lastModified: file.lastModified, requestId }
-    setTransfer(current => ({ folderName: current.folderName, uploadRequest }))
-    const result = await client.upload(file, { workbenchId: sourceId, requestId }, upload => {
-      if (activeWorkbench.current === sourceId) setTransfer(current => ({ ...current, upload }))
-    }, abort.signal)
-    if (activeWorkbench.current === sourceId) setTransfer({ ...result, uploadRequest, folderName: transfer.folderName || result.preflight.workbenchId.replace(/[^\p{L}\p{N}_-]/gu, '-') })
+    setTransfer({ folderName: '', uploadRequest })
+    const result = await client.upload(file, { workbenchId: scope, requestId }, upload => { if (mounted.current) setTransfer(current => ({ ...current, upload })) }, abort.signal)
+    if (mounted.current) setTransfer({ ...result, uploadRequest, name: result.preflight.overview?.name ?? '', folderName: suggestedWorkbenchFolder(result.preflight.overview?.name ?? result.preflight.workbenchId) })
   })
-  const selectParent = () => run(async () => {
+  const selectParent = () => void run(async () => {
     const selection = await client.request<CompletePackageDirectoryRequest>({ action: 'directory-request', uploadId: transfer.upload!.id, requestId: 'directory-' + browserSafeUuid() })
     setTransfer(current => ({ ...current, selection }))
     if (!browser) {
-      if (!pickParentDirectory) throw new Error('此界面暂不可选择目录，请在 DSH 客户端处理目录请求。')
+      if (!pickParentDirectory) throw new Error('请在 DSH 客户端处理目录选择请求。')
       const parentPath = await pickParentDirectory()
       const result = await client.request<CompletePackageDirectoryRequest>({ action: 'directory-complete', id: selection.id, ...(parentPath ? { parentPath } : { cancelled: true }) })
       setTransfer(current => ({ ...current, selection: result }))
     }
   })
-  const startImport = () => run(async () => {
-    const job = await client.request<CompletePackageJobView>({ action: 'start-import', workbenchId, uploadId: transfer.upload!.id, directoryRequestId: transfer.selection!.id, folderName: transfer.folderName, requestId: 'import-' + transfer.selection!.id })
-    setJobs(current => [job, ...current.filter(row => row.id !== job.id)])
-    setTransfer(current => ({ ...current, selection: { ...current.selection!, state: 'consumed' } }))
+  const startImport = () => void run(async () => {
+    // A lost start response must resolve the existing job before resubmitting edits.
+    const selection = await client.request<CompletePackageDirectoryRequest>({ action: 'directory-status', id: transfer.selection!.id })
+    const job = selection?.jobId
+      ? await client.request<CompletePackageJobView>({ action: 'status', id: selection.jobId })
+      : await client.request<CompletePackageJobView>({ action: 'start-import', workbenchId: scope, uploadId: transfer.upload!.id, directoryRequestId: transfer.selection!.id, folderName: transfer.folderName, ...(transfer.name?.trim() ? { name: transfer.name.trim() } : {}), requestId: 'import-' + transfer.selection!.id })
+    rememberJob(job)
+    setTransfer(current => ({ ...current, jobId: job.id, selection: { ...current.selection!, state: 'consumed', jobId: job.id } }))
   })
-  const uploadPercent = transfer.upload ? Math.min(100, Math.round(transfer.upload.received / Math.max(1, transfer.upload.size) * 100)) : 0
-  const shownJobs = mode === 'history' ? jobs.filter(job => job.kind === 'import') : jobs
+  const correctLocation = (job: CompletePackageJobView) => void run(async () => {
+    const result = await client.request<{ selection: CompletePackageDirectoryRequest; upload: CompletePackageUpload; preflight?: CompletePackagePreflight }>({ action: 'reset-import-location', id: job.id })
+    const preflight = result.preflight ?? await client.request<CompletePackagePreflight>({ action: 'upload-finish', id: result.upload.id })
+    setTransfer({ selection: result.selection, upload: result.upload, preflight, name: job.name ?? preflight.overview?.name ?? '', folderName: suggestedWorkbenchFolder(job.name ?? preflight.overview?.name ?? preflight.workbenchId) })
+    onImport?.()
+  })
+  const jobActions = {
+    onOpen: !browser && onOpenWorkbench ? (id: string) => { void run(async () => { await onOpenWorkbench(id) }) } : undefined,
+    onResume: (job: CompletePackageJobView) => { void run(async () => { rememberJob(await client.request<CompletePackageJobView>({ action: 'resume', id: job.id })) }) },
+    onCancel: (job: CompletePackageJobView) => { void run(async () => { rememberJob(await client.request<CompletePackageJobView>({ action: 'cancel', id: job.id })) }) },
+    onCorrectLocation: correctLocation,
+    onDownload: (job: CompletePackageJobView) => { void run(() => client.download(job.id)) },
+  }
+  const activeJob = jobs.find(job => job.id === transfer.jobId || job.id === transfer.selection?.jobId || selectionId && job.requestId === 'import-' + selectionId)
+  const shownJobs = mode === 'history' ? jobs.filter(job => job.kind === 'import') : jobs.filter(job => job.kind === 'export')
   return <section className={sharing.complete} aria-label="完整工作台包">
-    {!mode || mode === 'export' ? <div className={summary ? sharing.workspace : undefined}>
-      <section className={sharing.formPanel}>
-        <div className={sharing.formIntro}><h3>导出完整工作台</h3><p>把项目与工作进展一起打包，便于备份或在另一台机器继续。</p></div>
-        <fieldset className={sharing.sourceControl} disabled={disabled || busy}>{sourceControl}</fieldset>
-        <ul className={sharing.coverage} aria-label="完整包包含内容">
-          <li><IconFolderOpenOutlineMedium size={16} />项目文件与目录</li><li><IconNewChatOutlineMedium size={16} />对话历史与附件</li>
-          <li><IconDatabaseOutlineMedium size={16} />工作背景与记忆</li><li><IconBranchOutlineMedium size={16} />任务关系与进度</li>
-        </ul>
-        <div className={sharing.actionBar}><button type="button" className={css.primaryButton} disabled={disabled || busy || !workbenchId} onClick={() => { void run(async () => {
-          const job = await client.request<CompletePackageJobView>({ action: 'start-export', workbenchId, requestId: exportRequestId.current })
-          exportRequestId.current = 'export-' + browserSafeUuid()
-          setJobs(current => [job, ...current.filter(row => row.id !== job.id)])
-        }) }}><IconArchiveOutlineMedium size={16} />生成完整包</button><span>完成后在下方下载</span></div>
-      </section>{summary}
-    </div> : null}
-    {!mode || mode === 'import' ? <div className={mode ? sharing.workspace : undefined}>
-      <section className={sharing.formPanel}>
-        <div className={sharing.formIntro}><h3>接收完整工作台</h3><p>先选择完整包检查内容，再指定新工作台的存放位置。</p></div>
-        <label className={sharing.upload} data-disabled={disabled || busy || browser && !workbenchId}>
-          <IconArchiveOutlineMedium size={30} /><strong>{transfer.upload?.name || '选择完整工作台包'}</strong><span>点击选择文件</span><small>支持 .tar.gz、.tgz、.gz</small>
-          <input aria-label="接收完整包" type="file" accept=".gz,.tgz,.tar.gz" disabled={disabled || busy || browser && !workbenchId} onChange={event => { const file = event.target.files?.[0]; if (file) void chooseFile(file); event.target.value = '' }} />
-        </label>
-        {transfer.upload ? <div className={sharing.transferState} role="status"><span>已上传 {uploadPercent}%{transfer.preflight ? ` · 内容检查通过，含 ${transfer.preflight.sessionCount} 个会话` : ' · 中断后重新选择同一文件可以继续'}</span><progress className={sharing.progress} aria-label="完整包上传进度" max={100} value={uploadPercent} /></div> : null}
-        {busy && uploadAbort.current && !transfer.preflight ? <div className={sharing.jobActions}><button type="button" className={css.secondaryButton} onClick={() => uploadAbort.current?.abort(new Error('已暂停上传，可重新选择同一文件继续。'))}><IconPauseOutlineMedium size={16} />暂停上传</button></div> : null}
-        {transfer.preflight ? <>
-          <label className={sharing.field}>新工作台文件夹名称<input value={transfer.folderName} disabled={busy || disabled || transfer.selection?.state === 'consumed'} onChange={event => setTransfer(current => ({ ...current, folderName: event.target.value }))} /></label>
-          <div className={sharing.actionBar}><button type="button" className={css.secondaryButton} disabled={busy || disabled || transfer.selection?.state === 'pending' || transfer.selection?.state === 'consumed'} onClick={() => { void selectParent() }}><IconFolderOpenOutlineMedium size={16} />{browser ? '请 DSH 客户端选择目标目录' : '选择目标父目录'}</button>
-            <button type="button" className={css.primaryButton} disabled={busy || disabled || transfer.selection?.state !== 'selected' || !transfer.folderName.trim()} onClick={() => { void startImport() }}><IconPlusOutlineMedium size={16} />导入并保持暂停</button></div>
-          {transfer.selection?.state === 'pending' ? <p className={sharing.hint} role="status">正在等待 DSH 客户端确认目标目录。此页面可以保持打开，确认后继续导入。</p> : null}
-          {transfer.selection?.state === 'selected' ? <p className={sharing.hint} role="status">DSH 客户端已确认目标目录。</p> : null}
-          {transfer.selection?.state === 'cancelled' ? <p className={sharing.hint} role="status">目录选择已取消，可以重新选择。</p> : null}
-        </> : null}
-      </section>
-      {mode ? <aside className={sharing.summary}><div className={sharing.summaryTitle}><IconBranchOutlineMedium size={17} /><h3>恢复流程</h3></div><ol className={sharing.steps}>
-        <li><div><strong>选择文件，检查完整性</strong><p>确认目录、会话及依赖信息，保留可继续的上传进度。</p></div></li>
-        <li><div><strong>选择新工作台的位置</strong><p>{browser ? '由 DSH 客户端选择主机上的父目录，再回到此页继续。' : '在本机选择父目录，并设置新工作台文件夹名称。'}</p></div></li>
-        <li><div><strong>恢复完成后，由你继续</strong><p>文件、历史与任务关系恢复后，检查运行环境，主动继续工作。</p></div></li>
-      </ol></aside> : null}
-    </div> : null}
+    {mode === 'export' ? <div className={summary ? sharing.workspace : undefined}><section className={sharing.formPanel}>
+      <div className={sharing.formIntro}><h3>导出完整工作台</h3><p>把项目与工作进展一起打包，便于备份或在另一台机器继续。</p></div>
+      <fieldset className={sharing.sourceControl} disabled={disabled || busy}>{sourceControl}</fieldset>
+      <ul className={sharing.coverage} aria-label="完整包包含内容"><li><IconFolderOpenOutlineMedium size={16} />项目文件与目录</li><li><IconNewChatOutlineMedium size={16} />对话历史与附件</li><li><IconDatabaseOutlineMedium size={16} />工作背景与记忆</li><li><IconBranchOutlineMedium size={16} />任务关系与进度</li></ul>
+      <div className={sharing.actionBar}><button type="button" className={css.primaryButton} disabled={disabled || busy || !workbenchId} onClick={() => { void run(async () => { const job = await client.request<CompletePackageJobView>({ action: 'start-export', workbenchId, requestId: exportRequestId.current }); exportRequestId.current = 'export-' + browserSafeUuid(); rememberJob(job) }) }}><IconArchiveOutlineMedium size={16} />生成完整包</button><span>完成后在下方下载</span></div>
+    </section>{summary}</div> : null}
+    {mode === 'import' ? <WorkbenchImportFlow transfer={transfer} job={activeJob} busy={busy} browser={browser} disabled={disabled || browser && !workbenchId} {...(editors ? { editors } : {})} onFile={chooseFile} onChange={patch => setTransfer(current => ({ ...current, ...patch }))} onSelectParent={selectParent} onStart={startImport} onPause={() => uploadAbort.current?.abort(new Error('已暂停，可重新选择同一文件继续。'))} onNew={() => { setTransfer({ folderName: '' }); setError(undefined) }} jobActions={jobActions} /> : null}
     {error ? <p className={sharing.error} role="alert"><IconWarningOutlineMedium size={16} />{error}</p> : null}
-    <section className={sharing.jobs} aria-label="完整包作业">
-      <div className={sharing.sectionHeading}><h3><IconClockOutlineMedium size={17} />{mode === 'history' ? '完整包导入记录' : '传输与生成记录'}</h3><span>{shownJobs.length} 项 · 状态自动更新</span></div>
-      <div className={sharing.jobList}>{shownJobs.map(job => <article className={sharing.job} key={job.id} data-stage={job.stage}>
-        <span className={sharing.jobIcon} aria-hidden="true">{job.stage === 'complete' ? <IconCheckCircleOutlineMedium size={19} /> : job.stage === 'failed' ? <IconWarningOutlineMedium size={19} /> : <IconArchiveOutlineMedium size={19} />}</span>
-        <div className={sharing.jobCopy}><strong>{job.kind === 'export' ? '导出' : '导入'} · {labels[job.stage]}</strong>
-          <div className={sharing.jobMeta}><span>{job.files} 个条目 · {(job.bytes / 1024 / 1024).toFixed(1)} MB</span>{job.updatedAt ? <time dateTime={new Date(job.updatedAt).toISOString()}>{new Date(job.updatedAt).toLocaleString()}</time> : null}</div>
-          {job.running ? <progress className={sharing.progress} aria-label={`${job.kind === 'export' ? '导出' : '导入'}：${labels[job.stage]}`} /> : null}
-          {job.stage === 'complete' ? <small>{job.kind === 'import' ? '数据已恢复；环境待检查；任务等待你继续。' : '归档已就绪，可以下载。'}</small> : null}
-          {job.error ? <p role="alert">{job.error}</p> : null}</div>
-        <div className={sharing.jobActions}>{job.kind === 'export' && job.stage === 'complete' ? <button className={css.primaryButton} type="button" disabled={busy} onClick={() => { void run(() => client.download(job.id)) }}><IconDownloadOutlineMedium size={16} />下载完整包</button> : null}
-          {job.running ? <button className={css.secondaryButton} type="button" disabled={busy} onClick={() => { void run(async () => { await client.request({ action: 'cancel', id: job.id }) }) }}>取消作业</button> : null}
-          {job.recoverable ? <button className={css.secondaryButton} type="button" disabled={busy || disabled} onClick={() => { void run(async () => { await client.request({ action: 'resume', id: job.id }) }) }}><IconRefreshOutlineMedium size={16} />继续作业</button> : null}</div>
-      </article>)}</div>
-      {!shownJobs.length ? <div className={sharing.empty}><IconClockOutlineMedium size={24} /><p>{mode === 'history' ? '还没有完整包导入记录' : '生成或导入后，进度与结果会显示在这里'}</p></div> : null}
-    </section>
+    {mode !== 'import' ? <section className={sharing.jobs} aria-label="完整包作业"><div className={sharing.sectionHeading}><h3><IconClockOutlineMedium size={17} />{mode === 'history' ? '完整包导入记录' : '导出记录'}</h3><span>{shownJobs.length} 项 · 状态自动更新</span></div><div className={sharing.jobList}>{shownJobs.map(job => <WorkbenchCompleteJob key={job.id} job={job} busy={busy} disabled={disabled} {...jobActions} />)}</div>{!shownJobs.length ? <div className={sharing.empty}><IconClockOutlineMedium size={24} /><p>{mode === 'history' ? '还没有完整包导入记录' : '生成完整包后，在这里查看进度与下载'}</p></div> : null}</section> : null}
   </section>
 }
-
 /** Mount in the DSH desktop shell, including while a browser owns the workbench. */
 export function WorkbenchImportDirectoryRequests({ pickParentDirectory }: { pickParentDirectory: () => Promise<string | undefined> }) {
   const client = useMemo(() => createWorkbenchCompleteClient(), [])

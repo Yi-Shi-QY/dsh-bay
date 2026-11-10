@@ -51,7 +51,7 @@ export function installWorkbenchDirectoryRoute(connection: HostConnectionHandle,
       if (['directories', 'project-entries', 'project-preview', 'project-read'].includes(String(body.action))) capability = 'read-files'
       if (['project-write', 'prepare-creator-repair'].includes(String(body.action))) capability = 'write-files'
       if (access && actor) {
-        if (body.action === 'create' && actor.actor !== 'desktop') throw new WorkbenchAccessError('create-denied', '请在 DSH 中选择父目录并新建工作台。')
+        if (['create', 'create-preflight'].includes(String(body.action)) && actor.actor !== 'desktop') throw new WorkbenchAccessError('create-denied', '请在 DSH 中选择父目录并新建工作台。')
         if (mutation && actor.actor !== 'desktop' && (typeof body.requestId !== 'string' || !body.requestId)) throw new WorkbenchAccessError('request-id-required', '修改操作缺少请求标识。', 400)
         if (body.action === 'register-session' && actor.actor !== 'desktop') throw new WorkbenchAccessError('session-registration-denied', '请通过区域新建会话或打开已登记的会话。')
         if (body.action === 'prepare-creator-repair' && actor.actor !== 'desktop') throw new WorkbenchAccessError('creator-repair-desktop-required', '请在 DSH 客户端中打开插件修复会话。')
@@ -157,6 +157,7 @@ export function installWorkbenchDirectoryRoute(connection: HostConnectionHandle,
       const execute = async () => {
       let value: unknown
       switch (body.action) {
+        case 'create-preflight': value = await directory.checkCreateLocation(text('parentPath'), text('folderName')); break
         case 'snapshot': break
         case 'prepare-creator-repair': value = await directory.prepareCreatorRepair({ workbenchId: text('workbenchId'), moduleId: text('moduleId'), ...(body.packageName === undefined ? {} : { packageName: text('packageName') }) }); break
         case 'create-session': if (!createSession) throw new Error('会话服务不可用。'); value = await createSession({ workbenchId: text('workbenchId'), areaId: text('areaId'), requestId: text('requestId'), agentPreset: typeof body.agentPreset === 'string' ? body.agentPreset : 'standard', workspaceId: text('workspaceId') }); break

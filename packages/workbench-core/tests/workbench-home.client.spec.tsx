@@ -40,6 +40,32 @@ function expectDirectoryCreateInput(input: { name?: unknown; folderName?: unknow
 }
 
 describe('Workbench Home', () => {
+  it('keeps location editable after preflight failure and separates draft generation from creation', async () => {
+    let finish!: (value: string) => void
+    const generateDraft = vi.fn(() => new Promise<string>(resolve => { finish = resolve }))
+    const checkCreateLocation = vi.fn().mockRejectedValueOnce(new Error('目标文件夹已存在')).mockResolvedValue({ valid: true })
+    const d = directory({ pickParentDirectory: async () => 'C:/Projects', checkCreateLocation })
+    const view = render(<WorkbenchHome directory={d as never} onOpenWorkbench={vi.fn()} onCreated={vi.fn()} generateContextDraft={generateDraft} />)
+    fireEvent.click(view.getByRole('button', { name: '创建工作台', exact: true }))
+    fireEvent.click(view.getByRole('menuitem', { name: /新建空白工作台/ }))
+    fireEvent.change(view.getByLabelText('名称'), { target: { value: '研发' } })
+    fireEvent.change(view.getByLabelText('存放位置'), { target: { value: 'C:/Projects' } })
+    fireEvent.click(view.getByText('工作背景', { exact: true }))
+    fireEvent.click(view.getByRole('button', { name: 'AI 辅助生成背景草稿' }))
+    expect(view.getByRole('button', { name: '正在生成草稿…' })).toBeDefined()
+    expect(view.queryByRole('button', { name: '正在创建…' })).toBeNull()
+    expect(d.create).not.toHaveBeenCalled()
+    finish('用户确认后保存的草稿')
+    await waitFor(() => expect((view.getByRole('button', { name: '创建并打开' }) as HTMLButtonElement).disabled).toBe(false))
+    fireEvent.click(view.getByRole('button', { name: '创建并打开' }))
+    expect(await view.findByText('目标文件夹已存在')).toBeDefined()
+    expect((view.getByLabelText('名称') as HTMLInputElement).disabled).toBe(false)
+    expect(d.create).not.toHaveBeenCalled()
+    fireEvent.change(view.getByLabelText('文件夹名称'), { target: { value: 'new-product' } })
+    fireEvent.click(view.getByRole('button', { name: '创建并打开' }))
+    await waitFor(() => expect(d.create).toHaveBeenCalledOnce())
+    expect(d.create).toHaveBeenCalledWith(expect.objectContaining({ folderName: 'new-product' }))
+  })
   it('requires a parent folder and passes the selected location and reviewed folder name to creation', async () => {
     const pickParentDirectory = vi.fn(async () => 'C:\\Projects')
     const d = directory({ pickParentDirectory })
@@ -210,8 +236,8 @@ describe('Workbench Home', () => {
     fireEvent.click(view.getByRole('button', { name: '创建工作台', exact: true }))
     fireEvent.click(view.getByRole('menuitem', { name: '左右双栏，2 个区域' }))
     fireEvent.change(view.getByLabelText('名称'), { target: { value: 'AI 测试工作台' } })
-    fireEvent.click(view.getByRole('button', { name: 'AI 辅助生成背景草稿' }))
-    expect((await view.findByRole('alert')).textContent).toContain('当前环境未连接 DSH 原生 AI 服务。')
+    expect((view.getByRole('button', { name: 'AI 辅助生成背景草稿' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(view.getByText('当前环境未连接 DSH 原生 AI 服务，可直接手动填写')).toBeDefined()
     expect(d.create).not.toHaveBeenCalled()
   })
 

@@ -311,6 +311,13 @@ export class HostWorkbenchDirectory {
       return { text: content.includes(0) ? '此文件为二进制文件，无法显示文本预览。' : content.toString('utf8'), truncated: (await handle.stat()).size > bytesRead }
     } finally { await handle.close() }
   }
+  async checkCreateLocation(parentPath: string, folderName: string) {
+    if (!folderName.trim() || /[<>:"/\\|?*\u0000-\u001f]/u.test(folderName) || /[. ]$/u.test(folderName) || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/iu.test(folderName)) throw new Error('文件夹名称无效。')
+    const parent = await realpath(parentPath)
+    if (!(await stat(parent)).isDirectory()) throw new Error('请选择一个可用的父文件夹。')
+    if (existsSync(path.join(parent, folderName))) throw new Error('目标文件夹已存在，请修改文件夹名称或重新选择位置。')
+    return { valid: true }
+  }
   async create(input: { requestId: string; parentPath: string; folderName: string; record: WorkbenchRecordV2 }) {
     return this.serial(async () => {
       if (!safeId(input.requestId) || !input.folderName.trim() || /[<>:"/\\|?*\u0000-\u001f]/u.test(input.folderName) || /[. ]$/u.test(input.folderName) || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/iu.test(input.folderName)) throw new Error('文件夹名称无效。')

@@ -275,6 +275,7 @@ export function applyWorkbenchCoreFoundation(
         contextPatch: input => contextPatch === undefined ? Promise.resolve({ status: 'unavailable' as const }) : contextPatch(input),
       })
   directory.pickParentDirectory = async () => (await ctx.uiWorkspace.pickDirectory()) ?? undefined
+  if (windowView === undefined) directory.checkCreateLocation = (parentPath, folderName) => fileSettings.request({ action: 'create-preflight', parentPath, folderName })
   directory.memoryRequest = fileSettings.request
   directory.completeRequest = createWorkbenchCompleteClient().request
   directory.getAreaProjects = id => settings.getSnapshot().value?.workbenches[id]?.areaProjects ?? {}

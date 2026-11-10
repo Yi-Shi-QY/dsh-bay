@@ -22,6 +22,9 @@ import type { FileWorkbenchV1 } from './workbench-directory-contract.ts'
 import { exportTaskSnapshot, restoreTaskSnapshot, remapCompletePageReferences, type CompleteTaskSnapshot } from './host-workbench-task-snapshot.ts'
 import { validateWorkbenchRelations } from './foundation/area-identity.ts'
 import { baySessionId } from './host-bay-agent-store.ts'
+import { HostWorkbenchMemory } from './host-workbench-memory.ts'
+import { areasOf, type WorkbenchNodeV3 } from './foundation/document-v3.ts'
+import type { CompletePackagePreflight } from './workbench-complete-contract.ts'
 
 export type CompleteOptions = {
   profile: string
@@ -45,7 +48,7 @@ const sha = (value: string) => createHash('sha256').update(value).digest('hex')
 class PackageRequestError extends Error { constructor(readonly status: number, message: string) { super(message) } }
 const message = (error: unknown) => error instanceof Error ? error.message : String(error)
 const desktop: WorkbenchAccessContext = { actor: 'desktop', accessId: 'desktop' }
-type StoredUpload = CompletePackageUpload & { ownerAccessId: string; archiveSha256?: string; lastChunk?: { offset: number; length: number; requestId: string; hash: string } }
+type StoredUpload = CompletePackageUpload & { ownerAccessId: string; archiveSha256?: string; preflight?: CompletePackagePreflight; lastChunk?: { offset: number; length: number; requestId: string; hash: string } }
 type StoredDirectoryRequest = CompletePackageDirectoryRequest & { ownerAccessId: string; parentPath?: string; jobId?: string }
 const uploadMetaPath = (profile: string, id: string) => path.join(jobDirectory(profile), 'uploads', validId(id) + '.json')
 const uploadFilePath = (profile: string, id: string) => path.join(jobDirectory(profile), 'uploads', validId(id) + '.tar.gz')
@@ -55,8 +58,8 @@ function records<T>(folder: string): T[] {
   if (!existsSync(folder)) return []
   return readdirSync(folder).filter(name => /^[A-Za-z0-9_-]+\.json$/u.test(name)).flatMap(name => { try { return [JSON.parse(readFileSync(path.join(folder, name), 'utf8')) as T] } catch { return [] } })
 }
-const publicUpload = ({ ownerAccessId: _owner, archiveSha256: _hash, lastChunk: _chunk, ...value }: StoredUpload): CompletePackageUpload => value
-const publicDirectory = ({ ownerAccessId: _owner, parentPath: _path, jobId: _job, ...value }: StoredDirectoryRequest): CompletePackageDirectoryRequest => value
+const publicUpload = ({ ownerAccessId: _owner, archiveSha256: _hash, preflight: _preview, lastChunk: _chunk, ...value }: StoredUpload): CompletePackageUpload => value
+const publicDirectory = ({ ownerAccessId: _owner, parentPath, ...value }: StoredDirectoryRequest): CompletePackageDirectoryRequest => ({ ...value, ...(parentPath ? { displayPath: parentPath } : {}) })
 
 const saveJob = (profile: string, job: CompletePackageJob) => {
   jobs.set(profile + ':' + job.id, job)
@@ -101,7 +104,7 @@ type CompleteManifest = {
   orchestrationSha256?: string
 }
 
-async function readManifest(stage: string): Promise<{ manifest: CompleteManifest; manifestSha256: string }> {
+async function readManifest(stage: string) {
   const manifestFile = path.join(stage, 'manifest.json')
   const manifest = JSON.parse(await readFile(manifestFile, 'utf8')) as CompleteManifest
   if (manifest.type !== 'workbench-complete' || manifest.version !== 5 || !manifest.workbenchId || !manifest.sessionKeys) {
@@ -111,11 +114,13 @@ async function readManifest(stage: string): Promise<{ manifest: CompleteManifest
     if (!existsSync(path.join(stage, relative))) throw new Error('完整包缺少必要内容：' + relative)
   }
   const paths = new Set<string>()
+  let fileCount = 0, bytes = 0
   for await (const row of readInventory(path.join(stage, 'files.ndjson'))) {
     validateTargetName(row.path, process.platform)
     const key = process.platform === 'linux' ? row.path : row.path.toLocaleLowerCase('und')
     if (paths.has(key)) throw new Error('目标平台存在文件名冲突：' + row.path)
     paths.add(key)
+    if (row.type === 'file') { fileCount++; bytes += row.bytes ?? 0 }
     if (row.target !== undefined) validateTargetName(row.target, process.platform)
     const file = resolvePortablePath(path.join(stage, 'workbench'), row.path), info = await lstat(file)
     if (row.type === 'file' ? !info.isFile() || info.size !== row.bytes || await hashFile(file) !== row.sha256
@@ -127,11 +132,26 @@ async function readManifest(stage: string): Promise<{ manifest: CompleteManifest
   const native = JSON.parse(await readFile(path.join(stage, 'native/native-sessions.json'), 'utf8')) as NativeSessionSnapshot
   for (const key of Object.keys(envelope.record.sessionCatalog ?? {})) if (!manifest.sessionKeys[key] || !native.sessions.some(row => row.key === manifest.sessionKeys[key])) throw new Error('完整包缺少对话历史：' + key)
   if (envelope.record.projectModelVersion) hydrateProjects(path.join(stage, 'workbench'), envelope.record)
+  let taskCount = 0
   if (manifest.orchestration) {
     if (manifest.orchestration !== 'orchestration.json' || !manifest.orchestrationSha256 || await hashFile(path.join(stage, manifest.orchestration)) !== manifest.orchestrationSha256) throw new Error('完整包任务快照摘要不匹配。')
-    restoreTaskSnapshot(JSON.parse(await readFile(path.join(stage, manifest.orchestration), 'utf8')) as CompleteTaskSnapshot, envelope.record, manifest.sessionKeys, 0)
+    const tasks = JSON.parse(await readFile(path.join(stage, manifest.orchestration), 'utf8')) as CompleteTaskSnapshot
+    restoreTaskSnapshot(tasks, envelope.record, manifest.sessionKeys, 0)
+    taskCount = tasks.state.workItems.length
   }
-  return { manifest, manifestSha256: await hashFile(manifestFile) }
+  // Preview only layout and labels, without editor state or native bindings.
+  const preview = (node: WorkbenchNodeV3): WorkbenchNodeV3 => node.kind === 'split'
+    ? { kind: 'split', id: node.id, axis: node.axis, ratio: node.ratio, first: preview(node.first), second: preview(node.second) }
+    : { kind: 'area', areaId: node.areaId, ...(node.activeModuleInstanceId ? { activeModuleInstanceId: node.activeModuleInstanceId } : {}), moduleHistory: node.moduleHistory.map(page => ({ moduleInstanceId: page.moduleInstanceId, editorId: page.editorId, editorScope: page.editorScope, lastKnownTitle: page.lastKnownTitle, state: {} })) }
+  const areas = areasOf(envelope.record.document.root)
+  const memory = new HostWorkbenchMemory(() => path.join(stage, 'workbench'), () => envelope.record)
+  const overview: NonNullable<CompletePackagePreflight['overview']> = {
+    name: envelope.record.name, description: envelope.record.description, layout: preview(envelope.record.document.root),
+    projectCount: Object.keys(envelope.record.projects ?? {}).length, areaCount: areas.length,
+    pageCount: areas.reduce((sum, area) => sum + area.moduleHistory.length, 0), fileCount, bytes, taskCount,
+    memoryCount: Object.values(memory.index(manifest.workbenchId).entries).filter(entry => !entry.removed).length,
+  }
+  return { manifest, manifestSha256: await hashFile(manifestFile), overview }
 }
 
 async function extractPackage(archive: string, stage: string) {
@@ -197,7 +217,9 @@ export function installWorkbenchCompleteRoute(connection: HostConnectionHandle, 
   const readDirectory = (id: string, context: WorkbenchAccessContext) => { const value = readRecord<StoredDirectoryRequest>(directoryRequestPath(options.profile, id)); if (!value) throw new PackageRequestError(404, '找不到目录选择请求。'); owned(context, value); return value }
   const view = (job: CompletePackageJob): CompletePackageJobView => ({ version: job.version, id: job.id, kind: job.kind, requestId: job.requestId, workbenchId: job.workbenchId,
     stage: job.stage, files: job.files, bytes: job.bytes, updatedAt: job.updatedAt, ...(job.error ? { error: job.error } : {}), report: job.report,
-    running: running.has(job.id), recoverable: job.stage !== 'complete' && !running.has(job.id) })
+    ...(job.name ? { name: job.name } : {}), ...(job.targetPath || job.parentPath && job.folderName ? { targetDisplayPath: job.targetPath ?? path.join(job.parentPath!, job.folderName!) } : {}),
+    running: running.has(job.id), recoverable: job.stage !== 'complete' && !running.has(job.id) && !job.replacementDirectoryId,
+    canChangeDestination: job.kind === 'import' && !!job.uploadId && !job.stageDir && !job.sessionMap && !job.replacementDirectoryId && ['failed', 'cancelled'].includes(job.stage) && !running.has(job.id) })
   const lock = async <T>(key: string, operation: () => Promise<T>): Promise<T> => {
     const previous = serial.get(key) ?? Promise.resolve()
     const result = previous.catch(() => {}).then(operation)
@@ -294,10 +316,12 @@ export function installWorkbenchCompleteRoute(connection: HostConnectionHandle, 
     const target = job.targetPath
     const targetStage = target + '.importing-' + job.id
     await realpath(job.parentPath)
+    update(options.profile, job, { stage: 'files' })
     if (!existsSync(target)) await copyTree(path.join(stage, 'workbench'), targetStage, { ...(signal ? { signal } : {}), progress: progress(job) })
     signal?.throwIfAborted()
     const envelope = JSON.parse(await readFile(path.join(stage, 'workbench', '.bay', 'workbench.json'), 'utf8')) as FileWorkbenchV1
     envelope.record.workbenchId = job.workbenchId
+    if (job.name) envelope.record.name = job.name
     envelope.record.executionPaused = true
     const snapshot = JSON.parse(await readFile(path.join(stage, 'native', 'native-sessions.json'), 'utf8')) as NativeSessionSnapshot
     const sessionMap = job.sessionMap === undefined
@@ -329,6 +353,7 @@ export function installWorkbenchCompleteRoute(connection: HostConnectionHandle, 
       await rename(targetStage, target)
     }
     signal?.throwIfAborted()
+    update(options.profile, job, { stage: 'publish' })
     await options.directory.publishImported(target, envelope, logicalSessions)
     update(options.profile, job, { stage: 'complete', report: { ...job.report, data: 'complete', environment: 'needs-setup' } })
     await rm(stage, { recursive: true, force: true })
@@ -365,6 +390,7 @@ export function installWorkbenchCompleteRoute(connection: HostConnectionHandle, 
 
   const launch = (job: CompletePackageJob): CompletePackageJobView => {
     if (disposed) throw new PackageRequestError(503, '完整包服务正在关闭。')
+    if (job.replacementDirectoryId) throw new PackageRequestError(409, '此作业已返回目录设置，请从新的目录选择继续导入。')
     if (job.stage === 'complete' || running.has(job.id)) return view(job)
     const abort = new AbortController()
     delete job.error
@@ -379,7 +405,8 @@ export function installWorkbenchCompleteRoute(connection: HostConnectionHandle, 
   }
   const jobForStart = (input: Record<string, unknown>, context: WorkbenchAccessContext, kind: 'export' | 'import', location: { archive: string; parentPath?: string; folderName?: string; uploadId?: string }) => {
     const workbenchId = kind === 'import' ? importScope(input, context) : text(input, 'workbenchId'), requestId = validId(text(input, 'requestId'))
-    const inputDigest = sha(JSON.stringify({ kind, workbenchId, uploadId: location.uploadId, parentPath: location.parentPath, folderName: location.folderName }))
+    const name = typeof input.name === 'string' ? input.name.trim().slice(0, 160) : undefined
+    const inputDigest = sha(JSON.stringify({ kind, workbenchId, uploadId: location.uploadId, parentPath: location.parentPath, folderName: location.folderName, ...(name ? { name } : {}) }))
     const prior = persistedJobForRequest(options.profile, requestId)
     if (prior) {
       owned(context, prior)
@@ -389,7 +416,7 @@ export function installWorkbenchCompleteRoute(connection: HostConnectionHandle, 
     }
     authorize(context, workbenchId)
     const job: CompletePackageJob = { version: 5, id: randomUUID(), kind, requestId, workbenchId, accessWorkbenchId: workbenchId, ownerAccessId: context.accessId,
-      inputDigest, path: location.archive, ...(location.parentPath ? { parentPath: location.parentPath } : {}), ...(location.folderName ? { folderName: location.folderName } : {}), ...(location.uploadId ? { uploadId: location.uploadId } : {}),
+      inputDigest, path: location.archive, ...(name ? { name } : {}), ...(location.parentPath ? { parentPath: location.parentPath } : {}), ...(location.folderName ? { folderName: location.folderName } : {}), ...(location.uploadId ? { uploadId: location.uploadId } : {}),
       stage: 'queued', files: 0, bytes: 0, updatedAt: Date.now(), report: { data: 'pending', environment: 'unchecked', tasks: 'waiting-for-user', blockers: [], exclusions: [], environmentSteps: ['导入后由用户主动恢复插件、模型和工具链。'] } }
     saveJob(options.profile, job)
     return job
@@ -491,8 +518,9 @@ export function installWorkbenchCompleteRoute(connection: HostConnectionHandle, 
           const archiveSha256 = await hashFile(uploadFilePath(options.profile, id))
           const checked = await ephemeralPreflight(uploadFilePath(options.profile, id))
           try {
+            upload.preflight = { valid: true, workbenchId: checked.manifest.workbenchId, sessionCount: Object.keys(checked.manifest.sessionKeys).length, manifestSha256: checked.manifestSha256, overview: checked.overview }
             upload.archiveSha256 = archiveSha256; upload.state = 'ready'; upload.updatedAt = Date.now(); atomicJson(uploadMetaPath(options.profile, id), upload)
-            return { valid: true, workbenchId: checked.manifest.workbenchId, sessionCount: Object.keys(checked.manifest.sessionKeys).length, manifestSha256: checked.manifestSha256 }
+            return upload.preflight
           }
           finally { await rm(checked.stage, { recursive: true, force: true }) }
         })
@@ -527,14 +555,29 @@ export function installWorkbenchCompleteRoute(connection: HostConnectionHandle, 
         value = await lock('directory:' + selection.id, async () => {
           const currentSelection = readDirectory(selection.id, context)
           if (currentSelection.jobId && persistedJob(options.profile, currentSelection.jobId)?.requestId !== text(input, 'requestId')) throw new PackageRequestError(409, '目录许可已用于另一个导入作业。')
+          // Do not consume the selection or create a job for an invalid destination.
+          if (!currentSelection.jobId && existsSync(path.join(selection.parentPath!, name))) throw new PackageRequestError(409, '目标工作台文件夹已存在，请修改文件夹名称或重新选择位置。')
           if (await hashFile(uploadFilePath(options.profile, upload.id)) !== upload.archiveSha256) throw new PackageRequestError(409, '上传归档已发生变化。')
           const job = jobForStart(input, context, 'import', { archive: uploadFilePath(options.profile, upload.id), parentPath: selection.parentPath!, folderName: name, uploadId: upload.id })
           currentSelection.state = 'consumed'; currentSelection.jobId = job.id; currentSelection.updatedAt = Date.now(); atomicJson(directoryRequestPath(options.profile, selection.id), currentSelection)
           return launch(job)
         })
+      } else if (action === 'reset-import-location') {
+        const job = readJob(text(input, 'id'), context)
+        authorizeJobMutation(context, job)
+        value = await lock('job:' + job.id, async () => {
+          const upload = readUpload(job.uploadId ?? '', context)
+          if (job.replacementDirectoryId) return { selection: publicDirectory(readDirectory(job.replacementDirectoryId, context)), upload: publicUpload(upload), preflight: upload.preflight }
+          if (!view(job).canChangeDestination) throw new PackageRequestError(409, '此作业已经开始恢复数据，请继续原作业。')
+          const id = 'retry-' + job.id
+          const selection: StoredDirectoryRequest = { id, uploadId: job.uploadId!, workbenchId: job.accessWorkbenchId ?? '', ownerAccessId: context.accessId, parentPath: job.parentPath!, state: 'selected', updatedAt: Date.now() }
+          atomicJson(directoryRequestPath(options.profile, id), selection)
+          update(options.profile, job, { replacementDirectoryId: id, stage: 'cancelled' })
+          return { selection: publicDirectory(selection), upload: publicUpload(upload), preflight: upload.preflight }
+        })
       } else if (action === 'jobs') {
         const workbenchId = importScope(input, context); authorize(context, workbenchId, false)
-        value = records<CompletePackageJob>(jobDirectory(options.profile)).filter(job => (job.accessWorkbenchId ?? job.workbenchId) === workbenchId && (context.actor === 'desktop' || job.ownerAccessId === context.accessId)).map(view)
+        value = records<CompletePackageJob>(jobDirectory(options.profile)).filter(job => input.allImports === true && context.actor === 'desktop' ? job.kind === 'import' : (job.accessWorkbenchId ?? job.workbenchId) === workbenchId && (context.actor === 'desktop' || job.ownerAccessId === context.accessId)).map(view)
       } else if (action === 'cancel') {
         const job = readJob(text(input, 'id'), context)
         authorizeJobMutation(context, job, true)

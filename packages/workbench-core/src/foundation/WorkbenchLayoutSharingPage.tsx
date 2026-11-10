@@ -10,9 +10,13 @@ import type { SessionBindingV1 } from './model.ts'
 import { DESKTOP_SETTINGS_CONTEXT, settingsTargetWritable } from './settings-context.ts'
 import { WorkbenchCompletePackagePanel } from './WorkbenchCompletePackagePanel.tsx'
 import css from './WorkbenchSettings.module.css'
+import { WorkbenchSharingPage } from './WorkbenchSharingPage.tsx'
 
 /** Only mounted while visible; listing history never resumes an old transaction. */
 export function WorkbenchLayoutSharingPage(props: SettingsPageProps) {
+  return props.workbenchDirectory?.completeRequest ? <WorkbenchSharingPage {...props} /> : <LegacyLayoutSharingPage {...props} />
+}
+function LegacyLayoutSharingPage(props: SettingsPageProps) {
   const browser = props.settingsContext?.mode === 'browser-workbench'
   const complete = props.workbenchDirectory?.completeRequest !== undefined
   const [mode, setMode] = useState<'import' | 'export' | 'history'>(browser ? 'export' : props.openOptions?.shareMode ?? 'export')
