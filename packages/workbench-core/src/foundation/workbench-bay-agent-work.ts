@@ -253,7 +253,7 @@ export interface BayAgentControllerSnapshotV1 {
   attention: readonly BayAgentAttentionV1[]
   orchestration: BayAgentOrchestrationProjectionV1
   error?: string
-  agentModes?: readonly { id: string; name: string }[]
+  agentModes?: readonly { id: string; name: string; description?: string }[]
   /** Host-reported composition capabilities for the selectable Worker modes. */
   agentModeCapabilities?: readonly {
     id: string

@@ -26,20 +26,26 @@ function setup() {
     rename: vi.fn(async () => ({})),
     selectModel: vi.fn(async () => ({})), cancel: vi.fn(), state: vi.fn(async () => ({ running: true, active: true, queue: [], pendingInput: [] })),
   }
-  const presets = { register: vi.fn(async () => async () => {}), list: async () => [{ id: 'standard', name: 'Standard' }, { id: 'creator', name: 'Creator' }, { id: 'bay-agent', name: 'Bay Agent' }], compositionInventory: async () => [
+  const presetRoster: { id: string; name: string; description: string; broken?: string }[] = [
+    { id: 'standard', name: 'Standard', description: 'General coding and reasoning.' },
+    { id: 'creator', name: 'Creator', description: 'Create or repair DSH extensions.' },
+    { id: 'broken-mode', name: 'Broken mode', description: 'Unavailable mode.', broken: 'Plugin failed to load.' },
+    { id: 'bay-agent', name: 'Bay Agent', description: 'Persistent Workbench coordinator.' },
+  ]
+  const presets = { register: vi.fn(async () => async () => {}), list: vi.fn(async () => presetRoster), compositionInventory: async () => [
     { id: 'standard', rows: [
       { entryId: 'compaction-basic', moduleName: '@deepseek-ai/dsh-compaction-basic', enabled: true },
       { entryId: 'tool-result-pruner', moduleName: '@deepseek-ai/dsh-compaction-tool-result-pruner', enabled: true },
       { entryId: 'tool-subagent', moduleName: '@deepseek-ai/dsh-tool-subagent', enabled: true },
     ] },
     { id: 'creator', rows: [{ entryId: 'tool-fs', moduleName: '@deepseek-ai/dsh-tool-fs', enabled: true }] },
-  ], resolve: async (id: string) => { if (!['standard', 'creator'].includes(id)) throw new Error('unknown mode'); return { id } } }
+  ], resolve: async (id: string) => { const mode = presetRoster.find(row => row.id === id); if (!mode) throw new Error('unknown mode'); return { id, ...(mode.broken ? { broken: mode.broken } : {}) } } }
   const stream = vi.fn(async function* (_options: any) { yield { type: 'text-delta', index: 0, text: '# One-shot draft' }; yield { type: 'finish', reason: { kind: 'stop' } } })
   const llm = { prepareCall: vi.fn(async (config: any) => ({ config, stream })) }
   let readers = 0
   const ctx = { llm, on: vi.fn(() => () => {}), get: (name: string) => name === 'llm' ? llm : name === 'agentDefaultModel' ? { currentSelection: () => ({ provider: 'provider-default', model: 'model-default' }) } : undefined, sessionPersistence: { flush: async () => { if (readers) throw new Error('Close journal readers before flushing writes') }, open: async () => { readers++; return { read: async () => ({ events: [] }), [Symbol.asyncDispose]: async () => { readers-- } } } } }
   const create = (context: unknown = ctx) => { const host = new BayAgentHost(context as never, provider as never, sessions as never, profile, presets as never); dispose.push(() => host.dispose()); return host }
-  return { create, agents, sessions, presets, value, profile, llm, stream, ctx }
+  return { create, agents, sessions, presets, presetRoster, value, profile, llm, stream, ctx }
 }
 
 it('generates a draft from a real Cordis plugin context with a separately provided LLM service', async () => {
@@ -145,12 +151,46 @@ it('registers Bay Main with native session compaction and tool-result pruning', 
 it('reports native Worker preset capabilities without changing the selected mode', async () => {
   const fixture = setup(), host = fixture.create()
   await host.ensure('a')
+  expect(host.snapshot('a').agentModes).toEqual([
+    { id: 'standard', name: 'Standard', description: 'General coding and reasoning.' },
+    { id: 'creator', name: 'Creator', description: 'Create or repair DSH extensions.' },
+  ])
   expect(host.snapshot('a').agentModeCapabilities).toEqual([
     { id: 'standard', name: 'Standard', known: true, compaction: true, toolResultPruner: true, ptc: false, subagents: true },
     { id: 'creator', name: 'Creator', known: true, compaction: false, toolResultPruner: false, ptc: false, subagents: false },
   ])
   await expect(host.request({ workbenchId: 'a', action: 'create', input: { areaId: 'area-a', objective: 'Keep creator mode', agentPreset: 'creator', workspaceId: 'workspace-a' } })).resolves.toMatchObject({ value: expect.anything() })
   expect(fixture.sessions.create).toHaveBeenLastCalledWith(expect.objectContaining({ agentPreset: 'creator' }))
+})
+
+it('discovers live Worker modes before dispatch and creates nothing until Bay Agent selects one', async () => {
+  const fixture = setup(), host = fixture.create(), main = await host.ensure('a')
+  const agent = fixture.agents.get(main)!, dispatch = agent.tools.get('bay_dispatch')
+  expect(agent.sections.get('bay-agent-workbench').text()).toContain('Select by the registered descriptions rather than a hardcoded mode-name mapping.')
+  const createCount = fixture.sessions.create.mock.calls.length
+  const first = await dispatch.execute({ areaId: 'area-a', objective: 'Repair the DSH extension' })
+  expect(first.result).toEqual({
+    status: 'mode-selection-required',
+    taskCreated: false,
+    modes: [
+      { id: 'standard', name: 'Standard', description: 'General coding and reasoning.' },
+      { id: 'creator', name: 'Creator', description: 'Create or repair DSH extensions.' },
+    ],
+    nextAction: expect.stringContaining('call bay_dispatch again'),
+  })
+  expect(host.snapshot('a').workItems).toHaveLength(0)
+  expect(host.snapshot('a').assignments).toHaveLength(0)
+  expect(fixture.sessions.create).toHaveBeenCalledTimes(createCount)
+
+  fixture.presetRoster.push({ id: 'research', name: 'Research', description: 'Investigate code and document findings.' })
+  const refreshed = await dispatch.execute({ areaId: 'area-a', objective: 'Investigate a newly installed mode' })
+  expect(refreshed.result.modes).toContainEqual({ id: 'research', name: 'Research', description: 'Investigate code and document findings.' })
+  expect(host.snapshot('a').workItems).toHaveLength(0)
+
+  const selected = await dispatch.execute({ areaId: 'area-a', objective: 'Repair the DSH extension', agentPreset: 'creator', workspaceId: 'workspace-a' })
+  expect(selected.result.objective).toBe('Repair the DSH extension')
+  expect(host.snapshot('a').workItems).toHaveLength(1)
+  expect(fixture.sessions.create).toHaveBeenLastCalledWith(expect.objectContaining({ agentPreset: 'creator', workspaceId: 'workspace-a' }))
 })
 
 it('provisions a Workbench-owned Main Session without requiring a project and reuses it on Host restart', async () => {
@@ -219,7 +259,8 @@ it('generates background drafts with one direct LLM call and leaves the Main Ses
 
 it('does not dispatch missing modes or cross-workbench targets', async () => {
   const fixture = setup(), host = fixture.create(); await host.ensure('a')
-  await expect(host.request({ workbenchId: 'a', action: 'create', input: { areaId: 'foreign', objective: 'bad', agentPreset: 'unknown' } })).rejects.toThrow('unknown mode')
+  await expect(host.request({ workbenchId: 'a', action: 'create', input: { areaId: 'area-a', objective: 'bad', agentPreset: 'unknown' } })).resolves.toMatchObject({ value: { status: 'mode-unavailable', taskCreated: false, requestedAgentPreset: 'unknown' } })
   await expect(host.request({ workbenchId: 'a', action: 'create', input: { areaId: 'foreign', objective: 'bad' } })).rejects.toThrow('area-not-found')
+  await expect(host.request({ workbenchId: 'a', action: 'create', input: { areaId: 'area-a', objective: 'bad', agentPreset: 'bay-agent' } })).resolves.toMatchObject({ value: { status: 'mode-unavailable', taskCreated: false } })
   expect(host.snapshot('a').workItems).toHaveLength(0)
 })

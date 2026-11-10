@@ -39,6 +39,7 @@ function setup(
   pendingConversation = false,
   legacyUnboundConversation = false,
   availableSession = false,
+  hiddenAreas: readonly { areaId: string; label: string }[] = [],
 ) {
   const editorId = conversationStatus || pendingConversation || legacyUnboundConversation ? 'workbench.conversation' : 'test.editor'
   const sessionEditor = boundSession || pendingConversation || legacyUnboundConversation
@@ -201,6 +202,7 @@ function setup(
       saveTemplate,
       setLayoutLocked,
       unload,
+      getHiddenAreas: () => hiddenAreas,
       memoryRequest: vi.fn(async () => []),
       setBeforeLifecycleTransition: (handler: () => Promise<boolean>) => { flush = handler; return () => { flush = undefined } },
     },
@@ -665,6 +667,13 @@ describe('Frame layout persistence', () => {
     expect(h.view.getByRole('menuitem', { name: '另存为布局模板' })).toBeTruthy()
     expect(h.view.getByRole('menuitem', { name: /Workbench A/ })).toBeTruthy()
     expect(h.view.getByRole('menuitem', { name: '从标签栏卸载' })).toBeTruthy()
+  })
+
+  it('keeps hidden-area restoration out of the Workbench menu', () => {
+    const h = setup(async () => ({ status: 'committed', revision: 2 }), undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      [{ areaId: 'hidden-area', label: 'Hidden area' }])
+    fireEvent.click(h.view.getByRole('button', { name: '打开“Workbench A”工作台菜单' }))
+    expect(h.view.queryByRole('menuitem', { name: /重新显示区域/ })).toBeNull()
   })
 
   it('applies save and unload actions to the Workbench whose menu is open', async () => {

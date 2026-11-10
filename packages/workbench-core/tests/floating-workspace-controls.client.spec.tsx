@@ -44,6 +44,8 @@ it('uses shared conversation states for Bay Agent and floating duplicates, keepi
   const snapshot = { workbenchId: 'one', bayAgentSessionId: 'main-one', areas: [], workItems: [], assignments: [], attention: [] }
   const controller = { subscribe: () => () => {}, getSnapshot: () => snapshot, ensureMainSession: async () => 'main-one' } as unknown as NonNullable<ComponentProps<typeof WorkbenchFloatingWorkspace>['bayAgent']>
   const { runtime } = setup(controller, source)
+  expect(screen.queryByRole('tab', { name: /Bay Agent/ })).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: '唤出 Bay Agent' }))
   await waitFor(() => expect(screen.getByRole('tab', { name: /Bay Agent/ }).getAttribute('aria-description')).toContain('等待审批'))
   expect(screen.getByLabelText('Bay Agent 主控页签')).toBeTruthy()
   act(() => { runtime.open('one', { id: 'duplicate', editorId: 'workbench.conversation', editorScope: 'session', sessionId: 'main-one', state: {}, lastKnownTitle: '重复对话' }, true, false) })
@@ -176,6 +178,8 @@ it('keeps Bay Agent in the existing floating workspace with no binding, close or
   const snapshot = { workbenchId: 'one', bayAgentSessionId: 'main-one', areas: [], workItems: [], assignments: [], attention: [] }
   const controller = { subscribe: () => () => {}, getSnapshot: () => snapshot, ensureMainSession: vi.fn(async () => 'main-one') } as unknown as NonNullable<ComponentProps<typeof WorkbenchFloatingWorkspace>['bayAgent']>
   const { runtime, pin } = setup(controller)
+  expect(screen.queryByRole('tab', { name: /Bay Agent/ })).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: '唤出 Bay Agent' }))
   await waitFor(() => expect(runtime.find('bay-agent-main', 'one')?.tab.sessionId).toBe('main-one'))
   fireEvent.click(screen.getByRole('tab', { name: /Bay Agent/ }))
   expect(screen.getAllByRole('region', { name: '浮动工作区' })).toHaveLength(1)
@@ -192,9 +196,10 @@ it('shows recoverable Main creation errors without replacing the floating worksp
   const snapshot = { workbenchId: 'one', areas: [], workItems: [], assignments: [], attention: [] }
   const controller = { subscribe: () => () => {}, getSnapshot: () => snapshot, ensureMainSession: vi.fn().mockRejectedValueOnce(new Error('offline')).mockResolvedValue('restored-main') } as unknown as NonNullable<ComponentProps<typeof WorkbenchFloatingWorkspace>['bayAgent']>
   const { runtime } = setup(controller)
-  fireEvent.click(await screen.findByRole('tab', { name: /Bay Agent/ }))
-  expect(await screen.findByRole('alert')).toBeTruthy()
-  fireEvent.click(screen.getByRole('button', { name: '重试连接' }))
+  expect(screen.queryByRole('tab', { name: /Bay Agent/ })).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: '唤出 Bay Agent' }))
+  expect(await screen.findByRole('status')).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: '唤出 Bay Agent' }))
   await waitFor(() => expect(runtime.find('bay-agent-main', 'one')?.tab.sessionId).toBe('restored-main'))
-  expect(screen.queryByRole('alert')).toBeNull()
+  expect(screen.queryByRole('status')).toBeNull()
 })

@@ -947,6 +947,20 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
   const workbenchDirectorySnapshot = useSyncExternalStore(
     subscribeWorkbenchDirectory, getWorkbenchDirectorySnapshot, getWorkbenchDirectorySnapshot,
   )
+  const subscribeBayAgent = useCallback((listener: () => void) => props.bayAgent?.subscribe(listener) ?? (() => {}), [props.bayAgent])
+  const getBayAgentSnapshot = useCallback(() => props.bayAgent?.getSnapshot(), [props.bayAgent])
+  const bayAgentSnapshot = useSyncExternalStore(subscribeBayAgent, getBayAgentSnapshot, getBayAgentSnapshot)
+  const activeBayAgentAreaIds = useMemo(() => {
+    const activeItems = new Map((bayAgentSnapshot?.workItems ?? [])
+      .filter(row => row.status === 'queued' || row.status === 'running')
+      .map(row => [row.workItemId, row] as const))
+    return new Set([
+      ...([...activeItems.values()].filter(row => row.status === 'running').map(row => row.areaId)),
+      ...(bayAgentSnapshot?.assignments
+        .filter(row => row.state !== 'ended' && activeItems.has(row.workItemId))
+        .map(row => row.areaId) ?? []),
+    ])
+  }, [bayAgentSnapshot])
   const selectionTraceRef = useRef<WorkbenchSelectionTrace>()
   const subscribeWorkbenchWindows = useCallback(
     (listener: () => void) => windowController.subscribe(listener), [windowController],
@@ -3051,10 +3065,6 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
                                 void returnFocus
                               }}
                             ><IconListPenOutlineMedium size={16} /><span>编辑工作台背景</span></button>
-                            {(workbenchDirectory.getHiddenAreas?.(row.workbenchId) ?? []).map(area => <button key={area.areaId} type="button" role="menuitem" disabled={browserOwned || frameTransition !== undefined} onClick={() => {
-                              setWorkbenchMenuOpenId(undefined)
-                              void workbenchDirectory.showArea?.(row.workbenchId, area.areaId).catch(error => setStateDiagnostic(String(error)))
-                            }}>重新显示区域 · {area.label}</button>)}
                             {workbenchDirectory.memoryRequest ? <button type="button" role="menuitem" disabled={browserOwned} onClick={() => {
                               setWorkbenchMenuOpenId(undefined); setWorkbenchMenuPosition(undefined); setMemoryWorkbenchId(row.workbenchId)
                             }}><IconDatabaseOutlineMedium size={16} /><span>工作台专属记忆</span></button> : null}
@@ -3266,6 +3276,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
             }}
           /> : <Profiler id="workbench-layout" onRender={reportWorkbenchLayoutCommit}>
           <LayoutView
+            activeBayAgentAreaIds={activeBayAgentAreaIds}
             {...(workbenchDirectory.getAreaProjects === undefined ? {} : {
               areaProjects: workbenchDirectory.getAreaProjects(placementWorkbenchId),
               editAreaProject: (areaId: string) => setProjectDialog({ workbenchId: placementWorkbenchId, areaId }),
@@ -3482,6 +3493,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
 }
 
 interface LayoutViewProps {
+  activeBayAgentAreaIds: ReadonlySet<string>
   areaProjects?: Readonly<Record<string, import('../workbench-directory-contract.ts').AreaProjectV1>>
   editAreaProject?: (areaId: string) => void
   onManageEditors?: (() => void) | undefined
@@ -6258,6 +6270,7 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
               side={floatingMenuSide}
               align={areaCollapsed ? 'start' : 'end'}
               active={active} group={group} sibling={sibling}
+              activeTask={props.activeBayAgentAreaIds.has(group.id)} canCloseArea={groupsOf(document.root).length > 1}
               document={document}
               commit={commit} close={() => { setMenu(undefined) }}
               addPage={() => {
@@ -6430,13 +6443,15 @@ function WorkbenchAreaTabLabel({ tab, fallback, fontSize }: { tab: TabDocument; 
 }
 
 function AreaMenu({
-  anchorRef, surfaceRef, side, align, active, group, sibling, document, commit, close, requestSplit, splitActive, openRelated, openOfficial, addPage, showPages, editBackground, editProject, toggleCollapse, canCollapse, collapseLabel,
+  anchorRef, surfaceRef, side, align, active, activeTask, canCloseArea, group, sibling, document, commit, close, requestSplit, splitActive, openRelated, openOfficial, addPage, showPages, editBackground, editProject, toggleCollapse, canCollapse, collapseLabel,
 }: {
   anchorRef: RefObject<HTMLElement>
   surfaceRef: RefObject<HTMLDivElement>
   side: FloatingMenuSide
   align: 'start' | 'end'
   active: TabDocument | undefined
+  activeTask: boolean
+  canCloseArea: boolean
   group: GroupNode
   sibling: SiblingArea | undefined
   document: WorkbenchLayoutDocument
@@ -6515,11 +6530,14 @@ function AreaMenu({
         </>
       )}
       <div className={css.menuDivider} />
+      <button role="menuitem" disabled={!canCloseArea || activeTask} title={activeTask ? '请先停止或等待此区域的 Bay Agent 任务结束' : !canCloseArea ? '工作台至少保留一个区域' : undefined} onClick={() => run({ type: 'close-area', areaId: group.id })}>
+        关闭当前区域
+      </button>
       <button role="menuitem" disabled={active === undefined} onClick={() => {
         /* v8 ignore next -- the button is disabled when no active editor exists. */
         if (active !== undefined) run({ type: 'close-tab', tabId: active.id })
       }}>关闭当前视图</button>
-      <span className={css.menuHint}>合并显示保留各区域的背景和任务归属；关闭内页只关闭视图。</span>
+      <span className={css.menuHint}>关闭区域会保留项目、对话和背景；需要恢复时可使用顶栏撤回。关闭内页只移除当前视图。</span>
     </WorkbenchFloatingMenu>
   )
 }

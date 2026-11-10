@@ -64,7 +64,7 @@ export function AreaProjectDialog({ directory, workbenchId, areaId, onClose }: {
   return <Modal open onClose={close} title="区域项目文件夹" headless className={css.wizardModal ?? ''}>
     <form className={css.wizard} onSubmit={event => { event.preventDefault(); void save() }}>
       <header className={css.wizardHeader}>
-        <div><h2>区域项目文件夹</h2><p className={css.formHint}>此区域的新对话将在这个文件夹中工作。</p></div>
+        <div><h2>区域项目文件夹</h2><p className={css.formHint}>新会话将在此文件夹中工作；已有会话仍保留创建时的项目文件夹。</p></div>
         <Button type="button" aria-label="关闭" disabled={busy} onClick={close}><IconCloseOutlineMedium size={18} /></Button>
       </header>
       <div className={css.wizardBody}>

@@ -113,6 +113,7 @@ export type LayoutCommand =
   | { type: 'activate'; groupId: string; tabId: string }
   | { type: 'add-tab'; groupId: string; tab: TabDocument }
   | { type: 'close-tab'; tabId: string }
+  | { type: 'close-area'; areaId: string }
   | { type: 'move-tab'; tabId: string; targetGroupId: string; edge: DropEdge; ids: { groupId: string; splitId: string }; index?: number; ratio?: number }
   | { type: 'duplicate-tab'; tabId: string; newTabId: string; targetGroupId: string; edge: DropEdge; ids: { groupId: string; splitId: string }; index?: number; ratio?: number }
   | { type: 'merge-group'; sourceGroupId: string; targetGroupId: string }
@@ -704,6 +705,26 @@ export function mergeGroup(
   return sourceActiveTabId === undefined ? next : activate(next, targetGroupId, sourceActiveTabId)
 }
 
+/** Remove an Area from the visible layout while preserving its durable identity and contents. */
+export function closeGroup(document: WorkbenchLayoutDocument, areaId: string): WorkbenchLayoutDocument {
+  const groups = groupsOf(document.root)
+  if (groups.length <= 1 || !groups.some(group => group.id === areaId)) return document
+  const remove = (node: LayoutNode): LayoutNode | undefined => {
+    if (node.kind === 'group') return node.id === areaId ? undefined : node
+    const first = remove(node.first), second = remove(node.second)
+    if (first === undefined) return second
+    if (second === undefined) return first
+    if (first === node.first && second === node.second) return node
+    return { ...node, first, second }
+  }
+  const root = remove(document.root)
+  if (root === undefined) return document
+  const remaining = groupsOf(root)
+  const activeGroupId = remaining.some(group => group.id === document.activeGroupId)
+    ? document.activeGroupId : remaining[0]!.id
+  return { ...document, root, activeGroupId }
+}
+
 /** Bound conversations must belong to the same project. Host checks empty Areas too. */
 export function canMergeGroups(
   document: WorkbenchLayoutDocument,
@@ -757,6 +778,7 @@ export function applyLayoutCommand(
     case 'activate': return activate(document, command.groupId, command.tabId)
     case 'add-tab': return addTab(document, command.groupId, command.tab)
     case 'close-tab': return closeTab(document, command.tabId)
+    case 'close-area': return closeGroup(document, command.areaId)
     case 'move-tab': return moveTab(
       document, command.tabId, command.targetGroupId, command.edge, command.ids, command.index, command.ratio,
     )

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { HostWorkbenchDirectory } from '../src/host-workbench-directory.ts'
 import { areasOf, migrateDocumentV2ToV3, projectDocumentV3ToLayoutV2 } from '../src/foundation/document-v3.ts'
-import { canMergeGroups, closeTab, createSessionTab, duplicateTab, group, groupsOf, mergeGroup, moveTab, swapGroups } from '../src/foundation/model.ts'
+import { canMergeGroups, closeGroup, closeTab, createSessionTab, duplicateTab, group, groupsOf, mergeGroup, moveTab, swapGroups } from '../src/foundation/model.ts'
 import { decodeWorkbenchSettingsV4 } from '../src/foundation/persistence.ts'
 import { prepareFloatingTabForArea } from '../src/foundation/editor-selection.ts'
 import { WorkbenchControlPlane } from '../src/foundation/workbench-control-plane.ts'
@@ -47,6 +47,21 @@ it('closing the last view preserves the Area and the durable conversation', asyn
   await save(closeTab(layout, 'tab-a'))
   const record = directory.getSnapshot().value.workbenches.wb!
   expect(areasOf(record.document.root).map(area => area.areaId)).toContain('a')
+  expect(record.sessionCatalog?.['session-a']?.areaId).toBe('a')
+})
+it('closes an Area from the visible layout while retaining its project and conversations for restore', async () => {
+  const { directory, save, layout } = await fixture()
+  const closed = closeGroup(layout, 'a')
+  expect(groupsOf(closed.root).map(area => area.id)).toEqual(['b'])
+  expect(closeGroup(closed, 'b')).toBe(closed)
+  await save(closed)
+  let record = directory.getSnapshot().value.workbenches.wb!
+  expect(areasOf(record.document.root).map(area => area.areaId)).toEqual(['b'])
+  expect(record.areaProjects?.a?.relativePath).toBe('app')
+  expect(record.sessionCatalog?.['session-a']?.areaId).toBe('a')
+  await directory.showArea('wb', 'a', directory.getSnapshot().revision)
+  record = directory.getSnapshot().value.workbenches.wb!
+  expect(areasOf(record.document.root).map(area => area.areaId)).toEqual(['b', 'a'])
   expect(record.sessionCatalog?.['session-a']?.areaId).toBe('a')
 })
 it('merged display retains a discoverable source Area and its original conversation ownership', async () => {

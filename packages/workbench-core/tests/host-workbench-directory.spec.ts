@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { HostWorkbenchDirectory } from '../src/host-workbench-directory.ts'
 import type { WorkbenchRecordV2 } from '../src/foundation/persistence.ts'
 import { createWorkbenchContext } from '../src/foundation/workbench-context.ts'
+import { areasOf } from '../src/foundation/document-v3.ts'
 
 const roots: string[] = []
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }) })
@@ -56,6 +57,53 @@ it('binds two zero-session areas to one project without merging their contexts',
   expect(record.document.root.kind).toBe('split')
   await expect(f.directory.bindArea({ workbenchId: 'workbench-one', areaId: 'area-a', relativePath: '../outside', expectedRevision: f.directory.getSnapshot().revision })).rejects.toThrow()
   await expect(f.directory.bindArea({ workbenchId: 'workbench-one', areaId: 'area-a', relativePath: '.bay/memory', expectedRevision: f.directory.getSnapshot().revision })).rejects.toThrow('内部')
+})
+it('allows closing an area after its Bay Agent execution ends, while blocking only active execution', async () => {
+  const f = await setup(); await f.directory.create(f.input)
+  await f.directory.bindArea({ workbenchId: 'workbench-one', areaId: 'area-a', relativePath: 'app', createDirectory: true, expectedRevision: f.directory.getSnapshot().revision })
+  let active = true
+  f.directory.setAreaTaskGuard(() => active)
+  const visible = f.directory.getSnapshot().value.workbenches['workbench-one']!
+  const hidden = { ...visible, document: { ...visible.document, activeAreaId: 'area-b', root: { kind: 'area' as const, areaId: 'area-b', moduleHistory: [] } } }
+  await expect(f.directory.patch({ operation: 'set', path: ['workbenches', 'workbench-one'], value: hidden, expectedRevision: f.directory.getSnapshot().revision })).rejects.toThrow('正在运行')
+  active = false
+  await expect(f.directory.patch({ operation: 'set', path: ['workbenches', 'workbench-one'], value: hidden, expectedRevision: f.directory.getSnapshot().revision })).resolves.toMatchObject({ status: 'committed' })
+  const record = f.directory.getSnapshot().value.workbenches['workbench-one']!
+  expect(areasOf(record.document.root).map(area => area.areaId)).toEqual(['area-b'])
+  expect(record.areaProjects?.['area-a']?.relativePath).toBe('app')
+  await f.directory.showArea('workbench-one', 'area-a', f.directory.getSnapshot().revision)
+  expect(areasOf(f.directory.getSnapshot().value.workbenches['workbench-one']!.document.root).map(area => area.areaId)).toEqual(['area-b', 'area-a'])
+})
+it('allows rebinding an empty area while retaining historical sessions on their original project', async () => {
+  const f = await setup(); await f.directory.create(f.input)
+  await f.directory.bindArea({ workbenchId: 'workbench-one', areaId: 'area-a', relativePath: 'shared', createDirectory: true, expectedRevision: f.directory.getSnapshot().revision })
+  await f.directory.registerSession('workbench-one', 'native-session-a', { sessionKey: 'session-a', sessionId: 'native-session-a', role: 'user', areaId: 'area-a', relativePath: 'shared', title: 'App', agentPreset: 'standard', createdAt: 1 })
+  let active = true
+  f.directory.setAreaTaskGuard(() => active)
+  await expect(f.directory.bindArea({ workbenchId: 'workbench-one', areaId: 'area-a', relativePath: 'other', createDirectory: true, expectedRevision: f.directory.getSnapshot().revision })).rejects.toThrow('进行中的 Bay Agent')
+  active = false
+  await expect(f.directory.bindArea({ workbenchId: 'workbench-one', areaId: 'area-a', relativePath: 'other', createDirectory: true, expectedRevision: f.directory.getSnapshot().revision })).resolves.toMatchObject({ status: 'committed' })
+  const rebound = f.directory.getSnapshot().value.workbenches['workbench-one']!
+  expect(rebound.areaProjects?.['area-a']?.relativePath).toBe('other')
+  expect(rebound.sessionCatalog?.['session-a']).toMatchObject({ areaId: 'area-a', relativePath: 'shared' })
+  await expect(f.directory.reserveSession('workbench-one', 'new-session-request', 'area-a', 'standard', 'native-session-new'))
+    .resolves.toMatchObject({ relativePath: 'other' })
+  await expect(f.directory.bindArea({ workbenchId: 'workbench-one', areaId: 'area-b', relativePath: 'shared', createDirectory: false, expectedRevision: f.directory.getSnapshot().revision })).resolves.toMatchObject({ status: 'committed' })
+  expect(f.directory.getSnapshot().value.workbenches['workbench-one']!.sessionCatalog?.['session-a']?.relativePath).toBe('shared')
+})
+it('does not allow rebinding while an area still has an open page', async () => {
+  const f = await setup(); await f.directory.create(f.input)
+  await f.directory.bindArea({ workbenchId: 'workbench-one', areaId: 'area-a', relativePath: 'shared', createDirectory: true, expectedRevision: f.directory.getSnapshot().revision })
+  await f.directory.registerSession('workbench-one', 'native-session-a', { sessionKey: 'session-a', sessionId: 'native-session-a', role: 'user', areaId: 'area-a', relativePath: 'shared', title: 'App', agentPreset: 'standard', createdAt: 1 })
+  const snapshot = f.directory.getSnapshot(), record = snapshot.value.workbenches['workbench-one']!
+  const document = structuredClone(record.document)
+  if (document.root.kind !== 'split') throw new Error('fixture must have two areas')
+  document.root.first.moduleHistory = [{ moduleInstanceId: 'page-a', editorId: 'workbench.conversation', editorScope: 'session',
+    binding: { sessionId: 'native-session-a', workspaceId: f.directory.workspaceId('workbench-one', 'area-a') }, lastKnownTitle: 'App', state: {} }]
+  document.root.first.activeModuleInstanceId = 'page-a'
+  await f.directory.patch({ operation: 'set', path: ['workbenches', 'workbench-one'], value: { ...record, document }, expectedRevision: snapshot.revision })
+  await expect(f.directory.bindArea({ workbenchId: 'workbench-one', areaId: 'area-a', relativePath: 'other', createDirectory: true, expectedRevision: f.directory.getSnapshot().revision }))
+    .rejects.toThrow('关闭此区域中的内页')
 })
 it('checks real directory links before creating anything outside the workbench', async () => {
   const f = await setup(); await f.directory.create(f.input)

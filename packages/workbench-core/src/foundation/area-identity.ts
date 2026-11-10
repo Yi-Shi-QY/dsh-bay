@@ -17,7 +17,10 @@ export function validateWorkbenchRelations(record: WorkbenchRecordV2): void {
     if (!areas.has(id) || !project.relativePath || project.relativePath.includes('\\') || project.relativePath.split('/').some(part => !part || part === '.' || part === '..' || part.toLowerCase() === '.bay' || part.includes(':'))) throw new Error('区域项目引用无效：' + id)
   }
   for (const [key, entry] of Object.entries(catalog)) {
-    if (entry.sessionKey !== key || (entry.role === 'main' ? entry.relativePath !== '' : !entry.areaId || !areas.has(entry.areaId) || record.areaProjects?.[entry.areaId]?.relativePath !== entry.relativePath)) throw new Error('对话归属或项目引用无效：' + key)
+    // Closed sessions retain the project they were created in. Only pages
+    // still present in the layout must match the area's current project.
+    const relativePathValid = entry.relativePath !== '' && !entry.relativePath.includes('\\') && entry.relativePath.split('/').every(part => part && part !== '.' && part !== '..' && part.toLowerCase() !== '.bay' && !part.includes(':'))
+    if (entry.sessionKey !== key || (entry.role === 'main' ? entry.relativePath !== '' : !entry.areaId || !areas.has(entry.areaId) || !relativePathValid)) throw new Error('对话归属或项目引用无效：' + key)
   }
   for (const area of areasOf(record.document.root)) for (const page of area.moduleHistory) {
     if (page.binding) {

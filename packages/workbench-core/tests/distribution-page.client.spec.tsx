@@ -35,6 +35,16 @@ it('shows three distinct modes and requires confirmation before importing',async
   const select=view.getByLabelText('导出模式') as HTMLSelectElement
   expect([...select.options].map(o=>o.value)).toEqual(['layout-only','online-reference','offline-embedded'])
 })
+it('renders the export preview with the workbench layout summary',async()=>{
+  const f=fixture(),settings=settingsFixture(),document=settings.workbenches.a!.document
+  f.props.openOptions={shareMode:'export',workbenchId:'a'}
+  f.service.prepareExport.mockResolvedValue({preview:{layout:{name:'AAA',description:'工作台说明',tags:['研发'],document,warnings:[]},manifest:{dependencies:[]}},bytes:new Uint8Array([1])})
+  const view=render(<WorkbenchDistributionPage {...f.props as never}/>)
+  fireEvent.click(view.getByRole('button',{name:'保存布局并生成分享包'}))
+  await waitFor(()=>expect(view.getByText('布局概览')).toBeDefined())
+  expect(view.getByText('当前分享包不包含额外扩展。')).toBeDefined()
+  expect(view.getByText('工作台说明')).toBeDefined()
+})
 it('refreshes durable transaction status after restore fails instead of losing the resume action',async()=>{
   const f=fixture();f.service.confirm.mockRejectedValue(new Error('配置恢复失败'))
   const view=render(<WorkbenchDistributionPage {...f.props as never}/>)

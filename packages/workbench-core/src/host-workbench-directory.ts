@@ -188,7 +188,6 @@ export class HostWorkbenchDirectory {
     }
     for (const entry of Object.values(next.sessionCatalog ?? {})) {
       if (entry.role !== 'main' && (!entry.areaId || !next.areaDefinitions[entry.areaId])) throw new Error('对话所属区域缺失，无法保存工作台。')
-      if (entry.areaId && next.areaProjects[entry.areaId]?.relativePath !== entry.relativePath) throw new Error('对话与所属区域的项目不匹配。')
     }
     return next
   }
@@ -316,12 +315,14 @@ export class HostWorkbenchDirectory {
       if (!record || !workbenchAreas(record).some(row => row.areaId === input.areaId)) throw new Error('区域不存在。')
       const existing = record.areaProjects?.[input.areaId]
       if (existing?.relativePath === input.relativePath) return { status: 'committed' as const, revision: this.registry.revision }
-      const occupied = this.areaHasTasks(input.workbenchId, input.areaId) || Object.values(record.sessionCatalog ?? {}).some(row => row.areaId === input.areaId)
-      const resolved = await this.resolveDirectory(input.workbenchId, input.relativePath, !occupied && input.createDirectory === true)
+      if (this.areaHasTasks(input.workbenchId, input.areaId)) throw new Error('区域仍有进行中的 Bay Agent 任务。')
+      // A session catalog entry is historical ownership, not a currently open page.
+      const area = areasOf(record.document.root).find(row => row.areaId === input.areaId)
+      if (area && area.moduleHistory.length > 0) throw new Error('请先关闭此区域中的内页，再切换项目文件夹。历史会话和任务记录会保留。')
+      const resolved = await this.resolveDirectory(input.workbenchId, input.relativePath, input.createDirectory === true)
       const canonical = portableRelativePath(await realpath(this.rootPath(input.workbenchId)), resolved)
       if (!canonical) throw new Error('请选择工作台根目录内的子文件夹。')
       if (existing?.relativePath === canonical) return { status: 'committed' as const, revision: this.registry.revision }
-      if (occupied) throw new Error('已有会话或任务的区域不能更换项目目录，请新建区域。')
       const workspace = await this.workspaces.create(resolved)
       const registry = clone(this.registry), registration = registry.registrations[input.workbenchId]!
       registration.workspaces[canonical] = workspace.id
@@ -416,6 +417,10 @@ export class HostWorkbenchDirectory {
       if (!registration) throw new Error('请通过创建工作台入口选择目录；不支持旧格式工作台。')
       if (isDeepStrictEqual(record, this.snapshot.value.workbenches[id])) continue
       const before = this.snapshot.value.workbenches[id]!
+      const visibleAfter = new Set(areasOf(record.document.root).map(area => area.areaId))
+      for (const area of areasOf(before.document.root)) {
+        if (!visibleAfter.has(area.areaId) && this.areaHasTasks(id, area.areaId)) throw new Error('此区域仍有正在运行或启动中的 Bay Agent 任务，请先停止或等待任务结束。')
+      }
       if (!isDeepStrictEqual(record.areaProjects, before.areaProjects) || !isDeepStrictEqual(record.sessionCatalog, before.sessionCatalog)
         || !isDeepStrictEqual(record.fileWorkbench, before.fileWorkbench)) throw new Error('目录和会话目录只能通过宿主专用接口修改。')
       const portable = this.portable(this.reconcileAreas(record, before), registration)

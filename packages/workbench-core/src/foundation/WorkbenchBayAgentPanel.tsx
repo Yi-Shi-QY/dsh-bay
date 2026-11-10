@@ -23,13 +23,14 @@ export function WorkbenchBayAgentPanel({ controller, workbenchId, areas = [], on
   const [expanded, setExpanded] = useState(true)
   const [objective, setObjective] = useState('')
   const [areaId, setAreaId] = useState('')
+  const [agentPreset, setAgentPreset] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
   const activeAreas = areas.length > 0 ? areas : snapshot.areas
   const submit = async () => {
-    if (!objective.trim() || !areaId) return
+    if (!objective.trim() || !areaId || !agentPreset) return
     setBusy(true); setError(undefined)
-    try { await controller.createWorkItem({ areaId, objective: objective.trim(), start: true }); setObjective('') }
+    try { await controller.createWorkItem({ areaId, objective: objective.trim(), agentPreset, start: true }); setObjective('') }
     catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)) }
     finally { setBusy(false) }
   }
@@ -46,8 +47,12 @@ export function WorkbenchBayAgentPanel({ controller, workbenchId, areas = [], on
           <option value="">选择区域</option>
           {activeAreas.map(area => <option key={area.areaId} value={area.areaId}>{area.label}</option>)}
         </select>
+        <select aria-label="Worker 模式" value={agentPreset} onChange={event => setAgentPreset(event.currentTarget.value)} style={{ height: 30 }}>
+          <option value="">选择 Worker 模式</option>
+          {(snapshot.agentModes ?? []).map(mode => <option key={mode.id} value={mode.id} title={mode.description}>{mode.name}</option>)}
+        </select>
         <input aria-label="工作项目标" value={objective} onChange={event => setObjective(event.currentTarget.value)} placeholder="告诉 Bay Agent 要完成什么" onKeyDown={event => { if (event.key === 'Enter') void submit() }} style={{ height: 30, padding: '0 8px' }} />
-        <button type="button" disabled={busy || !objective.trim() || !areaId} onClick={() => void submit()} style={{ height: 30 }}>新建并启动工作项</button>
+        <button type="button" disabled={busy || !objective.trim() || !areaId || !agentPreset} onClick={() => void submit()} style={{ height: 30 }}>新建并启动工作项</button>
         {error ? <div role="alert" style={{ color: '#b42318' }}>{error}</div> : null}
       </div>
       {controller.listAttention().length > 0 ? <section aria-label="Attention Queue" style={{ marginBottom: 12 }}>
