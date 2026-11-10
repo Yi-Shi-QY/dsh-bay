@@ -49,34 +49,55 @@ it('closing the last view preserves the Area and the durable conversation', asyn
   expect(areasOf(record.document.root).map(area => area.areaId)).toContain('a')
   expect(record.sessionCatalog?.['session-a']?.areaId).toBe('a')
 })
-it('closes an Area from the visible layout while retaining its project and conversations for restore', async () => {
+it('removes closed Area identities while retaining projects and conversations, including an empty layout', async () => {
   const { directory, save, layout } = await fixture()
-  const closed = closeGroup(layout, 'a')
-  expect(groupsOf(closed.root).map(area => area.id)).toEqual(['b'])
-  expect(closeGroup(closed, 'b')).toBe(closed)
+  const projectId = directory.getSnapshot().value.workbenches.wb!.areaProjects!.a!.projectId!
+  const closed = closeGroup(closeGroup(layout, 'a'), 'b')
+  expect(groupsOf(closed.root)).toEqual([])
   await save(closed)
   let record = directory.getSnapshot().value.workbenches.wb!
-  expect(areasOf(record.document.root).map(area => area.areaId)).toEqual(['b'])
-  expect(record.areaProjects?.a?.relativePath).toBe('app')
-  expect(record.sessionCatalog?.['session-a']?.areaId).toBe('a')
-  await directory.showArea('wb', 'a', directory.getSnapshot().revision)
+  expect(record.areaProjects).toEqual({})
+  expect(record.areaDefinitions).toEqual({})
+  expect(record.sessionCatalog?.['session-a']).toMatchObject({ projectId, areaId: 'a' })
+  const opened = await directory.openProject({ workbenchId: 'wb', projectId, requestId: 'reopen', expectedRevision: directory.getSnapshot().revision })
+  if (opened.status !== 'committed') throw new Error('conflict')
+  expect(['a', 'b']).not.toContain(opened.areaId)
   record = directory.getSnapshot().value.workbenches.wb!
-  expect(areasOf(record.document.root).map(area => area.areaId)).toEqual(['b', 'a'])
-  expect(record.sessionCatalog?.['session-a']?.areaId).toBe('a')
+  expect(areasOf(record.document.root)[0]!.moduleHistory).toEqual([])
+  expect(record.sessionCatalog?.['session-a']?.projectId).toBe(projectId)
 })
-it('merged display retains a discoverable source Area and its original conversation ownership', async () => {
+it('keeps project-open retries idempotent and rejects request IDs reused for another project', async () => {
+  const { directory } = await fixture(false)
+  const projects = directory.getSnapshot().value.workbenches.wb!.projects!
+  const [app, research] = Object.values(projects)
+  expect(app).toBeDefined(); expect(research).toBeDefined()
+  const request = { workbenchId: 'wb', projectId: app!.projectId, requestId: 'open-project-request', expectedRevision: directory.getSnapshot().revision }
+  const opened = await directory.openProject(request)
+  expect(await directory.openProject({ ...request, expectedRevision: directory.getSnapshot().revision })).toMatchObject({ status: 'committed', areaId: opened.areaId })
+  await expect(directory.openProject({ ...request, projectId: research!.projectId, expectedRevision: directory.getSnapshot().revision })).rejects.toThrow('不同项目')
+})
+it('merging removes the source Area and keeps independent project and conversation ownership', async () => {
   const { directory, save, layout } = await fixture()
+  const projectId = directory.getSnapshot().value.workbenches.wb!.areaProjects!.a!.projectId!
   await save(mergeGroup(layout, 'a', 'b'))
   const plane = new WorkbenchControlPlane({ settings: directory })
-  expect(plane.getArea('a', 'wb')).toMatchObject({ areaId: 'a', visible: false })
-  expect(plane.inspect('wb').sessions).toEqual(expect.arrayContaining([expect.objectContaining({ sessionId: 'session-a', areaId: 'a' })]))
-  expect(directory.getSnapshot().value.workbenches.wb!.sessionCatalog?.['session-a']?.areaId).toBe('a')
+  expect(() => plane.getArea('a', 'wb')).toThrow('Unknown Area')
+  expect(plane.inspect('wb').sessions).toEqual(expect.arrayContaining([expect.objectContaining({ sessionId: 'session-a', projectId })]))
   const decoded = decodeWorkbenchSettingsV4(JSON.parse(JSON.stringify(directory.getSnapshot().value)))!
-  expect(decoded.workbenches.wb!.areaDefinitions?.a).toEqual({ areaId: 'a' })
-  expect(decoded.workbenches.wb!.sessionCatalog?.['session-a']?.areaId).toBe('a')
+  expect(decoded.workbenches.wb!.areaDefinitions?.a).toBeUndefined()
+  expect(decoded.workbenches.wb!.sessionCatalog?.['session-a']?.projectId).toBe(projectId)
   expect(decoded.workbenches.wb!.fileWorkbench).toBeDefined()
-  await directory.showArea('wb', 'a', directory.getSnapshot().revision)
-  expect(plane.getArea('a', 'wb').visible).toBe(true)
+})
+it('undoing closure of an empty Area restores its project without retaining a hidden Area', async () => {
+  const { directory, save, layout } = await fixture()
+  const empty = closeTab(layout, 'tab-a')
+  await save(empty)
+  const projectId = directory.getSnapshot().value.workbenches.wb!.areaProjects!.a!.projectId
+  await save(closeGroup(empty, 'a'))
+  expect(directory.getSnapshot().value.workbenches.wb!.areaProjects!.a).toBeUndefined()
+  await save(empty)
+  expect(directory.getSnapshot().value.workbenches.wb!.areaProjects!.a!.projectId).toBe(projectId)
+  expect(areasOf(directory.getSnapshot().value.workbenches.wb!.document.root).find(area => area.areaId === 'a')!.moduleHistory).toEqual([])
 })
 
 it('does not merge empty Areas from different projects or move a conversation across projects', async () => {

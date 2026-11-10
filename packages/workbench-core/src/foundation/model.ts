@@ -248,7 +248,7 @@ export function mapNode(node: LayoutNode, id: string, map: (node: LayoutNode) =>
  * @returns group nodes in traversal order.
  */
 export function groupsOf(node: LayoutNode): GroupNode[] {
-  return node.kind === 'group' ? [node] : [...groupsOf(node.first), ...groupsOf(node.second)]
+  return node.kind === 'group' ? (node.id ? [node] : []) : [...groupsOf(node.first), ...groupsOf(node.second)]
 }
 
 /** Flatten all tabs in group traversal order.
@@ -708,7 +708,8 @@ export function mergeGroup(
 /** Remove an Area from the visible layout while preserving its durable identity and contents. */
 export function closeGroup(document: WorkbenchLayoutDocument, areaId: string): WorkbenchLayoutDocument {
   const groups = groupsOf(document.root)
-  if (groups.length <= 1 || !groups.some(group => group.id === areaId)) return document
+  if (!groups.some(group => group.id === areaId)) return document
+  if (groups.length === 1) return { ...document, root: group('', []), activeGroupId: '' }
   const remove = (node: LayoutNode): LayoutNode | undefined => {
     if (node.kind === 'group') return node.id === areaId ? undefined : node
     const first = remove(node.first), second = remove(node.second)
@@ -819,7 +820,7 @@ export function validateLayout(value: unknown, account = 'ungrouped'): Workbench
   const visit = (node: LayoutNode): boolean => {
     // oxlint-disable-next-line typescript/no-unnecessary-condition -- persisted input is validated at runtime.
     if (typeof node !== 'object' || node === null) return false
-    if (typeof node.id !== 'string' || ids.has(node.id)) return false
+    if (typeof node.id !== 'string' || (node.id === '' && (node !== candidate.root || node.kind !== 'group' || candidate.activeGroupId !== '' || node.activeTabId !== undefined || node.project !== undefined || node.areaBinding !== undefined || !Array.isArray(node.tabs) || node.tabs.length !== 0)) || ids.has(node.id)) return false
     ids.add(node.id)
     if (node.kind === 'split') {
       // oxlint-disable-next-line typescript/no-unnecessary-condition -- persisted input is validated at runtime.
@@ -858,7 +859,7 @@ export function validateLayout(value: unknown, account = 'ungrouped'): Workbench
     if (node.areaBindingGeneration !== undefined && (!Number.isInteger(node.areaBindingGeneration) || node.areaBindingGeneration < 0)) return false
     return node.activeTabId === undefined || node.tabs.some(tab => tab.id === node.activeTabId)
   }
-  return visit(candidate.root) && groupsOf(candidate.root).some(item => item.id === candidate.activeGroupId)
+  return visit(candidate.root) && (candidate.root.kind === 'group' && candidate.root.id === '' && candidate.root.tabs.length === 0 && candidate.activeGroupId === '' || groupsOf(candidate.root).some(item => item.id === candidate.activeGroupId))
     ? candidate
     : undefined
 }

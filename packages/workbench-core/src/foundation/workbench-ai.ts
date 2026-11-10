@@ -74,18 +74,20 @@ export function buildWorkbenchAiPrompt(
     facts = { name: request.name, description: request.description }
   } else {
     if (!snapshot || snapshot.workbenchId !== request.workbenchId) throw new Error('工作台不存在，无法生成背景草稿')
+    const requestedArea = request.scope === 'area' ? snapshot.areas.find(area => area.areaId === request.areaId) : undefined
+    const projectId = requestedArea?.project?.projectId
     const areas = request.scope === 'area'
-      ? snapshot.areas.filter(area => area.areaId === request.areaId && !area.archived)
+      ? snapshot.areas.filter(area => (projectId ? area.project?.projectId === projectId : area.areaId === request.areaId) && !area.archived)
       : snapshot.areas.filter(area => !area.archived)
-    if (request.scope === 'area' && areas.length !== 1) throw new Error('区域不存在或已归档，无法生成区域背景草稿')
+    if (request.scope === 'area' && !areas.length) throw new Error('区域不存在或已关闭，无法定位项目背景')
     const areaFacts = areas.map(area => ({
       label: area.label,
       pages: area.modules.map(module => ({ title: module.title, editorId: module.editorId, scope: module.scope })),
     }))
     if (request.scope === 'workbench') {
-      facts = { name: snapshot.name, description: snapshot.description, areas: areaFacts }
+      facts = { name: snapshot.name, description: snapshot.description, projects: snapshot.projects, areas: areaFacts }
     } else {
-      facts = { area: areaFacts[0] }
+      facts = { project: projectId ? snapshot.projects?.find(project => project.projectId === projectId) : undefined, areas: areaFacts, area: areaFacts[0] }
     }
   }
   return [

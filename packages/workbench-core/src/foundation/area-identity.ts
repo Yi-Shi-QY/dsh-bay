@@ -6,6 +6,7 @@ import type { AreaProjectV1 } from '../workbench-directory-contract.ts'
 /** Visibility is a layout property, not an Area's lifetime. */
 export function workbenchAreas(record: WorkbenchRecordV2): AreaNode[] {
   const visible = areasOf(record.document.root), ids = new Set(visible.map(area => area.areaId))
+  if (record.projectModelVersion) return visible
   return [...visible, ...Object.keys(record.areaDefinitions ?? {}).filter(id => !ids.has(id)).map(areaId => ({ kind: 'area' as const, areaId, moduleHistory: [] }))]
 }
 
@@ -13,8 +14,12 @@ export function workbenchAreas(record: WorkbenchRecordV2): AreaNode[] {
 export function validateWorkbenchRelations(record: WorkbenchRecordV2): void {
   const areas = new Set(workbenchAreas(record).map(area => area.areaId))
   const catalog = record.sessionCatalog ?? {}
+  for (const [id, project] of Object.entries(record.projects ?? {})) {
+    if (project.projectId !== id || !project.relativePath || project.relativePath.includes('\\') || project.relativePath.split('/').some(part => !part || part === '.' || part === '..' || part.toLowerCase() === '.bay' || part.includes(':'))) throw new Error('项目登记无效：' + id)
+  }
   for (const [id, project] of Object.entries(record.areaProjects ?? {})) {
     if (!areas.has(id) || !project.relativePath || project.relativePath.includes('\\') || project.relativePath.split('/').some(part => !part || part === '.' || part === '..' || part.toLowerCase() === '.bay' || part.includes(':'))) throw new Error('区域项目引用无效：' + id)
+    if (record.projectModelVersion && (!project.projectId || record.projects?.[project.projectId]?.relativePath !== project.relativePath)) throw new Error('区域项目身份无效：' + id)
   }
   for (const [key, entry] of Object.entries(catalog)) {
     // Closed sessions retain the project they were created in. Only pages
@@ -22,7 +27,7 @@ export function validateWorkbenchRelations(record: WorkbenchRecordV2): void {
     const relativePathValid = entry.relativePath !== '' && !entry.relativePath.includes('\\') && entry.relativePath.split('/').every(part => part && part !== '.' && part !== '..' && part.toLowerCase() !== '.bay' && !part.includes(':'))
     // Floating user sessions (for example extension repairs) own a project,
     // but do not need an Area container. Worker ownership remains explicit.
-    const ownerValid = entry.areaId ? areas.has(entry.areaId) : entry.role === 'user'
+    const ownerValid = record.projectModelVersion ? !!entry.projectId && record.projects?.[entry.projectId]?.relativePath === entry.relativePath : entry.areaId ? areas.has(entry.areaId) : entry.role === 'user'
     if (entry.sessionKey !== key || (entry.role === 'main' ? entry.relativePath !== '' : !ownerValid || !relativePathValid)) throw new Error('对话归属或项目引用无效：' + key)
   }
   for (const area of areasOf(record.document.root)) for (const page of area.moduleHistory) {
@@ -31,6 +36,11 @@ export function validateWorkbenchRelations(record: WorkbenchRecordV2): void {
       if (!entry || entry.role === 'main' || entry.relativePath !== record.areaProjects?.[area.areaId]?.relativePath) throw new Error('内页对话与区域项目不匹配：' + page.moduleInstanceId)
     }
     if (page.editorId === 'workbench.workspace-files') {
+      const projectId = (page.state as { projectId?: string }).projectId
+      if (projectId) {
+        if (!record.projects?.[projectId] || record.areaProjects?.[area.areaId]?.projectId !== projectId) throw new Error('项目文件内页来源无效：' + page.moduleInstanceId)
+        continue
+      }
       const source = (page.state as { projectAreaId?: string }).projectAreaId ?? area.areaId
       if (!areas.has(source) || (source !== area.areaId && record.areaProjects?.[source]?.relativePath !== record.areaProjects?.[area.areaId]?.relativePath)) throw new Error('项目文件内页来源无效：' + page.moduleInstanceId)
     }

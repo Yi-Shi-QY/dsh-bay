@@ -10,6 +10,7 @@ export interface WorkbenchMemoryEntry {
   title: string
   summary: string
   areaId?: string
+  projectId?: string
   verification: MemoryVerification
   environmentDependent: boolean
   source: MemorySource
@@ -25,6 +26,7 @@ export interface WorkbenchMemoryIndex {
   requests: Record<string, { fingerprint: string; id: string; revision: number }>
 }
 export interface WorkbenchMemoryWrite {
+  projectId?: string
   requestId: string
   id: string
   expectedRevision: number

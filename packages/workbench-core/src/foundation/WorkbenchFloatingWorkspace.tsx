@@ -389,6 +389,7 @@ export function WorkbenchFloatingWorkspace(props: Props) {
   const renderRow = (row: FloatingInstance) => {
     const tab = row.tab, editor = editors.find(item => item.id === tab.editorId && item.scope === tab.editorScope)
     const areaId = 'floating:' + tab.id
+    const project = Object.values(frame.workbenchDirectory?.getProjects?.(workbenchId) ?? {}).find(project => tab.binding?.workspaceId ? project.workspaceId === tab.binding.workspaceId : tab.state && typeof tab.state === 'object' && !Array.isArray(tab.state) && tab.state.projectId === project.projectId)
     const commands: AreaContentCommandHandlersV1 = {
       commit(command) {
         if (row.busy) return false
@@ -428,7 +429,7 @@ export function WorkbenchFloatingWorkspace(props: Props) {
       activate(id)
     }} /> : null}{tab.id === 'bay-agent-main' && !tab.sessionId ? bayError ? <div className={css.empty} role="alert"><strong>Bay Agent</strong><p>{bayError}</p><button onClick={() => void revealBayAgent()}>重试连接</button></div> : <WorkbenchPageLoading label="Bay Agent" icon="message" /> : <div style={{ flex: 1, minHeight: 0, position: 'relative' }}><RetainedEditorTarget id={tab.id} workbenchId={workbenchId}>
       <MemoizedEditor workbenchId={workbenchId} sharePresenceEnabled={false} tab={tab} renderSlot={frame.renderSlot} editors={editors} editor={editor} editorAvailable={!!editor} extensionAccess={props.extensionAccess}
-        projection={{ areaId, tabId: tab.id, editorId: tab.editorId, editorScope: tab.editorScope, state: tab.state, lastKnownTitle: tab.lastKnownTitle, availability: editor ? 'available' : 'unsupported', ...(tab.sessionId ? { sessionId: tab.sessionId } : {}), ...(tab.pendingBinding ? { pendingBinding: tab.pendingBinding } : {}) }}
+        projection={{ areaId, ...(project ? { projectId: project.projectId, ...(project.workspaceId ? { workspaceId: project.workspaceId } : {}) } : {}), tabId: tab.id, editorId: tab.editorId, editorScope: tab.editorScope, state: tab.state, lastKnownTitle: tab.lastKnownTitle, availability: editor ? 'available' : 'unsupported', ...(tab.sessionId ? { sessionId: tab.sessionId } : {}), ...(tab.pendingBinding ? { pendingBinding: tab.pendingBinding } : {}) }}
         commands={commands} areaClaim={'floating:' + tab.id + ':' + (tab.bindingGeneration ?? 0)} lifecycle={{ visibility: shown ? 'visible' : 'background', focused: shown && runtime.focusedBinding?.sessionId === tab.sessionId, background: editor?.declaration?.runtime.background ?? 'keep', collapsed: editor?.declaration?.runtime.collapsed ?? 'keep' }} />
     </RetainedEditorTarget></div>}</div>
   }

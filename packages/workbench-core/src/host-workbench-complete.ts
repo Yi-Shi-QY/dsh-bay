@@ -1,3 +1,4 @@
+import { hydrateProjects } from './host-workbench-projects.ts'
 import { createHash, randomUUID } from 'node:crypto'
 import { createReadStream, createWriteStream, existsSync, readFileSync, readdirSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, realpath, rename, rm, writeFile, lstat, open, stat } from 'node:fs/promises'
@@ -121,10 +122,11 @@ async function readManifest(stage: string): Promise<{ manifest: CompleteManifest
       : row.type === 'directory' ? !info.isDirectory() : row.type !== 'symlink' || !info.isSymbolicLink()) throw new Error('完整包文件类型或摘要不匹配：' + row.path)
   }
   const envelope = JSON.parse(await readFile(path.join(stage, 'workbench/.bay/workbench.json'), 'utf8')) as FileWorkbenchV1
-  if (envelope.schemaVersion !== 1 || envelope.record.workbenchId !== manifest.workbenchId) throw new Error('工作台定义与清单身份不匹配。')
+  if (![1, 2].includes(envelope.schemaVersion) || envelope.record.workbenchId !== manifest.workbenchId) throw new Error('工作台定义与清单身份不匹配。')
   validateWorkbenchRelations(envelope.record)
   const native = JSON.parse(await readFile(path.join(stage, 'native/native-sessions.json'), 'utf8')) as NativeSessionSnapshot
   for (const key of Object.keys(envelope.record.sessionCatalog ?? {})) if (!manifest.sessionKeys[key] || !native.sessions.some(row => row.key === manifest.sessionKeys[key])) throw new Error('完整包缺少对话历史：' + key)
+  if (envelope.record.projectModelVersion) hydrateProjects(path.join(stage, 'workbench'), envelope.record)
   if (manifest.orchestration) {
     if (manifest.orchestration !== 'orchestration.json' || !manifest.orchestrationSha256 || await hashFile(path.join(stage, manifest.orchestration)) !== manifest.orchestrationSha256) throw new Error('完整包任务快照摘要不匹配。')
     restoreTaskSnapshot(JSON.parse(await readFile(path.join(stage, manifest.orchestration), 'utf8')) as CompleteTaskSnapshot, envelope.record, manifest.sessionKeys, 0)
@@ -262,7 +264,7 @@ export function installWorkbenchCompleteRoute(connection: HostConnectionHandle, 
       await writeFile(meta, JSON.stringify({
         type: 'workbench-complete', version: 5, schemaVersion: 5, workbenchId,
         record: paused.record, sessionKeys: ids, generatedAt: Date.now(),
-        workspacePaths: Object.fromEntries(Object.values(options.directory.getSnapshot().value.workbenches[workbenchId]!.areaProjects ?? {}).filter(project => project.workspaceId).map(project => [project.workspaceId!, project.relativePath])),
+        workspacePaths: Object.fromEntries(Object.values(options.directory.getSnapshot().value.workbenches[workbenchId]!.projects ?? options.directory.getSnapshot().value.workbenches[workbenchId]!.areaProjects ?? {}).filter(project => project.workspaceId).map(project => [project.workspaceId!, project.relativePath])),
         packageSha: sha(workbenchId + ':' + requestId), orchestration: options.orchestration ? 'orchestration.json' : undefined,
         ...(options.orchestration ? { orchestrationSha256: await hashFile(path.join(stage, 'orchestration.json')) } : {}),
       }), 'utf8')

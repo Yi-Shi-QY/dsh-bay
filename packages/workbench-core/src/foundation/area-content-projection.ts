@@ -8,6 +8,7 @@ export interface AreaContentProjectionV1 {
   editorScope: 'root' | 'session'
   sessionId?: string
   workspaceId?: string
+  projectId?: string
   bindingGeneration?: number
   state: JsonValue
   availability: 'available' | 'missing' | 'archived' | 'moved' | 'unsupported'
@@ -68,6 +69,7 @@ export function areAreaContentProjectionsEqual(
     && previous.editorScope === next.editorScope
     && previous.sessionId === next.sessionId
     && previous.workspaceId === next.workspaceId
+    && previous.projectId === next.projectId
     && previous.bindingGeneration === next.bindingGeneration
     && previous.state === next.state
     && previous.availability === next.availability

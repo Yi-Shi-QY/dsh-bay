@@ -1,3 +1,4 @@
+import { WorkbenchProjectOverview } from './WorkbenchProjectOverview.tsx'
 import { WorkbenchReclaimProgress } from './WorkbenchReclaimProgress.tsx'
 import { WorkbenchImportDirectoryRequests } from './WorkbenchCompletePackagePanel.tsx'
 import { WorkbenchCollaborationApprovals, WorkbenchShareGrantControls } from './WorkbenchSharePermissions.tsx'
@@ -956,13 +957,15 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
     const activeItems = new Map((bayAgentSnapshot?.workItems ?? [])
       .filter(row => row.status === 'queued' || row.status === 'running')
       .map(row => [row.workItemId, row] as const))
+    const projects = workbenchDirectory.getAreaProjects?.(bayAgentSnapshot?.workbenchId ?? '') ?? {}
+    const owners = (row: { areaId: string; projectId?: string }) => row.projectId ? Object.entries(projects).filter(([, project]) => project.projectId === row.projectId).map(([id]) => id) : [row.areaId]
     return new Set([
-      ...([...activeItems.values()].filter(row => row.status === 'running').map(row => row.areaId)),
+      ...([...activeItems.values()].filter(row => row.status === 'running').flatMap(owners)),
       ...(bayAgentSnapshot?.assignments
         .filter(row => row.state !== 'ended' && activeItems.has(row.workItemId))
-        .map(row => row.areaId) ?? []),
+        .flatMap(owners) ?? []),
     ])
-  }, [bayAgentSnapshot])
+  }, [bayAgentSnapshot, workbenchDirectory, workbenchDirectorySnapshot])
   const selectionTraceRef = useRef<WorkbenchSelectionTrace>()
   const subscribeWorkbenchWindows = useCallback(
     (listener: () => void) => windowController.subscribe(listener), [windowController],
@@ -3294,7 +3297,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
               directory={workbenchDirectory}
               workbenchId={contextDialog.workbenchId}
               {...(areaId === undefined ? {} : { areaId })}
-              title={areaId === undefined ? '编辑工作台背景' : '编辑区域背景'}
+              title={areaId === undefined ? '编辑工作台背景' : '编辑项目背景'}
               initialValue={areaId === undefined
                 ? context !== undefined && 'goal' in context.human ? context.human.goal : ''
                 : context !== undefined && 'objective' in context.human ? context.human.objective : ''}
@@ -3324,6 +3327,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
 
           /> : <Profiler id="workbench-layout" onRender={reportWorkbenchLayoutCommit}>
           <LayoutView
+            directory={workbenchDirectory} bayAgentSnapshot={bayAgentSnapshot} bayAgentController={props.bayAgent}
             activeBayAgentAreaIds={activeBayAgentAreaIds}
             {...(workbenchDirectory.getAreaProjects === undefined ? {} : {
               areaProjects: workbenchDirectory.getAreaProjects(placementWorkbenchId),
@@ -3542,6 +3546,9 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
 }
 
 interface LayoutViewProps {
+  directory?: WorkbenchDirectory | undefined
+  bayAgentSnapshot?: import('./workbench-bay-agent-work.ts').BayAgentControllerSnapshotV1 | undefined
+  bayAgentController?: BayAgentControllerV1 | undefined
   activeBayAgentAreaIds: ReadonlySet<string>
   areaProjects?: Readonly<Record<string, import('../workbench-directory-contract.ts').AreaProjectV1>>
   editAreaProject?: (areaId: string) => void
@@ -4218,6 +4225,11 @@ function fixedPreviewStyle(rect: DOMRect): CSSProperties {
 }
 
 function LayoutView(props: LayoutViewProps) {
+  if (props.node.kind === 'group' && !props.node.id) return <section className={css.empty} aria-label="工作台暂无区域"><strong>从一个项目开始</strong><span>项目资料与历史仍然保留。选择已有项目，或新建一个区域。</span>
+    {Object.values(props.directory?.getProjects?.(props.workbenchId) ?? {}).map(project => <button key={project.projectId} disabled={!props.layoutActionsEnabled} onClick={() => { void props.directory?.openProject?.(props.workbenchId, project.projectId).catch(error => props.reportStateFailure(String(error))) }}>{project.name} · 在新区域打开</button>)}
+    <button disabled={!props.layoutActionsEnabled} onClick={() => { const id = nextId('area'); props.commit({ type: 'replace-layout', document: { version: 2, root: { kind: 'group', id, tabs: [] }, activeGroupId: id } }) }}>新建区域</button>
+  </section>
+
   return props.node.kind === 'group'
     ? <AreaView {...props} group={props.node} />
     : <SplitView {...props} split={props.node} />
@@ -5172,6 +5184,9 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
     editAreaBackground, editAreaProject, areaProjects,
     conversationResourcePolicy,
   } = props
+  const [projectOverviewOpen, setProjectOverviewOpen] = useState(false)
+  const projectId = areaProjects?.[group.id]?.projectId
+  const project = projectId ? props.directory?.getProjects?.(workbenchId)[projectId] : undefined
   const floating = useFloatingWorkspace()
   const interactionPolicy = normalizeWorkbenchConversationInteractionPolicy(conversationResourcePolicy)
   const tabFontSize = workbenchTabFontSizePx(interactionPolicy.tabFontSize)
@@ -5490,7 +5505,7 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
     }
     return {
       id: nextId('tab'), editorId: editor.id, editorScope: 'root',
-      lastKnownTitle: editor.label, state: editor.id === 'workbench.workspace-files' ? { projectAreaId: group.id } : structuredClone(initialState),
+      lastKnownTitle: editor.label, state: editor.id === 'workbench.workspace-files' ? (projectId ? { projectId } : { projectAreaId: group.id }) : structuredClone(initialState),
     }
   }
 
@@ -5644,6 +5659,7 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
     ? undefined
     : {
       areaId: group.id,
+      ...((areaProjects?.[group.id]?.projectId ?? group.project?.projectId) ? { projectId: (areaProjects?.[group.id]?.projectId ?? group.project?.projectId)! } : {}),
       tabId: active.id,
       editorId: active.editorId,
       editorScope: active.editorScope,
@@ -5695,6 +5711,7 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
     ? undefined
     : {
       areaId: group.id,
+      ...((areaProjects?.[group.id]?.projectId ?? group.project?.projectId) ? { projectId: (areaProjects?.[group.id]?.projectId ?? group.project?.projectId)! } : {}),
       tabId: active.id,
       editorId: active.editorId,
       editorScope: active.editorScope,
@@ -6178,6 +6195,7 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
               onSelect={editor => editorMenuMode === 'replace' ? replaceEditor(editor) : addEditor(editor)} />
           </WorkbenchFloatingMenu>
         ) : null}
+        {project ? <button className={css.areaTabOverviewTrigger} type="button" title={active === undefined ? '项目概览' : projectOverviewOpen ? '隐藏项目概览' : '显示项目概览'} aria-label={active === undefined ? '项目概览' : projectOverviewOpen ? '隐藏项目概览' : '显示项目概览'} aria-pressed={active === undefined || projectOverviewOpen} data-active={active === undefined || projectOverviewOpen || undefined} onClick={() => setProjectOverviewOpen(value => !value)}><IconFolderOpenOutlineMedium size={14} /><span className={css.areaTabOverviewLabel}>项目概览</span></button> : null}
         {areaProjects !== undefined ? <AreaProjectButton relativePath={areaProjects[group.id]?.relativePath} onClick={() => editAreaProject?.(group.id)} /> : null}
         {activePendingSession ? (
           <PendingSessionBindingPicker
@@ -6320,7 +6338,7 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
               side={floatingMenuSide}
               align={areaCollapsed ? 'start' : 'end'}
               active={active} group={group} sibling={sibling}
-              activeTask={props.activeBayAgentAreaIds.has(group.id)} canCloseArea={groupsOf(document.root).length > 1}
+              activeTask={props.activeBayAgentAreaIds.has(group.id)} canCloseArea={true}
               document={document}
               commit={commit} close={() => { setMenu(undefined) }}
               addPage={() => {
@@ -6335,7 +6353,6 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
                 setTabOverviewQuery('')
                 setTabOverviewOpen(true)
               }}
-              {...(editAreaBackground === undefined ? {} : { editBackground: () => editAreaBackground(group.id) })}
               {...(editAreaProject === undefined ? {} : { editProject: () => editAreaProject(group.id) })}
               {...(collapseEdge === undefined ? {} : { toggleCollapse: () => toggleAreaCollapsed(group.id), canCollapse, collapseLabel })}
               requestSplit={(axis) => {
@@ -6360,7 +6377,9 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
         </div>
       </header>
       <div ref={bodyRef} id={`workbench-area-body-${group.id}`} className={css.body} data-workbench-body>
-        {active === undefined ? (
+        {project && props.directory && (active === undefined || projectOverviewOpen) ? <WorkbenchProjectOverview project={project} directory={props.directory} workbenchId={workbenchId} tasks={props.bayAgentSnapshot} controller={props.bayAgentController} writable={props.layoutActionsEnabled} onEditBackground={editAreaBackground ? () => editAreaBackground(group.id) : undefined}
+          onAddPage={() => { setProjectOverviewOpen(false); editorMenuAnchorRef.current = emptyEditorTriggerRef.current ?? areaMenuTriggerRef.current; setEditorMenuMode('add'); setMenu('editor') }}
+          onOpenSession={session => { const binding = { sessionId: session.sessionId!, ...(project.workspaceId ? { workspaceId: project.workspaceId } : {}) }; const existing = group.tabs.find(tab => tab.binding?.sessionId === binding.sessionId && tab.editorId === 'workbench.conversation'); if (existing) commit({ type: 'activate', groupId: group.id, tabId: existing.id }); else commit({ type: 'add-tab', groupId: group.id, tab: createSessionTab(nextId('tab'), 'workbench.conversation', binding, sessionRows[binding.sessionId]?.displayTitle ?? session.title) }); setProjectOverviewOpen(false) }} /> : active === undefined ? (
           <WorkbenchEmptyArea editors={selectableEditors} onSelect={addEditor} triggerRef={emptyEditorTriggerRef} expanded={menu === 'editor'}
             onManage={props.onManageEditors}
             onBrowse={anchor => { editorMenuAnchorRef.current = anchor; setEditorMenuMode('add'); setMenu(value => value === 'editor' ? undefined : 'editor') }} />
@@ -6493,7 +6512,7 @@ function WorkbenchAreaTabLabel({ tab, fallback, fontSize }: { tab: TabDocument; 
 }
 
 function AreaMenu({
-  anchorRef, surfaceRef, side, align, active, activeTask, canCloseArea, group, sibling, document, commit, close, requestSplit, splitActive, openRelated, openOfficial, addPage, showPages, editBackground, editProject, toggleCollapse, canCollapse, collapseLabel,
+  anchorRef, surfaceRef, side, align, active, activeTask, canCloseArea, group, sibling, document, commit, close, requestSplit, splitActive, openRelated, openOfficial, addPage, showPages, editProject, toggleCollapse, canCollapse, collapseLabel,
 }: {
   anchorRef: RefObject<HTMLElement>
   surfaceRef: RefObject<HTMLDivElement>
@@ -6509,7 +6528,6 @@ function AreaMenu({
   close: () => void
   addPage: () => void
   showPages: () => void
-  editBackground?: () => void
   editProject?: () => void
   toggleCollapse?: () => void
   canCollapse?: boolean
@@ -6536,7 +6554,6 @@ function AreaMenu({
     >
       <button role="menuitem" onClick={addPage}>添加内页</button>
       <button role="menuitem" disabled={group.tabs.length === 0} onClick={showPages}>查看全部内页</button>
-      {editBackground === undefined ? null : <button role="menuitem" onClick={() => { editBackground(); close() }}>编辑区域背景</button>}
       {editProject === undefined ? null : <button role="menuitem" onClick={() => { editProject(); close() }}>设置项目文件夹</button>}
       {toggleCollapse === undefined ? null : <button role="menuitem" disabled={!canCollapse} onClick={() => { toggleCollapse(); close() }}>{collapseLabel}</button>}
       <div className={css.menuDivider} />
@@ -6580,7 +6597,7 @@ function AreaMenu({
         </>
       )}
       <div className={css.menuDivider} />
-      <button role="menuitem" disabled={!canCloseArea || activeTask} title={activeTask ? '请先停止或等待此区域的 Bay Agent 任务结束' : !canCloseArea ? '工作台至少保留一个区域' : undefined} onClick={() => run({ type: 'close-area', areaId: group.id })}>
+      <button role="menuitem" disabled={!canCloseArea || activeTask} title={activeTask ? '请先停止或等待此区域的 Bay Agent 任务结束' : !canCloseArea ? '当前不能关闭区域' : undefined} onClick={() => run({ type: 'close-area', areaId: group.id })}>
         关闭当前区域
       </button>
       <button role="menuitem" disabled={active === undefined} onClick={() => {
@@ -6683,6 +6700,7 @@ function Editor({
     workbenchId,
     sharePresenceEnabled,
     areaId: projection.areaId,
+    ...(projection.projectId ? { projectId: projection.projectId } : {}),
     areaClaim,
     ...(tab.sessionId === undefined ? {} : { sessionId: tab.sessionId }),
     ...(workspaceId === undefined ? {} : { workspaceId }),

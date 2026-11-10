@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { WorkbenchHomeCenter, type WorkbenchHomeCenterProps } from '../src/foundation/WorkbenchHomeCenter.tsx'
 import { createProjectNeutralFrameSettings } from '../src/foundation/frame-settings-adapter.ts'
@@ -58,7 +58,7 @@ describe('Workbench Home center', () => {
 
   it('hosts import, export and durable history in Home with all three distribution modes', async () => {
     const f = setup(), { view } = f
-    fireEvent.click(view.getByRole('button', { name: '导入工作台包' }))
+    fireEvent.click(within(view.getByRole('region', { name: '添加工作台' })).getByRole('button', { name: '导入工作台包' }))
     await view.findByLabelText('工作台包文件')
     expect(view.queryByRole('dialog')).toBeNull()
     fireEvent.click(view.getByRole('button', { name: '返回总览' }))

@@ -26,12 +26,13 @@
 
 ```text
 Workbench 根目录
-  ├─ Area → 根目录内的项目相对路径
+  ├─ Project → 稳定 projectId、根内目录、背景、记忆、会话与任务
+  ├─ Area → Project 的临时展示空间（允许零个或多个）
   │          └─ 多个独立 Session → 各自的内页实例
   └─ Bay Agent Main → 工作台根目录
 ```
 
-- Workbench 创建时拥有一个根目录；Area 只保存根目录内的相对项目路径。多个 Area 可以共享一个项目路径，但仍分别保存背景、布局、任务和内页关系。
+- Workbench 创建时拥有根目录及 Project 登记；Area 关联 projectId。多个 Area 展示同一个 Project 时共享背景、记忆、会话和任务，独立保存布局与内页。关闭 Area 移除该区域身份；再次打开 Project 创建新 Area，只显示项目概览，不自动打开旧内页或继续任务。
 - Area 不再绑定一个代表 Session。一个 Area 可以同时包含多个对话，内页仍然一个实例绑定一个具体 Session。
 - Session 内页必须使用 Core owner 传入的 `workspaceId` 和 `sessionId`。`workspaceId` 是该 Session 对应的 DSH 项目工作区身份，不能由 Area 顺序、当前焦点、标签标题或全局当前 Session 推断。
 - 移动内页、在浮动工作区固定/取消固定、切换标签或从 DSH 原版模式返回，都不能改写内页的 Session 来源。只有明确的绑定代际变化才释放旧资源。
@@ -253,7 +254,9 @@ Core 对 Slot metadata 做运行时校验。声明无效、ID 冲突、扩展内
 - `unbound`: `available` 表示未绑定也能工作；`pending` 表示显示等待资源/操作；`hidden` 表示在缺少资源时不提供入口。pending 不等于自动创建。
 - `sharing`: `none`、`area`、`independent` 是宿主声明枚举。18.0 的 Session 内页使用 `independent`，每个内页明确保存自己的来源对话；无绑定内页使用 `none`。`area` 仅作为旧声明字段保留，不允许据此读取区域首个对话或批量重绑。区域保存项目目录；切换标签、移动视图不更改会话与任务归属。
 
-Core 传给编辑器的 owner 可能包含 `instanceId`、`areaId`、`workspaceId`、`sessionId`、`bindingGeneration`、`areaClaim`、`state`、`lifecycle` 以及受支持的回调。session 编辑器只使用当前实例传入的精确 ID。空 `sessionId` 时应渲染声明的 pending/恢复 UI，不要查全局 current Session、扫描 Session 列表或根据焦点/区域顺序猜测。
+项目内页使用 `owner.projectId`；无 Session 的项目页也能取得它。Area ID 只表示展示位置，不能作为背景、记忆或任务持久化主键。浮动 Session 页从其精确 Workspace 解析项目；Main 和全局内页可没有 projectId，不能自行猜测。
+
+Core 传给编辑器的 owner 可能包含 `instanceId`、`areaId`、`projectId`、`workspaceId`、`sessionId`、`bindingGeneration`、`areaClaim`、`state`、`lifecycle` 以及受支持的回调。session 编辑器只使用当前实例传入的精确 ID。空 `sessionId` 时应渲染声明的 pending/恢复 UI，不要查全局 current Session、扫描 Session 列表或根据焦点/区域顺序猜测。
 
 异步读取内容时使用 `owner.renderLoading?.({ label: '内容名称' })` 返回 Core 的统一加载画面；列表局部读取可传 `compact: true`。它自动沿用工作台主题和内页图标，无需引用 Core 内部文件或复制 CSS。仅在实际请求未完成时显示，失败后展示错误和重试入口，不能把空结果、未绑定或永久缺失的资源当成加载。Core 也为使用 React.lazy/Suspense 的内页提供统一 fallback；扩展自行管理的请求仍需主动使用 `renderLoading`。已存在的输入组件和原生会话不能为展示过渡而反复卸载重建。
 
@@ -388,7 +391,7 @@ DSH Plugin Manager 安装标准插件包
 6. 对 `dsh.workbench.distribution` 运行精确 runtime file、静态依赖闭包和 `exportState/importState` 检查；使用 `offline-embedded` 生成工作台包，确认扩展制品带有 digest/integrity，而不是只写一个在线引用。
 7. 在隔离 DSH 测试 Profile 中，经 DSH Plugin Manager 安装并启用；如需重启，等待完整重启后再验收。
 8. 分别验证 DSH 清单/runtime 状态、Core 扩展中心状态、Workbench consent、实际添加/使用内页和布局恢复。遇到身份映射失败时记录 `registrant`、runtime `entryId/moduleName`、bundle row 和 Core 显示的 diagnostic code。
-9. 在干净接收环境中导入完整工作台包，验证根目录文件、区域项目、至少三个 Session、附件和扩展内页状态分别恢复；缺少扩展或环境时应保留待恢复状态，不自动创建替代 Session。
+9. 关闭项目的全部 Area 后，完整包仍须包含该 Project 的文件与资料；关闭区域不是从包中排除项目。项目内部 `.bay/project.json`、`context.md` 与 `memory/` 由 Host 维护，不能作为扩展缓存排除。在干净接收环境中导入完整工作台包，验证根目录文件、区域项目、至少三个 Session、附件和扩展内页状态分别恢复；缺少扩展或环境时应保留待恢复状态，不自动创建替代 Session。
 10. 记录包名、版本、Core/DSH 兼容声明、artifact SHA-256（若发布流程生成）、测试命令和逐项结果。只对真实完成的状态使用 `installed`、`active` 或 `desktop-verified`。
 
 不要默认向用户活动 Profile 安装；测试 Profile 可以隔离数据但不是恶意代码沙箱。安装或运行插件可能具有 DSH 所授予的宿主权限。
@@ -400,7 +403,7 @@ DSH Plugin Manager 安装标准插件包
 - [ ] `package.json` editor ID 集、runtime `extension.editorIds` 和实际 Slot ID 集完全一致且唯一。
 - [ ] `inject()` 返回的 `workbenchEditor` metadata 在目标 DSH Slot 实现下可由 Core 读到。
 - [ ] root/session Slot、binding requirement、unbound UI 与真实工作流相符。
-- [ ] 打开内页不会隐式创建 Session；一个 Area 内的多个 Session 内页互不串用，多个 Area 共享项目目录时也不互相改写背景、任务或 Session。
+- [ ] 打开内页不会隐式创建 Session；一个 Area 内的多个 Session 内页互不串用，多个 Area 共享项目时读取同一份背景和记忆，不自动改绑 Session。
 - [ ] 保存值是 JSON-safe 且在 `maxBytes` 内；Schema 变化和超限能恢复，不静默丢数据。
 - [ ] `portable`、`reference-only`、`forbidden` 的导出导入行为符合声明。
 - [ ] `distribution.runtimeFiles` 包含所有运行入口、Bundle patch 和许可证，没有源码、source map、安装脚本或未列出的依赖。
@@ -491,3 +494,9 @@ inject 返回的 workbenchEditor 同时提供 portability.exportState/importStat
 生命周期隐藏必须撤销焦点，pause 仅暂停展示工作，dispose 仅释放可恢复视图；不得取消底层任务。未保存内容必须注册关闭保护。Core 的关闭、删除/归档和受控刷新/关闭流程等待该保护；操作系统强杀、崩溃及原生未提供异步拦截的退出只能提示，无法保证恢复。
 
 资源通过 owner 打开接口接入；不允许借用原生全局侧栏 owner。需要真实 Area 几何或没有完整绑定/生命周期契约的内页应声明禁止浮窗。完整示例及验收清单见模板 README 的“17.3 展示位置与实例生命周期”。
+
+## 项目归属修订（2026-11-10）
+
+工作台文件信封 schemaVersion 为 2，projectModelVersion 为 1；项目元数据 schemaVersion 为 1，完整包外层仍为 V5。旧读取器须拒绝未知信封版本。扩展自己的 state.version 与上述版本独立，仅在扩展状态结构变化时升级。
+
+必须回归：关闭所有区域 → 重新关联原项目 → 手动打开内页；同项目两个区域；区域换绑后原会话仍读原项目；浮动与区域转移；零区域完整包导入。关闭视图只能释放本视图资源，不能删除项目文件或会话、取消其他视图的任务。

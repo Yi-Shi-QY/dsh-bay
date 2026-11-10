@@ -11,6 +11,7 @@ import { portableRelativePath, resolvePortablePath } from './host-native-session
 import type { CreatorRepairProjectV1, CreatorRepairTargetV1, DirectoryPatch, FileWorkbenchSnapshot, FileWorkbenchV1, WorkbenchSessionEntryV1 } from './workbench-directory-contract.ts'
 import { acquireFileLock } from './host-file-lock.ts'
 import { workbenchAreas, showWorkbenchArea, validateWorkbenchRelations } from './foundation/area-identity.ts'
+import { discoverProject, hydrateProjects, projectWrites, upgradeProjectOwnership, type ProjectWrite } from './host-workbench-projects.ts'
 
 interface Registration { rootPath: string; workspaces: Record<string, string>; sessions: Record<string, string>; creatorRepairs?: Record<string, string>; sessionRequests?: Record<string, { areaId: string; relativePath: string; agentPreset: string; sessionId: string }> }
 interface Registry {
@@ -47,6 +48,8 @@ export class HostWorkbenchDirectory {
     legacy?: WorkbenchSettingsV4) {
     this.registryFile = path.join(profile, '.dsh-workbench', 'directory-v1', 'registry.json')
     this.journalFile = path.join(profile, '.dsh-workbench', 'directory-v1', 'commit.json')
+    const releaseRegistry = acquireFileLock(this.registryFile + '.lock')
+    try {
     this.recoverCommit()
     if (existsSync(this.registryFile)) {
       this.registry = readJson<Registry>(this.registryFile)
@@ -60,15 +63,26 @@ export class HostWorkbenchDirectory {
     }
     for (const [id, registration] of Object.entries(this.registry.registrations)) {
       try {
-        const envelope = readJson<FileWorkbenchV1>(filename(registration.rootPath))
+        let envelope = readJson<FileWorkbenchV1>(filename(registration.rootPath))
         this.validate(envelope.record)
-        if (envelope.schemaVersion !== 1 || envelope.record.workbenchId !== id) throw new Error('工作台身份或版本不匹配。')
+        if (![1, 2].includes(envelope.schemaVersion) || envelope.record.workbenchId !== id) throw new Error('工作台身份或版本不匹配。')
+        if (envelope.schemaVersion === 1) {
+          const releaseRoot = acquireFileLock(path.join(registration.rootPath, '.bay', 'writer.lock'))
+          try {
+          const upgraded = upgradeProjectOwnership(registration.rootPath, envelope.record)
+          const backup = { file: path.join(registration.rootPath, '.bay', 'upgrades', 'project-ownership-v1', 'workbench.json'), value: envelope }
+          envelope = { schemaVersion: 2, revision: envelope.revision + 1, record: this.portable(this.reconcileAreas(upgraded.record), registration) }
+          this.registry.revision++
+          this.commit(this.registry, [backup, ...upgraded.writes, { file: filename(registration.rootPath), value: envelope }])
+          } finally { releaseRoot() }
+        }
         this.records.set(id, envelope)
       } catch (error) {
         this.registry.preferences.invalidWorkbenches[id] = { workbenchId: id, name: id, description: '工作台目录不可读取，请重新定位。', rawRecord: { rootPath: registration.rootPath, diagnostic: String(error) } }
       }
     }
     this.snapshot = this.project()
+    } finally { releaseRegistry() }
   }
   getSnapshot = (): FileWorkbenchSnapshot => this.snapshot
   subscribe = (listener: () => void): (() => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener) } }
@@ -97,22 +111,38 @@ export class HostWorkbenchDirectory {
   setAreaTaskGuard(guard: (workbenchId: string, areaId: string) => boolean) { this.areaHasTasks = guard }
   private recoverCommit() {
     if (!existsSync(this.journalFile)) return
-    const job = readJson<{ writes: { file: string; value: unknown }[] }>(this.journalFile)
-    for (const write of job.writes) atomicJson(write.file, write.value)
+    const job = readJson<{ writes: ProjectWrite[] }>(this.journalFile)
+    for (const write of job.writes) this.writeOne(write)
     unlinkSync(this.journalFile)
   }
-  private commit(registry: Registry, writes: { file: string; value: unknown }[]) {
+  private writeOne(write: ProjectWrite) {
+    if (write.text === undefined) { atomicJson(write.file, write.value); return }
+    mkdirSync(path.dirname(write.file), { recursive: true })
+    const temporary = write.file + '.' + randomUUID() + '.tmp'
+    writeFileSync(temporary, write.text, { encoding: 'utf8', flush: true }); renameSync(temporary, write.file)
+  }
+  private commit(registry: Registry, writes: ProjectWrite[]) {
     const all = [...writes, { file: this.registryFile, value: registry }]
     atomicJson(this.journalFile, { writes: all })
-    for (const write of all) atomicJson(write.file, write.value)
+    for (const write of all) this.writeOne(write)
     unlinkSync(this.journalFile)
     this.registry = registry
   }
   private project(): FileWorkbenchSnapshot {
     const workbenches: Record<string, WorkbenchRecordV2> = {}
     for (const [id, envelope] of this.records) {
-      const registration = this.registry.registrations[id]!, record = clone(envelope.record)
-      record.fileWorkbench = { schemaVersion: 1, revision: envelope.revision, rootPath: registration.rootPath }
+      const registration = this.registry.registrations[id]!
+      let record: WorkbenchRecordV2
+      try { record = hydrateProjects(registration.rootPath, envelope.record); validateWorkbenchRelations(record) }
+      catch (error) {
+        this.registry.preferences.invalidWorkbenches[id] = { workbenchId: id, name: envelope.record.name, description: '工作台或项目资料无法读取，请检查目录。', rawRecord: { rootPath: registration.rootPath, diagnostic: String(error) } }
+        continue
+      }
+      delete this.registry.preferences.invalidWorkbenches[id]
+      record.fileWorkbench = { schemaVersion: envelope.schemaVersion, revision: envelope.revision, rootPath: registration.rootPath }
+      for (const project of Object.values(record.projects ?? {})) {
+        const workspaceId = registration.workspaces[project.relativePath]; if (workspaceId) project.workspaceId = workspaceId
+      }
       for (const project of Object.values(record.areaProjects ?? {})) {
         const workspaceId = registration.workspaces[project.relativePath]; if (workspaceId) project.workspaceId = workspaceId
       }
@@ -141,7 +171,7 @@ export class HostWorkbenchDirectory {
     const reverse = new Map(Object.entries(registration.sessions).map(([key, id]) => [id, key]))
     const bind = (binding: { sessionId: string; workspaceId?: string }, areaId?: string) => {
       const key = reverse.get(binding.sessionId) ?? binding.sessionId
-      registration.sessions[key] = binding.sessionId
+      registration.sessions[key] ??= binding.sessionId
       const previous = portable.sessionCatalog?.[key]
       const relativePath = areaId ? portable.areaProjects?.[areaId]?.relativePath : ''
       if (relativePath === undefined) throw new Error('请先为区域设置项目目录。')
@@ -149,6 +179,7 @@ export class HostWorkbenchDirectory {
       if (previous && previous.relativePath !== relativePath) throw new Error('不能将会话移入不同项目目录。')
       portable.sessionCatalog ??= {}
       portable.sessionCatalog[key] = previous ?? { sessionKey: key, role: areaId ? 'user' : 'main', ...(areaId ? { areaId } : {}), relativePath, title: areaId ? '对话' : 'Bay Agent', agentPreset: areaId ? 'standard' : 'bay-agent', createdAt: Date.now() }
+      if (areaId && portable.areaProjects?.[areaId]?.projectId) portable.sessionCatalog[key]!.projectId = portable.areaProjects[areaId]!.projectId!
       binding.sessionId = key; delete binding.workspaceId
     }
     for (const area of areasOf(portable.document.root)) {
@@ -160,18 +191,24 @@ export class HostWorkbenchDirectory {
     for (const project of Object.values(portable.areaProjects ?? {})) delete project.workspaceId
     for (const entry of Object.values(portable.sessionCatalog ?? {})) delete entry.sessionId
     validateWorkbenchRelations(portable)
+    if (portable.projectModelVersion) {
+      delete portable.areaContexts
+      for (const project of Object.values(portable.projects ?? {})) { delete project.context; delete project.contextCandidates; delete project.workspaceId }
+    }
     return portable
   }
   /** Reconcile structural edits inside the same atomic commit as their layout. */
   private reconcileAreas(record: WorkbenchRecordV2, previous?: WorkbenchRecordV2): WorkbenchRecordV2 {
     const next = clone(record)
-    next.areaDefinitions = { ...previous?.areaDefinitions, ...next.areaDefinitions }
-    for (const area of [...(previous ? areasOf(previous.document.root) : []), ...areasOf(next.document.root)]) next.areaDefinitions[area.areaId] = { areaId: area.areaId }
+    next.areaDefinitions = {}
+    for (const area of areasOf(next.document.root)) next.areaDefinitions[area.areaId] = { areaId: area.areaId }
     next.areaProjects = { ...previous?.areaProjects, ...next.areaProjects }
     const visible = areasOf(next.document.root)
     // Resolve chains of splits created before the autosave boundary.
     for (let pass = 0; pass < visible.length; pass++) for (const area of visible) {
       if (next.areaProjects[area.areaId]) continue
+      const restored = area.projectRestoreId && next.projects?.[area.projectRestoreId]
+      if (restored) { const { projectId, relativePath, generation, workspaceId } = restored; next.areaProjects[area.areaId] = { projectId, relativePath, generation, ...(workspaceId ? { workspaceId } : {}) }; continue }
       const source = area.projectSourceAreaId && next.areaProjects[area.projectSourceAreaId]
       const bindings = area.moduleHistory.flatMap(page => page.binding ? [page.binding] : [])
       const project = source && bindings.every(binding => binding.workspaceId === source.workspaceId) ? source
@@ -180,21 +217,25 @@ export class HostWorkbenchDirectory {
     }
     for (const area of visible) {
       delete area.projectSourceAreaId
+      delete area.projectRestoreId
       for (const page of area.moduleHistory) if (page.editorId === 'workbench.workspace-files') {
-        const state = page.state as { projectAreaId?: string }
+        const state = page.state as { projectAreaId?: string; projectId?: string }
         const source = next.areaProjects[state.projectAreaId ?? area.areaId], target = next.areaProjects[area.areaId]
         if (source && target && source.relativePath !== target.relativePath) throw new Error('项目文件内页只能移入同项目区域。')
+        if (state.projectId && target?.projectId !== state.projectId) throw new Error('项目文件内页只能移入同项目区域。')
+        if (target?.projectId) { state.projectId = target.projectId; delete state.projectAreaId }
       }
     }
-    for (const entry of Object.values(next.sessionCatalog ?? {})) {
-      if (entry.role !== 'main' && (entry.areaId ? !next.areaDefinitions[entry.areaId] : entry.role !== 'user')) throw new Error('对话所属区域缺失，无法保存工作台。')
-    }
+    const ids = new Set(visible.map(area => area.areaId))
+    next.areaProjects = Object.fromEntries(Object.entries(next.areaProjects).filter(([id]) => ids.has(id)))
+    next.areaMetadata = Object.fromEntries(Object.entries(next.areaMetadata ?? {}).filter(([id]) => ids.has(id)))
+    next.areaContexts = Object.fromEntries(Object.entries(next.areaContexts ?? {}).filter(([id]) => ids.has(id)))
     return next
   }
   private writeProjection(root: string, record: WorkbenchRecordV2) {
     const base = path.join(root, '.bay', 'context'); mkdirSync(base, { recursive: true })
     writeFileSync(path.join(base, '工作台整体背景说明.md'), renderWorkbenchContextMarkdown(workbenchContextOf(record.context)), 'utf8')
-    for (const [id, context] of Object.entries(record.areaContexts ?? {})) {
+    for (const [id, context] of Object.entries(record.projectModelVersion ? {} : record.areaContexts ?? {})) {
       if (!safeId(id)) throw new Error('区域身份无效。')
       const folder = path.join(base, 'areas', id); mkdirSync(folder, { recursive: true })
       writeFileSync(path.join(folder, '区域说明.md'), renderAreaContextMarkdown(areaContextOf(context)), 'utf8')
@@ -242,7 +283,7 @@ export class HostWorkbenchDirectory {
   }
   async listDirectories(id: string, relativePath = '') { const folder = await this.resolveDirectory(id, relativePath); return (await readdir(folder, { withFileTypes: true })).filter(row => row.name !== '.bay' && (row.isDirectory() || row.isSymbolicLink())).map(row => ({ name: row.name, relativePath: [relativePath, row.name].filter(Boolean).join('/') })) }
   async projectEntries(id: string, areaId: string, relativePath = '') {
-    const project = this.snapshot.value.workbenches[id]?.areaProjects?.[areaId]
+    const record = this.snapshot.value.workbenches[id], project = record?.projects?.[areaId] ?? record?.areaProjects?.[areaId]
     if (!project) throw new Error('请先为此区域设置项目文件夹。')
     const base = await this.resolveDirectory(id, project.relativePath), directory = await this.resolveDirectory(id, [project.relativePath, relativePath].filter(Boolean).join('/'))
     portableRelativePath(base, directory)
@@ -258,7 +299,7 @@ export class HostWorkbenchDirectory {
   }
   async projectPreview(id: string, areaId: string, relativePath: string) {
     if (relativePath.split('/').some(part => part.toLowerCase() === '.bay')) throw new Error('不能读取工作台内部管理目录。')
-    const project = this.snapshot.value.workbenches[id]?.areaProjects?.[areaId]
+    const record = this.snapshot.value.workbenches[id], project = record?.projects?.[areaId] ?? record?.areaProjects?.[areaId]
     if (!project || !relativePath) throw new Error('项目或文件不存在。')
     const base = await this.resolveDirectory(id, project.relativePath), target = await realpath(resolvePortablePath(base, relativePath))
     portableRelativePath(base, target)
@@ -296,8 +337,8 @@ export class HostWorkbenchDirectory {
       const registry = clone(this.registry), id = input.record.workbenchId
       if (registry.registrations[id]) throw new Error('工作台身份已经存在。')
       const registration: Registration = { rootPath, workspaces: { '': workspace.id }, sessions: {} }
-      const record = this.portable(this.reconcileAreas({ ...input.record, areaProjects: {}, sessionCatalog: {} }), registration)
-      const envelope: FileWorkbenchV1 = { schemaVersion: 1, revision: 0, record }
+      const record = this.portable(this.reconcileAreas({ ...input.record, projectModelVersion: 1, projects: {}, areaProjects: {}, sessionCatalog: {} }), registration)
+      const envelope: FileWorkbenchV1 = { schemaVersion: 2, revision: 0, record }
       registry.registrations[id] = registration
       registry.requests[input.requestId] = { workbenchId: id, parentPath, folderName: input.folderName }
       registry.preferences.activeWorkbenchId = id; registry.preferences.openWorkbenchIds.push(id); registry.revision++
@@ -327,10 +368,12 @@ export class HostWorkbenchDirectory {
       const registry = clone(this.registry), registration = registry.registrations[input.workbenchId]!
       registration.workspaces[canonical] = workspace.id
       const changed = clone(record)
-      changed.areaProjects = { ...changed.areaProjects, [input.areaId]: { relativePath: canonical, generation: (existing?.generation ?? 0) + 1 } }
-      const envelope: FileWorkbenchV1 = { schemaVersion: 1, revision: this.records.get(input.workbenchId)!.revision + 1, record: this.portable(changed, registration) }
+      const project = discoverProject(registration.rootPath, canonical, changed.projects ?? {})
+      changed.projects = { ...changed.projects, [project.projectId]: project }
+      changed.areaProjects = { ...changed.areaProjects, [input.areaId]: { projectId: project.projectId, relativePath: canonical, generation: project.generation } }
+      const envelope: FileWorkbenchV1 = { schemaVersion: 2, revision: this.records.get(input.workbenchId)!.revision + 1, record: this.portable(changed, registration) }
       registry.revision++
-      this.commit(registry, [{ file: filename(registration.rootPath), value: envelope }]); this.records.set(input.workbenchId, envelope); this.publish()
+      this.commit(registry, [...projectWrites(registration.rootPath, project), { file: filename(registration.rootPath), value: envelope }]); this.records.set(input.workbenchId, envelope); this.publish()
       return { status: 'committed' as const, revision: registry.revision }
     })
   }
@@ -365,20 +408,26 @@ export class HostWorkbenchDirectory {
     return result
   }
   async registerSession(id: string, sessionId: string, entry: WorkbenchSessionEntryV1) { return this.serial(async () => {
-    const record = this.snapshot.value.workbenches[id]; if (!record) throw new Error('工作台不存在。')
+    const record = clone(this.snapshot.value.workbenches[id]); if (!record) throw new Error('工作台不存在。')
     const registry = clone(this.registry), registration = registry.registrations[id]!
     const existingKey = Object.keys(registration.sessions).find(key => registration.sessions[key] === sessionId)
     if (existingKey) {
       const existing = record.sessionCatalog?.[existingKey]
-      if (existing && (existing.relativePath !== entry.relativePath || existing.areaId !== entry.areaId)) throw new Error('会话归属已登记，不能随内页位置更改。')
+      if (existing && existing.relativePath !== entry.relativePath) throw new Error('会话归属已登记，不能随内页位置更改。')
       if (existing) return
     }
     if (registration.sessions[entry.sessionKey] && registration.sessions[entry.sessionKey] !== sessionId) throw new Error('会话身份映射冲突。')
     registration.sessions[entry.sessionKey] = sessionId
-    const envelope: FileWorkbenchV1 = { schemaVersion: 1, revision: this.records.get(id)!.revision + 1,
+    const writes: ProjectWrite[] = []
+    if (entry.role !== 'main') {
+      const project = discoverProject(registration.rootPath, entry.relativePath, record.projects ?? {})
+      record.projects = { ...record.projects, [project.projectId]: project }; entry = { ...entry, projectId: project.projectId }
+      writes.push(...projectWrites(registration.rootPath, project))
+    }
+    const envelope: FileWorkbenchV1 = { schemaVersion: 2, revision: this.records.get(id)!.revision + 1,
       record: this.portable(this.reconcileAreas({ ...record, sessionCatalog: { ...record.sessionCatalog, [entry.sessionKey]: entry } }, record), registration) }
     registry.revision++
-    this.commit(registry, [{ file: filename(registration.rootPath), value: envelope }]); this.records.set(id, envelope); this.publish()
+    this.commit(registry, [...writes, { file: filename(registration.rootPath), value: envelope }]); this.records.set(id, envelope); this.publish()
   }) }
   async reserveSession(id: string, requestId: string, areaId: string, agentPreset: string, sessionId: string) { return this.serial(async () => {
     const record = this.snapshot.value.workbenches[id], project = record?.areaProjects?.[areaId]
@@ -398,18 +447,38 @@ export class HostWorkbenchDirectory {
     if (!record) throw new Error('工作台不存在。')
     return this.patch({ operation: 'set', path: ['workbenches', id], expectedRevision, value: showWorkbenchArea(record, areaId, 'split-' + randomUUID()) })
   }
+  async openProject(input: { workbenchId: string; projectId: string; requestId: string; expectedRevision: number }) {
+    return this.serial(async () => {
+      const record = this.snapshot.value.workbenches[input.workbenchId], project = record?.projects?.[input.projectId]
+      if (!record || !project || !safeId(input.requestId)) throw new Error('项目不存在或请求无效。')
+      // Stable operation-derived view identity makes retries safe without restoring closed Areas.
+      const areaId = 'area-' + createHash('sha256').update(input.workbenchId + ':' + input.requestId).digest('hex').slice(0, 24)
+      if (areasOf(record.document.root).some(area => area.areaId === areaId)) {
+        if (record.areaProjects?.[areaId]?.projectId !== project.projectId) throw new Error('重复的项目打开请求指向了不同项目。')
+        return { status: 'committed' as const, revision: this.registry.revision, areaId }
+      }
+      if (input.expectedRevision !== this.registry.revision) return { status: 'conflict' as const, actualRevision: this.registry.revision }
+      const area = { kind: 'area' as const, areaId, moduleHistory: [] }
+      const next = { ...record, document: { ...record.document, activeAreaId: areaId, root: areasOf(record.document.root).length ? { kind: 'split' as const, id: 'split-' + randomUUID(), axis: 'horizontal' as const, ratio: .5, first: record.document.root, second: area } : area },
+        areaProjects: { ...record.areaProjects, [areaId]: { projectId: project.projectId, relativePath: project.relativePath, generation: project.generation } } }
+      const registry = clone(this.registry), registration = registry.registrations[input.workbenchId]!
+      const envelope: FileWorkbenchV1 = { schemaVersion: 2, revision: this.records.get(input.workbenchId)!.revision + 1, record: this.portable(this.reconcileAreas(next), registration) }
+      registry.revision++; this.commit(registry, [{ file: filename(registration.rootPath), value: envelope }]); this.records.set(input.workbenchId, envelope); this.publish()
+      return { status: 'committed' as const, revision: registry.revision, areaId }
+    })
+  }
   definition(id: string): FileWorkbenchV1 { this.rootPath(id); return clone(this.records.get(id)!) }
   async publishImported(rootPath: string, envelope: FileWorkbenchV1, sessionMap: Record<string, string>) { return this.serial(async () => {
     this.validate(envelope.record)
     validateWorkbenchRelations(envelope.record)
-    if (envelope.schemaVersion !== 1 || !envelope.record.executionPaused) throw new Error('导入工作台必须保持待继续状态。')
+    if (![1, 2].includes(envelope.schemaVersion) || !envelope.record.executionPaused) throw new Error('导入工作台必须保持待继续状态。')
     const id = envelope.record.workbenchId, existing = this.registry.registrations[id]
     if (existing) {
       if (existing.rootPath !== rootPath || !isDeepStrictEqual(existing.sessions, sessionMap)) throw new Error('工作台导入身份冲突。')
       return
     }
     const actualRoot = await realpath(rootPath), workspaceMap: Record<string, string> = {}
-    for (const relative of new Set(['', ...Object.values(envelope.record.areaProjects ?? {}).map(row => row.relativePath), ...Object.values(envelope.record.sessionCatalog ?? {}).map(row => row.relativePath)])) {
+    for (const relative of new Set(['', ...Object.values(envelope.record.projects ?? {}).map(row => row.relativePath), ...Object.values(envelope.record.areaProjects ?? {}).map(row => row.relativePath), ...Object.values(envelope.record.sessionCatalog ?? {}).map(row => row.relativePath)])) {
       const folder = await realpath(resolvePortablePath(actualRoot, relative)); portableRelativePath(actualRoot, folder)
       workspaceMap[relative] = (await this.workspaces.create(folder)).id
     }
@@ -417,7 +486,9 @@ export class HostWorkbenchDirectory {
     const registry = clone(this.registry)
     registry.registrations[id] = { rootPath: actualRoot, workspaces: workspaceMap, sessions: clone(sessionMap) }
     registry.preferences.openWorkbenchIds.push(id); registry.preferences.activeWorkbenchId = id; registry.revision++
-    this.commit(registry, [{ file: filename(actualRoot), value: envelope }]); this.records.set(id, envelope)
+    const upgraded = upgradeProjectOwnership(actualRoot, envelope.record)
+    envelope = { ...envelope, schemaVersion: 2, record: this.portable(this.reconcileAreas(upgraded.record), registry.registrations[id]!) }
+    this.commit(registry, [...upgraded.writes, { file: filename(actualRoot), value: envelope }]); this.records.set(id, envelope)
     this.writeProjection(actualRoot, envelope.record); this.publish()
   }) }
   patch = (operation: DirectoryPatch): Promise<{ status: 'committed'; revision: number } | { status: 'conflict'; actualRevision: number }> => this.serial(async () => {
@@ -434,7 +505,7 @@ export class HostWorkbenchDirectory {
       if (operation.operation === 'unset') delete target[last]; else target[last] = clone(operation.value)
     }
     if (isDeepStrictEqual(next, this.snapshot.value)) return { status: 'committed', revision: this.registry.revision }
-    const registry = clone(this.registry), records = new Map(this.records), writes: { file: string; value: unknown }[] = []
+    const registry = clone(this.registry), records = new Map(this.records), writes: ProjectWrite[] = []
     for (const [id, record] of Object.entries(next.workbenches)) {
       this.validate(record)
       const registration = registry.registrations[id]
@@ -447,11 +518,27 @@ export class HostWorkbenchDirectory {
       }
       if (!isDeepStrictEqual(record.areaProjects, before.areaProjects) || !isDeepStrictEqual(record.sessionCatalog, before.sessionCatalog)
         || !isDeepStrictEqual(record.fileWorkbench, before.fileWorkbench)) throw new Error('目录和会话目录只能通过宿主专用接口修改。')
+      if (record.projectModelVersion !== before.projectModelVersion || !isDeepStrictEqual(record.projectMigration, before.projectMigration)
+        || !isDeepStrictEqual(Object.keys(record.projects ?? {}), Object.keys(before.projects ?? {}))) throw new Error('项目登记只能通过宿主专用接口修改。')
+      for (const [areaId, context] of Object.entries(record.areaContexts ?? {})) if (!record.areaProjects?.[areaId] && !isDeepStrictEqual(context, before.areaContexts?.[areaId])) throw new Error('请先关联项目，再修改项目背景。')
+      for (const [projectId, project] of Object.entries(record.projects ?? {})) {
+        const original = before.projects![projectId]!
+        const { context: _c, contextCandidates: _s, ...reference } = project
+        const { context: _oc, contextCandidates: _os, ...priorReference } = original
+        if (!isDeepStrictEqual(reference, priorReference) || !isDeepStrictEqual(project.contextCandidates, original.contextCandidates)) throw new Error('项目身份不能通过布局修改。')
+        const updates = Object.entries(record.areaContexts ?? {}).filter(([areaId, context]) => record.areaProjects?.[areaId]?.projectId === projectId && !isDeepStrictEqual(context, before.areaContexts?.[areaId]))
+        if (updates.length > 1 && !updates.every(([, context]) => isDeepStrictEqual(context, updates[0]![1]))) throw new Error('同一项目的背景修改冲突。')
+        if (updates[0]) project.context = updates[0][1]
+        if (!isDeepStrictEqual(project.context, original.context)) {
+          if (project.context?.revision !== (original.context?.revision ?? 0) + 1) throw new Error('项目背景版本冲突。')
+          writes.push(...projectWrites(registration.rootPath, project))
+        }
+      }
       const portable = this.portable(this.reconcileAreas(record, before), registration)
-      const envelope: FileWorkbenchV1 = { schemaVersion: 1, revision: (records.get(id)?.revision ?? 0) + 1, record: portable }
+      const envelope: FileWorkbenchV1 = { schemaVersion: 2, revision: (records.get(id)?.revision ?? 0) + 1, record: portable }
       writes.push({ file: filename(registration.rootPath), value: envelope }); records.set(id, envelope)
     }
-    for (const id of records.keys()) if (!next.workbenches[id]) { records.delete(id); delete registry.registrations[id] }
+    for (const id of records.keys()) if (!next.workbenches[id] && this.snapshot.value.workbenches[id]) { records.delete(id); delete registry.registrations[id] }
     const { workbenches: _records, migrationRequired: _migration, ...preferences } = next
     registry.preferences = preferences; registry.revision++
     this.commit(registry, writes); this.records = records

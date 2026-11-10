@@ -15,7 +15,10 @@ export interface WorkbenchEditorOwnerProps {
   readonly workbenchId?: string
   /** Whether the Host share session is active for this runtime page. */
   readonly sharePresenceEnabled?: boolean
+  /** Disposable display location; never use as a durable project key. */
   readonly areaId?: string
+  /** Stable project identity, also supplied to project pages without a Session. */
+  readonly projectId?: string
   readonly sessionId?: string
   readonly workspaceId?: string
   readonly bindingGeneration?: number

@@ -48,6 +48,7 @@ export interface WorkbenchCreatorCurrentV1 {
   context: WorkbenchContextV1
   document: WorkbenchCreatorLayoutNodeV1
   activeAreaId: string
+  projects?: readonly import('../workbench-directory-contract.ts').WorkbenchProjectV1[]
   areas: readonly WorkbenchCreatorAreaV1[]
 }
 
@@ -68,6 +69,7 @@ export type WorkbenchCreatorLayoutNodeV1 =
 
 export interface WorkbenchCreatorAreaV1 {
   areaId: string
+  projectId?: string
   ordinal: number
   active: boolean
   historyCount: number
@@ -254,11 +256,12 @@ export function deriveWorkbenchCreatorInspectSnapshot(
         context: workbenchContextOf(activeRecord.context),
         document: projectLayoutNode(activeRecord.document.root),
         activeAreaId: activeRecord.document.activeAreaId,
-        areas: areasOf(activeRecord.document.root).map((area, ordinal) => projectArea(
+        projects: structuredClone(Object.values(activeRecord.projects ?? {})),
+        areas: areasOf(activeRecord.document.root).map((area, ordinal) => ({ ...(activeRecord.areaProjects?.[area.areaId]?.projectId ? { projectId: activeRecord.areaProjects[area.areaId]!.projectId! } : {}), ...projectArea(
           area, ordinal, activeRecord.document.activeAreaId, activeRecord.areaMetadata?.[area.areaId],
           areaContextOf(activeRecord.areaContexts?.[area.areaId]),
           editorRows, sessions, workspaces, options.modelSelectionSource,
-        )),
+        ) })),
       },
     }),
     editors: editorRows,

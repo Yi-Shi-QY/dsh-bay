@@ -38,7 +38,7 @@ export class HostWorkbenchAccess {
       const prior = this.definitions.get(workbenchId)
       if (prior?.stamp === stamp) return prior.valid
       const data = JSON.parse(readFileSync(file, 'utf8'))
-      const valid = data?.schemaVersion === 1 && data.record?.workbenchId === workbenchId && data.record?.document?.version === 3
+      const valid = [1, 2].includes(Number(data?.schemaVersion)) && data.record?.workbenchId === workbenchId && data.record?.document?.version === 3
       this.definitions.set(workbenchId, { stamp, valid })
       return valid
     } catch { return false }
@@ -128,7 +128,7 @@ export class HostWorkbenchAccess {
     if (!read && current.actor === 'desktop' && this.controller(target.workbenchId) === 'browser') throw new WorkbenchAccessError('browser-controls-workbench', '此工作台由浏览器控制，请先收回。', 409)
     if (target.sessionId) {
       const actual = this.sessionTarget(target.sessionId)
-      if (!actual || actual.workbenchId !== target.workbenchId || target.areaId && target.areaId !== actual.areaId) throw new WorkbenchAccessError('session-scope-denied', '会话不属于指定工作台或区域。')
+      if (!actual || actual.workbenchId !== target.workbenchId || target.areaId && target.areaId !== actual.areaId && !(record.projectModelVersion && Object.values(record.sessionCatalog ?? {}).some(entry => entry.sessionId === target.sessionId && entry.projectId === record.areaProjects?.[target.areaId!]?.projectId))) throw new WorkbenchAccessError('session-scope-denied', '会话不属于指定工作台或区域。')
       if (current.actor === 'lan-guest' && capability === 'message') {
         const main = record.bayAgentSession?.sessionId === target.sessionId || Object.values(record.sessionCatalog ?? {}).some(row => row.sessionId === target.sessionId && row.role === 'main')
         if (main && !current.grant!.capabilities.includes('main-message')) throw new WorkbenchAccessError('main-message-denied', '主控未授权向 Bay Agent 发送消息。')
@@ -164,6 +164,8 @@ export class HostWorkbenchAccess {
       if (record.fileWorkbench) delete record.fileWorkbench.rootPath
       delete record.externalBindings
       delete record.backgroundAi
+      delete record.projectMigration
+      for (const project of Object.values(record.projects ?? {})) delete project.contextCandidates
       delete record.bayAgentOrchestration
       for (const area of areasOf(record.document.root)) for (const page of area.moduleHistory) {
         delete page.sessionStates; delete page.sessionStateOrder
@@ -173,6 +175,8 @@ export class HostWorkbenchAccess {
         const allowed = new Set(context.grant.areaIds)
         const filterAreas = <T>(values: Record<string, T> | undefined) => Object.fromEntries(Object.entries(values ?? {}).filter(([id]) => allowed.has(id)))
         record.areaProjects = filterAreas(record.areaProjects)
+        const projectIds = new Set(Object.values(record.areaProjects).flatMap(project => project.projectId ?? []))
+        if (record.projects) record.projects = Object.fromEntries(Object.entries(record.projects).filter(([id]) => projectIds.has(id)))
         record.areaDefinitions = filterAreas(record.areaDefinitions)
         record.areaMetadata = filterAreas(record.areaMetadata)
         record.areaContexts = filterAreas(record.areaContexts)

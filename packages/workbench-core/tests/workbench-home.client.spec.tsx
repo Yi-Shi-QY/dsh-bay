@@ -281,7 +281,7 @@ describe('Workbench Home', () => {
     fireEvent.click(view.getByRole('button', { name: '更多操作：试用工作台' }))
     fireEvent.click(await view.findByRole('menuitem', { name: '导出工作台' }))
     expect(openSettings).toHaveBeenCalledWith({ section: 'sharing', workbenchId: 'one', shareMode: 'export' })
-    fireEvent.click(view.getByRole('button', { name: '导入工作台包' }))
+    fireEvent.click(within(view.getByRole('group', { name: '工作台快捷操作' })).getByRole('button', { name: '导入工作台包' }))
     expect(openSettings).toHaveBeenCalledWith({ section: 'sharing', shareMode: 'import' })
   })
 })

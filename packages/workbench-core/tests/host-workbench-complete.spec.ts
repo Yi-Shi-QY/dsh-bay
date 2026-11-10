@@ -7,6 +7,7 @@ import type { BayAgentWorkStateV1 } from '../src/foundation/workbench-bay-agent-
 import { mkdtemp, readFile, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { HostWorkbenchMemory } from '../src/host-workbench-memory.ts'
 import { HostWorkbenchDirectory } from '../src/host-workbench-directory.ts'
 import { installWorkbenchCompleteRoute } from '../src/host-workbench-complete.ts'
 import type { WorkbenchRecordV2 } from '../src/foundation/persistence.ts'
@@ -42,7 +43,7 @@ it('exports and imports an inert V5 package with files, definition and empty nat
   expect(await readFile(join(root, 'recipient', 'visible.txt'), 'utf8')).toBe('preserved')
 })
 
-it('restores hidden task ownership, logical session mappings and final cwd; retry does not duplicate Sessions or run tasks', async () => {
+it.each([false, true])('restores project task ownership, memory, native histories and cwd (zero Areas: %s) without replay or duplication', async zeroAreas => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'bay-complete-task-'))); roots.push(root)
   const source = new Context(), target = new Context()
   await jsonl.apply(source, { root: join(root, 'source-store'), compression: 'none' })
@@ -50,7 +51,7 @@ it('restores hidden task ownership, logical session mappings and final cwd; retr
   try {
     const workspaces = { async create(folder: string) { return { id: folder } } }
     const directory = new HostWorkbenchDirectory(join(root, 'profile'), workspaces as never)
-    await directory.create({ requestId: 'create-task', parentPath: root, folderName: 'source', record: { ...record(), areaDefinitions: { hidden: { areaId: 'hidden' } } } })
+    await directory.create({ requestId: 'create-task', parentPath: root, folderName: 'source', record: { ...record(), document: { version: 3, activeAreaId: 'area-a', root: { kind: 'split', id: 'split', axis: 'horizontal', ratio: .5, first: record().document.root, second: { kind: 'area', areaId: 'hidden', moduleHistory: [] } } } } })
     for (const areaId of ['area-a', 'hidden']) await directory.bindArea({ workbenchId: 'complete-wb', areaId, relativePath: 'app', createDirectory: true, expectedRevision: directory.getSnapshot().revision })
     const repair = await directory.prepareCreatorRepair({ workbenchId: 'complete-wb', moduleId: 'local.pomodoro' })
     for (const id of ['native-main', 'native-worker', repair.sessionId]) {
@@ -62,7 +63,8 @@ it('restores hidden task ownership, logical session mappings and final cwd; retr
       try { await log.append(session.snapshotEvents()); await log.flush() } finally { await log.close() }
       await directory.registerSession('complete-wb', id, { sessionKey: main ? 'main:key' : isRepair ? repair.sessionKey : 'worker:key', role: main ? 'main' : isRepair ? 'user' : 'worker', ...(main || isRepair ? {} : { areaId: 'hidden' }), relativePath, title: id, agentPreset: main ? 'bay-agent' : isRepair ? 'cordis' : 'standard', createdAt: 1 })
     }
-    const sourceRecord = directory.getSnapshot().value.workbenches['complete-wb']!
+    const sourceRecord = structuredClone(directory.getSnapshot().value.workbenches['complete-wb']!)
+    if (sourceRecord.document.root.kind === 'split') sourceRecord.document.root = sourceRecord.document.root.first
     if (sourceRecord.document.root.kind !== 'area') throw new Error('Expected Area')
     const workspaceId = directory.workspaceId('complete-wb', 'hidden')
     const stateKey = JSON.stringify([workspaceId, 'native-worker'])
@@ -71,6 +73,14 @@ it('restores hidden task ownership, logical session mappings and final cwd; retr
       sessionStates: { [stateKey]: { resourceAddress: 'dsh-resource://file/session/native-worker/result.txt' } }, sessionStateOrder: [stateKey] }))
     sourceRecord.document.root.activeModuleInstanceId = 'view-1'
     await directory.patch({ operation: 'set', path: ['workbenches', 'complete-wb'], value: sourceRecord, expectedRevision: directory.getSnapshot().revision })
+    const projectId = directory.getSnapshot().value.workbenches['complete-wb']!.areaProjects!['area-a']!.projectId!
+    const memory = new HostWorkbenchMemory(() => directory.rootPath('complete-wb'), () => directory.getSnapshot().value.workbenches['complete-wb']!)
+    memory.write('complete-wb', { id: 'decision', projectId, expectedRevision: 0, requestId: 'remember', title: 'Decision', summary: 'Keep original', body: 'Verified project fact', verification: 'verified', environmentDependent: false, source: { kind: 'user', reference: 'confirmation', description: 'User confirmed' } }, 'human')
+    if (zeroAreas) {
+      const empty = structuredClone(directory.getSnapshot().value.workbenches['complete-wb']!)
+      empty.document = { version: 3, activeAreaId: '', root: { kind: 'area', areaId: '', moduleHistory: [] } }
+      await directory.patch({ operation: 'set', path: ['workbenches', 'complete-wb'], value: empty, expectedRevision: directory.getSnapshot().revision })
+    }
     const state: BayAgentWorkStateV1 = { version: 1,
       workItems: [{ workItemId: 'task', workbenchId: 'complete-wb', areaId: 'hidden', objective: 'Continue original work', status: 'running', currentAssignmentId: 'attempt', inputs: [], successCriteria: [], createdAt: 1, updatedAt: 2 }],
       assignments: [{ assignmentId: 'attempt', workItemId: 'task', areaId: 'hidden', runtimeName: 'dsh-session-controller', runtimeAssignmentId: 'old-run', workerSessionId: 'native-worker', state: 'running', createdAt: 2 }], attention: [],
@@ -95,7 +105,8 @@ it('restores hidden task ownership, logical session mappings and final cwd; retr
     const restored = recipient.getSnapshot().value.workbenches['complete-wb']!
     const workerId = restored.sessionCatalog!['worker:key']!.sessionId!
     const tasks = save.mock.calls.at(-1)![1] as BayAgentWorkStateV1
-    expect(restored.areaDefinitions?.hidden).toEqual({ areaId: 'hidden' })
+    expect(restored.areaDefinitions?.hidden).toBeUndefined()
+    expect(tasks.workItems[0]?.projectId).toBe(restored.sessionCatalog!['worker:key']!.projectId)
     expect(tasks.workItems[0]).toMatchObject({ areaId: 'hidden', status: 'waiting', importedFrom: { status: 'running' } })
     expect(tasks.assignments[0]).toMatchObject({ workerSessionId: workerId, state: 'ended', importedFrom: { runtimeAssignmentId: 'old-run' } })
     expect(tasks.assignments[0]?.runtimeAssignmentId).toBeUndefined()
@@ -104,9 +115,13 @@ it('restores hidden task ownership, logical session mappings and final cwd; retr
     expect(tasks.attention).toHaveLength(1)
     expect(restored.executionPaused).toBe(true)
     if (restored.document.root.kind !== 'area') throw new Error('Expected Area')
+    if (!zeroAreas) {
     expect(restored.document.root.moduleHistory.map(page => page.binding?.sessionId)).toEqual([workerId, workerId])
     expect(restored.document.root.moduleHistory[0]?.state).toEqual({ resourceAddress: 'dsh-resource://file/session/' + workerId + '/result.txt' })
     expect(restored.document.root.moduleHistory[0]?.sessionStateOrder).toEqual([JSON.stringify([join(root, 'recipient', 'app'), workerId])])
+    } else { expect(restored.document.root.areaId).toBe(''); expect(restored.document.root.moduleHistory).toEqual([]) }
+    const restoredMemory = new HostWorkbenchMemory(() => recipient.rootPath('complete-wb'), () => restored)
+    expect(restoredMemory.read('complete-wb', 'decision')).toMatchObject({ body: 'Verified project fact', entry: { projectId } })
     expect(await target.sessionPersistence.list()).toHaveLength(3)
     const restoredRepair = await recipient.prepareCreatorRepair({ workbenchId: 'complete-wb', moduleId: 'local.pomodoro' })
     expect(restoredRepair).toMatchObject({ registered: true, relativePath: repair.relativePath, sessionKey: repair.sessionKey })

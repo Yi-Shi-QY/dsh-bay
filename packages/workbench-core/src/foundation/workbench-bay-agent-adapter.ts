@@ -1,3 +1,4 @@
+import { areaContextOf } from './workbench-context.ts'
 import type { SessionBindingV1 } from './model.ts'
 import type {
   AreaAgentContextV1,
@@ -35,6 +36,7 @@ export interface WorkbenchBayAgentPromptContextV1 {
   }
   area?: {
     areaId: string
+    projectId?: string
     label: string
     ownership: WorkbenchAreaOwnershipV1
     generation: number
@@ -49,6 +51,7 @@ export interface WorkbenchBayAgentPromptContextV1 {
 export interface BuildWorkbenchBayAgentPromptContextInputV1 {
   snapshot: WorkbenchControlPlaneSnapshotV1
   areaId?: string
+  projectId?: string
   workItem?: WorkbenchBayAgentWorkItemV1
   capturedAt?: number
 }
@@ -58,6 +61,7 @@ export interface WorkbenchBayAgentExecutionLeaseV1 {
   moduleInstanceId?: string
   workbenchId: string
   areaId: string
+  projectId?: string
   sessionId?: string
   areaGeneration: number
   projectGeneration?: number
@@ -79,6 +83,7 @@ export type WorkbenchBayAgentReportResult =
 export interface CaptureWorkbenchBayAgentPromptInputV1 {
   workbenchId?: string
   areaId?: string
+  projectId?: string
   workItem?: WorkbenchBayAgentWorkItemV1
   capturedAt?: number
 }
@@ -86,6 +91,7 @@ export interface CaptureWorkbenchBayAgentPromptInputV1 {
 export interface CaptureWorkbenchBayAgentExecutionLeaseInputV1 {
   workbenchId?: string
   areaId: string
+  projectId?: string
 }
 
 export interface ApplyWorkbenchBayAreaAgentReportInputV1 {
@@ -102,9 +108,7 @@ export function buildWorkbenchBayAgentPromptContext(
   input: BuildWorkbenchBayAgentPromptContextInputV1,
 ): WorkbenchBayAgentPromptContextV1 {
   const { snapshot } = input
-  const area = input.areaId === undefined
-    ? undefined
-    : findArea(snapshot, input.areaId)
+  const area = input.projectId ? projectExecutionTarget(snapshot, input.projectId, input.areaId) : input.areaId === undefined ? undefined : findArea(snapshot, input.areaId)
   return {
     schemaVersion: 1,
     capturedAt: input.capturedAt ?? Date.now(),
@@ -125,9 +129,19 @@ function findArea(snapshot: WorkbenchControlPlaneSnapshotV1, areaId: string): Wo
   throw Object.assign(new Error(`Unknown Area ${areaId}`), { code: 'area-not-found' })
 }
 
+/** Resolve business identity without requiring its old display container to exist. */
+export function projectExecutionTarget(snapshot: WorkbenchControlPlaneSnapshotV1, projectId: string, preferredAreaId?: string): WorkbenchControlPlaneAreaV1 {
+  const project = snapshot.projects?.find(row => row.projectId === projectId)
+  if (!project) throw new Error('项目不存在，无法继续任务。')
+  const view = snapshot.areas.find(row => row.areaId === preferredAreaId && row.project?.projectId === projectId) ?? snapshot.areas.find(row => row.project?.projectId === projectId)
+  return { areaId: view?.areaId ?? '', label: project.name, ownership: view?.ownership ?? 'user-owned', active: view?.active ?? false, archived: false,
+    visible: !!view, generation: project.generation, context: areaContextOf(project.context), project, modules: view?.modules ?? [] }
+}
+
 function projectPromptArea(area: WorkbenchControlPlaneAreaV1): NonNullable<WorkbenchBayAgentPromptContextV1['area']> {
   return {
     areaId: area.areaId,
+    ...(area.project?.projectId ? { projectId: area.project.projectId } : {}),
     label: area.label,
     ownership: area.ownership,
     generation: area.generation,
@@ -176,7 +190,8 @@ export function renderWorkbenchBayAgentPromptContext(context: WorkbenchBayAgentP
   if (context.area !== undefined) {
     lines.push(
       '',
-      '## Current Area',
+      context.area.projectId ? '## Current Project' : '## Current Area',
+      ...(context.area.projectId ? [`Project ID: ${context.area.projectId}`] : []),
       `Area ID: ${context.area.areaId}`,
       `Area label: ${context.area.label}`,
       `Area ownership: ${context.area.ownership}`,
@@ -238,11 +253,13 @@ function renderList(values: readonly string[]): string[] {
 export function captureWorkbenchBayAgentExecutionLease(
   snapshot: WorkbenchControlPlaneSnapshotV1,
   areaId: string,
+  projectId?: string,
 ): WorkbenchBayAgentExecutionLeaseV1 {
-  const area = findArea(snapshot, areaId)
+  const area = projectId ? projectExecutionTarget(snapshot, projectId, areaId) : findArea(snapshot, areaId)
   return {
     workbenchId: snapshot.workbenchId,
-    areaId,
+    areaId: area.areaId,
+    ...(area.project?.projectId ? { projectId: area.project.projectId } : {}),
     ...(area.binding === undefined ? {} : { sessionId: area.binding.sessionId }),
     areaGeneration: area.generation,
     ...(area.project ? { projectGeneration: area.project.generation } : {}),
@@ -256,12 +273,12 @@ export function workbenchBayAgentExecutionStaleReason(
   snapshot: WorkbenchControlPlaneSnapshotV1,
 ): WorkbenchBayAgentExecutionStaleReason | undefined {
   if (snapshot.workbenchId !== lease.workbenchId) return 'workbench-replaced'
-  const area = snapshot.areas.find(candidate => candidate.areaId === lease.areaId)
+  const area = lease.projectId ? (snapshot.projects?.some(row => row.projectId === lease.projectId) ? projectExecutionTarget(snapshot, lease.projectId, lease.areaId) : undefined) : snapshot.areas.find(candidate => candidate.areaId === lease.areaId)
   if (area === undefined) return 'area-missing'
   if (lease.projectGeneration !== area.project?.generation) return 'area-generation-changed'
   if (!lease.moduleInstanceId && area.generation !== lease.areaGeneration) return 'area-generation-changed'
   const currentSessionId = snapshot.sessions !== undefined && lease.sessionId
-    ? snapshot.sessions.find(row => row.sessionId === lease.sessionId && row.areaId === lease.areaId)?.sessionId
+    ? snapshot.sessions.find(row => row.sessionId === lease.sessionId && (lease.projectId ? row.projectId === lease.projectId : row.areaId === lease.areaId))?.sessionId
     : lease.moduleInstanceId ? snapshot.areas.flatMap(row => row.modules).find(row => row.moduleInstanceId === lease.moduleInstanceId)?.binding?.sessionId : area.binding?.sessionId
   if (currentSessionId !== lease.sessionId) return 'session-changed'
   if (snapshot.context.revision !== lease.workbenchContextRevision
@@ -290,13 +307,14 @@ export class WorkbenchBayAgentAdapter {
     return buildWorkbenchBayAgentPromptContext({
       snapshot,
       ...(input.areaId === undefined ? {} : { areaId: input.areaId }),
+      ...(input.projectId ? { projectId: input.projectId } : {}),
       ...(input.workItem === undefined ? {} : { workItem: input.workItem }),
       capturedAt: input.capturedAt ?? this.now(),
     })
   }
 
   captureExecutionLease(input: CaptureWorkbenchBayAgentExecutionLeaseInputV1): WorkbenchBayAgentExecutionLeaseV1 {
-    return captureWorkbenchBayAgentExecutionLease(this.controlPlane.inspect(input.workbenchId), input.areaId)
+    return captureWorkbenchBayAgentExecutionLease(this.controlPlane.inspect(input.workbenchId), input.areaId, input.projectId)
   }
 
   async applyAreaAgentReport(input: ApplyWorkbenchBayAreaAgentReportInputV1): Promise<WorkbenchBayAgentReportResult> {
@@ -304,7 +322,8 @@ export class WorkbenchBayAgentAdapter {
     const staleReason = workbenchBayAgentExecutionStaleReason(input.lease, snapshot)
     if (staleReason !== undefined) return { status: 'stale', reason: staleReason }
     const result = await this.controlPlane.patchContext({
-      scope: 'area',
+      scope: input.lease.projectId ? 'project' : 'area',
+      ...(input.lease.projectId ? { projectId: input.lease.projectId } : {}),
       workbenchId: input.lease.workbenchId,
       areaId: input.lease.areaId,
       writer: 'bay-agent',

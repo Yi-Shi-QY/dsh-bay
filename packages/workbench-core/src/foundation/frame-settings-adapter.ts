@@ -90,6 +90,9 @@ export type WorkbenchDirectoryCreateResult = WorkbenchDirectoryOperationResult |
 
 /** Named-Workbench selector backed by the same revision-aware Settings scope. */
 export interface WorkbenchDirectory {
+  getProjects?(workbenchId: string): Readonly<Record<string, import('../workbench-directory-contract.ts').WorkbenchProjectV1>>
+  getProjectSessions?(workbenchId: string, projectId: string): readonly import('../workbench-directory-contract.ts').WorkbenchSessionEntryV1[]
+  openProject?(workbenchId: string, projectId: string): Promise<void>
   /** Registered by the existing surface, including its unsaved-form guard. */
   openInSurface?(workbenchId: string): Promise<void>
   getHiddenAreas?(workbenchId: string): readonly { areaId: string; label: string }[]

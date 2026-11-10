@@ -24,7 +24,7 @@ export function installWorkbenchDirectoryRoute(connection: HostConnectionHandle,
       const actor = access?.resolve(request.headers)
       const patch = body.action === 'patch' ? body.operation as DirectoryPatch : undefined
       const workbenchId = typeof body.workbenchId === 'string' ? body.workbenchId : patch?.path?.[0] === 'workbenches' ? patch.path[1] : actor?.workbenchId
-      const mutation = ['create', 'create-session', 'prepare-creator-repair', 'show-area', 'bind-area', 'register-session', 'patch', 'memory-write', 'project-write'].includes(String(body.action))
+      const mutation = ['create', 'create-session', 'prepare-creator-repair', 'show-area', 'open-project', 'bind-area', 'register-session', 'patch', 'memory-write', 'project-write'].includes(String(body.action))
       const writeTargets = new Set<string>(workbenchId ? [workbenchId] : [])
       // Preserve area-scoped authorization through the final directory
       // transaction wrapper. Rechecking only the workbench would discard the
@@ -46,7 +46,7 @@ export function installWorkbenchDirectoryRoute(connection: HostConnectionHandle,
           : [{ workbenchId: id }]
       })
       let capability: WorkbenchCapability = 'view'
-      if (['create-session', 'show-area', 'bind-area', 'register-session', 'patch'].includes(String(body.action))) capability = 'layout'
+      if (['create-session', 'show-area', 'open-project', 'bind-area', 'register-session', 'patch'].includes(String(body.action))) capability = 'layout'
       if (body.action === 'memory-write') capability = 'memory'
       if (['directories', 'project-entries', 'project-preview', 'project-read'].includes(String(body.action))) capability = 'read-files'
       if (['project-write', 'prepare-creator-repair'].includes(String(body.action))) capability = 'write-files'
@@ -77,10 +77,20 @@ export function installWorkbenchDirectoryRoute(connection: HostConnectionHandle,
             // Merge against the exact scoped projection, not a truncated full
             // definition: invisible host fields must survive guest edits.
             const projection = access.snapshot(actor).value.workbenches[workbenchId]!
-            for (const key of ['backgroundAi', 'bayAgentOrchestration', 'sessionCatalog', 'areaProjects', 'areaDefinitions', 'bayAgentSession'] as const) {
+            for (const key of ['backgroundAi', 'bayAgentOrchestration', 'sessionCatalog', 'areaProjects', 'areaDefinitions', 'bayAgentSession', 'projectMigration', 'projectModelVersion'] as const) {
               if (!isDeepStrictEqual(after[key], projection[key])) throw new WorkbenchAccessError('patch-field-denied', '此字段只能由主控修改：' + key)
               if (before[key] === undefined) delete after[key]
               else Object.assign(after, { [key]: before[key] })
+            }
+            if (before.projects) {
+              if (!isDeepStrictEqual(Object.keys(after.projects ?? {}).sort(), Object.keys(projection.projects ?? {}).sort())) throw new WorkbenchAccessError('project-scope-denied', '不能修改项目登记。')
+              const merged = structuredClone(before.projects)
+              for (const [id, project] of Object.entries(after.projects ?? {})) {
+                const { context, ...identity } = project, { context: _context, ...original } = projection.projects![id]!
+                if (!isDeepStrictEqual(identity, original)) throw new WorkbenchAccessError('project-scope-denied', '不能修改项目身份。')
+                if (context !== undefined) merged[id]!.context = context
+              }
+              after.projects = merged
             }
             if (actor.grant?.areaIds) {
               if (isDeepStrictEqual(after.document, projection.document)) after.document = structuredClone(before.document)
@@ -99,20 +109,27 @@ export function installWorkbenchDirectoryRoute(connection: HostConnectionHandle,
               const selected = priorAreas.find(prior => prior.areaId === area.areaId)?.activeModuleInstanceId
               if (selected && area.moduleHistory.some(page => page.moduleInstanceId === selected)) area.activeModuleInstanceId = selected
             }
-            const classifications: Record<string, WorkbenchCapability> = { document: 'layout', context: 'context', name: 'layout', description: 'context', areaContexts: 'context', areaMetadata: 'layout', updatedAt: 'layout' }
+            const classifications: Record<string, WorkbenchCapability> = { document: 'layout', context: 'context', name: 'layout', description: 'context', areaContexts: 'context', projects: 'context', areaMetadata: 'layout', updatedAt: 'layout' }
             for (const key of new Set([...Object.keys(before), ...Object.keys(after)])) {
               if (isDeepStrictEqual(before[key as keyof typeof before], after[key as keyof typeof after])) continue
               if (key === 'updatedAt') continue
               const required = classifications[key]
               if (!required) throw new WorkbenchAccessError('patch-field-denied', '此字段只能由主控修改：' + key)
-              if (key === 'areaContexts' || key === 'areaMetadata') {
+              if (key === 'projects') {
+                const changedProjects = new Set([...Object.keys(before.projects ?? {}), ...Object.keys(after.projects ?? {})])
+                for (const id of changedProjects) if (!isDeepStrictEqual(before.projects?.[id], after.projects?.[id])) {
+                  const areaId = Object.entries(before.areaProjects ?? {}).find(([areaId, ref]) => ref.projectId === id && (!actor.grant?.areaIds || actor.grant.areaIds.includes(areaId)))?.[0]
+                  if (actor.grant?.areaIds && !areaId) throw new WorkbenchAccessError('project-scope-denied', '项目不在授权范围内。')
+                  const target = { workbenchId, ...(areaId ? { areaId } : {}) }; access.authorize(actor, 'context', target); addScopedRequirement('context', target)
+                }
+              } else if (key === 'areaContexts' || key === 'areaMetadata') {
                 for (const id of new Set([...Object.keys(before[key] ?? {}), ...Object.keys(after[key] ?? {})])) if (!isDeepStrictEqual(before[key]?.[id], after[key]?.[id])) {
                   const target = { workbenchId, areaId: id }
                   access.authorize(actor, required, target)
                   addWriteArea(workbenchId, id); addScopedRequirement(required, target)
                 }
               } else if (actor.grant?.areaIds) throw new WorkbenchAccessError('area-scope-denied', '此操作影响整个工作台，需要完整结构授权。')
-              if (key !== 'areaContexts' && key !== 'areaMetadata') access.authorize(actor, required, { workbenchId })
+              if (key !== 'areaContexts' && key !== 'areaMetadata' && key !== 'projects') access.authorize(actor, required, { workbenchId })
               capability = required
             }
             // Every bound page must already belong to this workbench. A layout
@@ -123,8 +140,9 @@ export function installWorkbenchDirectoryRoute(connection: HostConnectionHandle,
         if (workbenchId) {
           if (mutation && typeof body.areaId === 'string') addWriteArea(workbenchId, body.areaId)
           let relativePath = typeof body.relativePath === 'string' ? body.relativePath : undefined
-          if (['project-entries', 'project-preview'].includes(String(body.action)) && typeof body.areaId === 'string') {
-            const project = access.getRecord(workbenchId).areaProjects?.[body.areaId]
+          if (['project-entries', 'project-preview'].includes(String(body.action)) && (typeof body.areaId === 'string' || typeof body.projectId === 'string')) {
+            const record = access.getRecord(workbenchId)
+            const project = typeof body.projectId === 'string' ? record.projects?.[body.projectId] : record.areaProjects?.[String(body.areaId)]
             if (!project) throw new Error('请先设置区域项目目录。')
             relativePath = [project.relativePath, relativePath].filter(Boolean).join('/')
           }
@@ -142,8 +160,9 @@ export function installWorkbenchDirectoryRoute(connection: HostConnectionHandle,
         case 'snapshot': break
         case 'prepare-creator-repair': value = await directory.prepareCreatorRepair({ workbenchId: text('workbenchId'), moduleId: text('moduleId'), ...(body.packageName === undefined ? {} : { packageName: text('packageName') }) }); break
         case 'create-session': if (!createSession) throw new Error('会话服务不可用。'); value = await createSession({ workbenchId: text('workbenchId'), areaId: text('areaId'), requestId: text('requestId'), agentPreset: typeof body.agentPreset === 'string' ? body.agentPreset : 'standard', workspaceId: text('workspaceId') }); break
+        case 'open-project': value = await directory.openProject({ workbenchId: text('workbenchId'), projectId: text('projectId'), requestId: text('requestId'), expectedRevision: Number(body.expectedRevision) }); break
         case 'show-area': value = await directory.showArea(text('workbenchId'), text('areaId'), Number(body.expectedRevision)); break
-        case 'memory-list': if (!memory) throw new Error('记忆服务不可用。'); value = memory.list(text('workbenchId'), typeof body.query === 'string' ? body.query : ''); break
+        case 'memory-list': if (!memory) throw new Error('记忆服务不可用。'); value = memory.list(text('workbenchId'), typeof body.query === 'string' ? body.query : '', typeof body.projectId === 'string' ? body.projectId : undefined); break
         case 'memory-read': if (!memory) throw new Error('记忆服务不可用。'); value = memory.read(text('workbenchId'), text('id'), body.revision === undefined ? undefined : Number(body.revision)); break
         case 'memory-write': if (!memory) throw new Error('记忆服务不可用。'); value = memory.write(text('workbenchId'), body.entry as WorkbenchMemoryWrite, 'human'); break
         case 'patch': value = await directory.patch(body.operation as DirectoryPatch); break
@@ -159,8 +178,8 @@ export function installWorkbenchDirectoryRoute(connection: HostConnectionHandle,
           ...(typeof body.requestId === 'string' ? { requestId: body.requestId } : {}),
         }); break
         case 'directories': value = await directory.listDirectories(text('workbenchId'), typeof body.relativePath === 'string' ? body.relativePath : ''); break
-        case 'project-entries': value = await directory.projectEntries(text('workbenchId'), text('areaId'), typeof body.relativePath === 'string' ? body.relativePath : ''); break
-        case 'project-preview': value = await directory.projectPreview(text('workbenchId'), text('areaId'), text('relativePath')); break
+        case 'project-entries': value = await directory.projectEntries(text('workbenchId'), typeof body.projectId === 'string' ? body.projectId : text('areaId'), typeof body.relativePath === 'string' ? body.relativePath : ''); break
+        case 'project-preview': value = await directory.projectPreview(text('workbenchId'), typeof body.projectId === 'string' ? body.projectId : text('areaId'), text('relativePath')); break
         case 'project-read': value = { bytes: Buffer.from(await directory.readProjectFile(text('workbenchId'), text('relativePath'))).toString('base64') }; break
         case 'project-write': value = await directory.writeProjectFile(text('workbenchId'), text('relativePath'), Buffer.from(text('bytes'), 'base64')); break
         default: throw new Error('不支持的工作台目录操作。')

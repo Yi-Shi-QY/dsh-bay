@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
 import React from 'react'
 import { afterEach, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react'
 import { WorkbenchCompletePackagePanel, WorkbenchImportDirectoryRequests } from '../src/foundation/WorkbenchCompletePackagePanel.tsx'
 import { WorkbenchLayoutSharingPage } from '../src/foundation/WorkbenchLayoutSharingPage.tsx'
+import { WorkbenchSharingPage } from '../src/foundation/WorkbenchSharingPage.tsx'
+import { settingsFixture } from './settings-fixtures.ts'
 
 const client = vi.hoisted(() => ({ request: vi.fn(), upload: vi.fn(), download: vi.fn() }))
 vi.mock('../src/client/workbench-complete.ts', () => ({ createWorkbenchCompleteClient: () => client }))
@@ -61,4 +63,47 @@ it('offers first-workbench import on an empty desktop without enabling export', 
   expect(view.getByLabelText('接收完整包').hasAttribute('disabled')).toBe(false)
   expect(view.getByRole('button', { name: '生成完整包' }).hasAttribute('disabled')).toBe(true)
   await waitFor(() => expect(client.request).toHaveBeenCalledWith({ action: 'jobs', workbenchId: '' }, expect.anything()))
+})
+
+it('uses the selected workbench for complete export and retains it when switching package types', async () => {
+  client.request.mockImplementation(async input => input.action === 'jobs' ? [] : { id: 'export', kind: 'export', stage: 'queued', files: 0, bytes: 0 })
+  const prepareExport = vi.fn(async () => { throw new Error('fixture-preview-unavailable') })
+  const view = render(<WorkbenchSharingPage {...{
+    value: settingsFixture(), editors: [], workbenchDirectory: { completeRequest: vi.fn() },
+    distributionPackage: { prepareExport, history: vi.fn(async () => []) },
+    useSessions: (select: (value: object) => unknown) => select({ ids: [], byId: {} }),
+  } as never} />)
+  fireEvent.change(view.getByLabelText('完整包来源工作台'), { target: { value: 'b' } })
+  fireEvent.click(view.getByRole('button', { name: '生成完整包' }))
+  await waitFor(() => expect(client.request).toHaveBeenCalledWith(expect.objectContaining({ action: 'start-export', workbenchId: 'b' })))
+  fireEvent.click(view.getByRole('button', { name: '布局与扩展', exact: true }))
+  expect((view.getByLabelText('分享来源工作台') as HTMLSelectElement).value).toBe('b')
+  fireEvent.click(view.getByRole('button', { name: '保存布局并生成分享包' }))
+  await waitFor(() => expect(prepareExport).toHaveBeenCalledWith('b', 'layout-only', false))
+  expect(await view.findByText('fixture-preview-unavailable')).toBeTruthy()
+})
+
+it('keeps an upload alive while switching package types and restores the checked import form', async () => {
+  client.request.mockResolvedValue([])
+  let finish!: (value: unknown) => void
+  let uploadSignal: AbortSignal | undefined
+  client.upload.mockImplementation((_file, _input, onProgress, signal) => {
+    uploadSignal = signal
+    onProgress({ id: 'upload', name: 'received.tgz', size: 20, received: 10, state: 'uploading' })
+    return new Promise(resolve => { finish = resolve })
+  })
+  const view = render(<WorkbenchSharingPage {...{
+    value: settingsFixture(), editors: [], openOptions: { shareMode: 'import' },
+    workbenchDirectory: { completeRequest: vi.fn() }, distributionPackage: { history: vi.fn(async () => []) },
+    useSessions: (select: (value: object) => unknown) => select({ ids: [], byId: {} }),
+  } as never} />)
+  fireEvent.change(view.getByLabelText('接收完整包'), { target: { files: [new File(['data'], 'received.tgz')] } })
+  expect(view.getByRole('progressbar', { name: '完整包上传进度' }).getAttribute('value')).toBe('50')
+  fireEvent.click(view.getByRole('button', { name: '布局与扩展', exact: true }))
+  expect(uploadSignal?.aborted).toBe(false)
+  await act(async () => { finish({ upload: { id: 'upload', name: 'received.tgz', size: 20, received: 20, state: 'ready' }, preflight: { valid: true, workbenchId: 'received', sessionCount: 2 } }) })
+  fireEvent.click(view.getByRole('button', { name: '完整工作台包', exact: true }))
+  expect((view.getByLabelText('新工作台文件夹名称') as HTMLInputElement).value).toBe('received')
+  expect(view.getByRole('button', { name: '导入并保持暂停' }).hasAttribute('disabled')).toBe(true)
+  expect(client.upload).toHaveBeenCalledOnce()
 })

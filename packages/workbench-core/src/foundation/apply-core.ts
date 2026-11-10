@@ -278,9 +278,16 @@ export function applyWorkbenchCoreFoundation(
   directory.memoryRequest = fileSettings.request
   directory.completeRequest = createWorkbenchCompleteClient().request
   directory.getAreaProjects = id => settings.getSnapshot().value?.workbenches[id]?.areaProjects ?? {}
+  directory.getProjects = id => settings.getSnapshot().value?.workbenches[id]?.projects ?? {}
+  directory.getProjectSessions = (id, projectId) => Object.values(settings.getSnapshot().value?.workbenches[id]?.sessionCatalog ?? {}).filter(entry => entry.projectId === projectId)
+  directory.openProject = async (workbenchId, projectId) => {
+    if (directory.flushBeforeLifecycleTransition && !await directory.flushBeforeLifecycleTransition()) throw new Error('请先保存当前布局。')
+    const result = await fileSettings.request<{ status: string }>({ action: 'open-project', workbenchId, projectId, requestId: browserSafeUuid(), expectedRevision: settings.getSnapshot().revision })
+    if (result.status !== 'committed') throw new Error('工作台刚刚发生变化，请重试。')
+  }
   directory.getHiddenAreas = id => {
     const record = settings.getSnapshot().value?.workbenches[id]
-    if (!record) return []
+    if (!record || record.projectModelVersion) return []
     const visible = new Set(areasOf(record.document.root).map(area => area.areaId))
     return Object.keys(record.areaDefinitions ?? {}).filter(areaId => !visible.has(areaId)).map(areaId => ({ areaId, label: record.areaMetadata?.[areaId]?.label ?? record.areaProjects?.[areaId]?.relativePath ?? areaId }))
   }

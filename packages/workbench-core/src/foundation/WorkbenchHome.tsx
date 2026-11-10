@@ -3,6 +3,9 @@ import {
   Button, Input, Pill,
   IconFolderOpenOutlineMedium, IconPlusOutlineMedium,
   IconSearchOutlineMedium, IconPanelLeftOutlineMedium,
+  IconAppsAddOutlineMedium, IconNewChatOutlineMedium, IconSettingsOutlineMedium,
+  IconArchiveOutlineMedium, IconGlobeOutlineMedium, IconChevronRightOutlineMedium,
+  IconPinOutlineMedium, IconPinFillMedium, Menu, IconEllipsisOutlineMedium,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { DESKTOP_SETTINGS_CONTEXT, settingsTargetWritable, type WorkbenchSettingsOpenOptionsV1 } from './settings-context.ts'
 import type { WorkbenchWindowControllerV1 } from '../client/workbench-window-controller.ts'
@@ -11,7 +14,8 @@ import type { WorkbenchDirectory } from './frame-settings-adapter.ts'
 import type { WorkbenchEditorCatalogRow } from './catalog.ts'
 import { WorkbenchOverviewDetail } from './WorkbenchOverviewDetail.tsx'
 import type { WorkbenchSettingsV4 } from './persistence.ts'
-import { IconPinOutlineMedium, Menu, IconEllipsisOutlineMedium } from '@deepseek-ai/dsh-client-ui-primitives'
+import { areasOf } from './document-v3.ts'
+import { workbenchAreas } from './area-identity.ts'
 import { WorkbenchCreateDialog } from './WorkbenchCreateDialog.tsx'
 import { WorkbenchCreateMenu } from './WorkbenchCreateMenu.tsx'
 import type { WorkbenchLayoutPresetId } from './workbench-layout-presets.ts'
@@ -81,7 +85,7 @@ export function WorkbenchHome({ value, initialSelectedId, directory, editors = [
     <div className={css.overview}>
       <header className={css.hero}>
         <div><h1>你的工作台</h1><p className={css.heroCopy}>把会话、文件和工具，整理成适合你的工作空间。</p></div>
-        <div className={css.heroActions}>
+        <div className={css.heroActions} role="group" aria-label="工作台快捷操作">
           <Button variant="outline" icon={<IconFolderOpenOutlineMedium size={16} />} onClick={() => navigate?.({ section: 'sharing', shareMode: 'import' })}>导入工作台包</Button>
           <WorkbenchCreateMenu onSelect={setCreatePreset} onImport={navigate ? () => navigate({ section: 'sharing', shareMode: 'import' }) : undefined} anchor={props => <Button variant="primary" icon={<IconPlusOutlineMedium size={16} />} {...props}>创建工作台</Button>} />
         </div>
@@ -100,18 +104,40 @@ export function WorkbenchHome({ value, initialSelectedId, directory, editors = [
           <Input className={css.search ?? ''} icon={<IconSearchOutlineMedium size={16} />} type="search" aria-label="搜索工作台" placeholder="搜索工作台" value={query} onChange={event => setQuery(event.target.value)} />
         </div>
         {filtered.length ? <div className={css.masterDetail}>
-          <aside className={css.workbenchList} aria-label="选择工作台">{filtered.map(row => {
+          <aside className={css.workbenchList} aria-label="选择工作台"><div className={css.workbenchRows}>{filtered.map(row => {
             const selected = (filtered.some(item => item.workbenchId === selectedId) ? selectedId : filtered[0]?.workbenchId) === row.workbenchId
             const pinned = snapshot.sidebarShortcuts?.includes(row.workbenchId) === true
             const browser = !settingsTargetWritable(DESKTOP_SETTINGS_CONTEXT, row.workbenchId, windowController)
+            const status = row.archivedAt !== undefined ? 'archived' : browser ? 'browser' : activeIds.has(row.workbenchId) ? 'open' : 'inactive'
+            const record = value?.workbenches[row.workbenchId]
+            const pages = record ? areasOf(record.document.root).flatMap(area => area.moduleHistory) : []
+            const sessions = record ? new Set([...Object.values(record.sessionCatalog ?? {}).map(entry => entry.sessionId ?? entry.sessionKey), ...pages.flatMap(page => page.binding ? [page.binding.sessionId] : [])]) : undefined
             return <article key={row.workbenchId} className={css.workbenchRow} aria-label={row.name} data-selected={selected || undefined}>
-              <button className={css.workbenchSelect} aria-pressed={selected} onClick={() => setSelectedId(row.workbenchId)}><span className={css.rowMark}><IconPanelLeftOutlineMedium size={18} /></span><span><strong>{row.name}</strong><small>{row.description || '暂无简介'}</small></span></button>
-              <div className={css.workbenchRowFooter}><button className={css.sidebarPin} aria-label={pinned ? '已固定到 DSH 侧栏' : '固定到 DSH 侧栏'} title={pinned ? '已固定到 DSH 侧栏' : '固定到 DSH 侧栏'} aria-pressed={pinned} disabled={!directory.setSidebarPinned || !!action.states['pin-' + row.workbenchId]?.busy} onClick={() => void action.run('pin-' + row.workbenchId, () => directory.setSidebarPinned!(row.workbenchId, !pinned))}><IconPinOutlineMedium size={14} />{pinned ? '已固定' : '固定到侧栏'}</button><span>{row.archivedAt ? '已归档' : browser ? '浏览器中' : activeIds.has(row.workbenchId) ? '已打开' : '未打开'}</span></div>
-              {row.archivedAt ? <Button size="sm" disabled={busyId !== undefined} onClick={() => void restore(row.workbenchId)}>恢复工作台</Button> : null}
-              <div className={css.rowUtilities}><Button size="sm" onClick={() => navigate?.({ section: 'workbenches', workbenchId: row.workbenchId })}>管理</Button><Menu open={menuId === row.workbenchId} onClose={() => setMenuId(undefined)} align="end" portal autoFocus anchor={<Button size="sm" aria-label={'更多操作：' + row.name} aria-haspopup="menu" aria-expanded={menuId === row.workbenchId} onClick={() => setMenuId(row.workbenchId)}><IconEllipsisOutlineMedium size={16} /></Button>} items={[{ id: 'export', label: '导出工作台', disabled: browser || !!row.archivedAt }, { id: 'archive', label: row.archivedAt ? '恢复工作台' : '归档工作台', disabled: browser || busyId !== undefined }]} onSelect={id => { setMenuId(undefined); if (id === 'export') navigate?.({ section: 'sharing', workbenchId: row.workbenchId, shareMode: 'export' }); else if (row.archivedAt) void restore(row.workbenchId); else void archive(row.workbenchId) }} /></div>
-              {action.feedback('pin-' + row.workbenchId)}{action.feedback(row.workbenchId)}
+              <button type="button" className={css.workbenchSelect} aria-label={row.name} aria-pressed={selected} onClick={() => setSelectedId(row.workbenchId)}>
+                <span className={css.rowHeading}><span className={css.rowMark} aria-hidden="true"><IconPanelLeftOutlineMedium size={21} /></span><strong title={row.name}>{row.name}</strong><span className={css.rowStatus} data-status={status}>{status === 'archived' ? <IconArchiveOutlineMedium size={12} /> : status === 'browser' ? <IconGlobeOutlineMedium size={12} /> : <i aria-hidden="true" />}{status === 'archived' ? '已归档' : status === 'browser' ? '浏览器中' : status === 'open' ? '已打开' : '未打开'}</span></span>
+                <span className={css.rowDescription}>{row.description || '添加简介，记录这个工作台的方向'}</span>
+                <span className={css.rowStats} aria-label="工作台内容概况">
+                  <span title="当前展示区域"><IconPanelLeftOutlineMedium size={14} /><b>{record ? workbenchAreas(record).length : '—'}</b><span>区域</span></span>
+                  <span title="区域内打开的内页"><IconAppsAddOutlineMedium size={14} /><b>{record ? pages.length : '—'}</b><span>内页</span></span>
+                  <span title="已登记的独立会话，关闭内页后仍保留"><IconNewChatOutlineMedium size={14} /><b>{sessions?.size ?? '—'}</b><span>会话</span></span>
+                </span>
+              </button>
+              <div className={css.workbenchRowFooter}>
+                <button type="button" className={css.sidebarPin} aria-label={pinned ? '已固定到 DSH 侧栏' : '固定到 DSH 侧栏'} title={pinned ? '取消固定到 DSH 侧栏' : '固定到 DSH 侧栏'} aria-pressed={pinned} disabled={!directory.setSidebarPinned || !!action.states['pin-' + row.workbenchId]?.busy} onClick={() => void action.run('pin-' + row.workbenchId, () => directory.setSidebarPinned!(row.workbenchId, !pinned))}>{pinned ? <IconPinFillMedium size={14} /> : <IconPinOutlineMedium size={14} />}{pinned ? '已固定' : '固定到侧栏'}</button>
+                <div className={css.rowUtilities}>
+                  {row.archivedAt ? <Button size="sm" aria-label="恢复工作台" title="恢复工作台" disabled={busyId !== undefined} onClick={() => void restore(row.workbenchId)}><IconArchiveOutlineMedium size={14} /></Button> : null}
+                  <Button size="sm" icon={<IconSettingsOutlineMedium size={14} />} onClick={() => navigate?.({ section: 'workbenches', workbenchId: row.workbenchId })}>管理</Button>
+                  <Menu open={menuId === row.workbenchId} onClose={() => setMenuId(undefined)} align="end" portal autoFocus anchor={<Button size="sm" aria-label={'更多操作：' + row.name} aria-haspopup="menu" aria-expanded={menuId === row.workbenchId} onClick={() => setMenuId(row.workbenchId)}><IconEllipsisOutlineMedium size={16} /></Button>} items={[{ id: 'export', label: '导出工作台', disabled: browser || !!row.archivedAt }, { id: 'archive', label: row.archivedAt ? '恢复工作台' : '归档工作台', disabled: browser || busyId !== undefined }]} onSelect={id => { setMenuId(undefined); if (id === 'export') navigate?.({ section: 'sharing', workbenchId: row.workbenchId, shareMode: 'export' }); else if (row.archivedAt) void restore(row.workbenchId); else void archive(row.workbenchId) }} />
+                </div>
+              </div>
+              <div className={css.rowFeedback}>{action.states['pin-' + row.workbenchId]?.error || action.states['pin-' + row.workbenchId]?.busy ? action.feedback('pin-' + row.workbenchId) : null}{action.states[row.workbenchId]?.error || action.states[row.workbenchId]?.busy ? action.feedback(row.workbenchId) : null}</div>
             </article>
-          })}</aside>
+          })}</div>
+            <section className={css.addWorkbenchCard} aria-label="添加工作台">
+              <Button className={css.addWorkbenchAction} aria-label="导入工作台包" disabled={!navigate} onClick={() => navigate?.({ section: 'sharing', shareMode: 'import' })}><span className={css.addWorkbenchIcon}><IconFolderOpenOutlineMedium size={20} /></span><span className={css.addWorkbenchCopy}><strong>导入工作台包</strong><small>接续已有的工作空间</small></span><IconChevronRightOutlineMedium size={16} /></Button>
+              <WorkbenchCreateMenu onSelect={setCreatePreset} anchor={props => <Button className={css.addWorkbenchAction} aria-label="创建工作台" {...props}><span className={css.addWorkbenchIcon} data-accent><IconPlusOutlineMedium size={20} /></span><span className={css.addWorkbenchCopy}><strong>创建工作台</strong><small>从空白或预设布局开始</small></span><IconChevronRightOutlineMedium size={16} /></Button>} />
+            </section>
+          </aside>
           {(() => { const row = filtered.find(row => row.workbenchId === selectedId) ?? filtered[0]!; const record = value?.workbenches[row.workbenchId]; return record ? <WorkbenchOverviewDetail key={row.workbenchId} record={record} directory={directory} editors={editors} navigate={navigate} windowController={windowController} onOpenWorkbench={onOpenWorkbench} onCreated={onCreated} generateContextDraft={generateContextDraft} onOpen={() => void open(row.workbenchId)} writable={settingsTargetWritable(DESKTOP_SETTINGS_CONTEXT, row.workbenchId, windowController)} busy={busyId !== undefined} /> : <section className={css.selectedDetail}><h2>{row.name}</h2><p>正在读取工作台详情…</p><Button onClick={() => void open(row.workbenchId)}>打开工作台</Button></section> })()}
         </div> : <div className={css.noResults} role="status"><IconSearchOutlineMedium size={24} /><h2>没有找到工作台</h2><p>{query ? '试试其他名称、简介或标签。' : '这个分类里还没有工作台。'}</p><Button variant="outline" onClick={() => { setFilter('all'); setQuery('') }}>查看全部工作台</Button></div>}
         <p className={css.librarySummary}>{rows.length} 个工作台 · {snapshot.openWorkbenchIds.length} 个已打开<span>布局和内页会自动保留</span></p>

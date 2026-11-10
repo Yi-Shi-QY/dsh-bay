@@ -1,10 +1,11 @@
 # Workbench editor extension template
 
-## 17.3 展示位置与实例生命周期
+## 18.0 项目身份与实例生命周期
 
 Core 兼容版本为 `0.2.2-alpha.18.0`。模板扩展自身保留独立的 `0.1.0` 版本，不能把它误当成 Core 版本。
 
 - 声明 `presentation.floating: false` 可禁止浮窗；缺少完整绑定及生命周期声明的内页不能在浮窗运行。
+- `owner.projectId` 是项目持久身份；`owner.areaId` 只是展示位置。关闭 Area 后 Project 保留，重新打开显示概览，不自动恢复扩展内页。两个 Area 共享项目时背景和记忆共享，内页视图状态独立。全局页或 Main 可无 projectId，不能退回用 areaId 猜测。
 - `owner.instanceId` 是布局内标签 ID，运行时缓存使用 `owner.runtimeIdentity`；不能跨工作台仅按标签 ID 缓存。`owner.presentation` 为 `floating` 或 `area`，位置变化不是新建实例。
 - 标签从浮窗固定到 Area 保持挂载和控制器。不要把 `areaId` 变化当成新任务；仅真实绑定代际改变才释放旧绑定。异步回调必须检查当前绑定与生命周期。
 - `owner.lifecycle.visibility` 变成 background/collapsed 时撤销键盘和前台交互；pause 停止 UI 轮询，keep 保留必要控制器。dispose 只允许释放能从 owner.state 恢复的视图，不能因此终止终端或底层任务。Core 会保留已登记关闭保护的视图，防止未保存内容因后台卸载丢失。

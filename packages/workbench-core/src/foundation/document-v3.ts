@@ -36,6 +36,8 @@ export interface AreaNode {
   areaId: string
   /** Operation hint consumed and removed by the Host when a split is saved. */
   projectSourceAreaId?: string
+  /** Transient project association carried by layout undo, consumed by Host. */
+  projectRestoreId?: string
   /** Retired wire field, ignored by V18 projection and removed on Host write. */
   areaBinding?: SessionBindingV1
   areaBindingGeneration?: number
@@ -213,7 +215,7 @@ function collectIds(node: WorkbenchNodeV3, result: Set<string>): void {
  * @returns Areas in first-to-second visual order.
  */
 export function areasOf(node: WorkbenchNodeV3): AreaNode[] {
-  return node.kind === 'area' ? [node] : [...areasOf(node.first), ...areasOf(node.second)]
+  return node.kind === 'area' ? (node.areaId ? [node] : []) : [...areasOf(node.first), ...areasOf(node.second)]
 }
 
 /**
@@ -235,6 +237,7 @@ export function cloneWorkbenchDocumentWithFreshIds(
   document: WorkbenchDocumentV3,
   createId: WorkbenchIdFactory = kind => `${kind}-${browserSafeUuid()}`,
 ): WorkbenchDocumentV3 {
+  if (document.root.kind === 'area' && !document.root.areaId) return structuredClone(document)
   const sourceDocument = normalizeWorkbenchDocument(document)
   const occupied = new Set<string>()
   const allocate = uniqueIdAllocator(createId, occupied)
@@ -295,7 +298,9 @@ export function migrateDocumentV2ToV3(document: WorkbenchLayoutDocument): Workbe
     return {
       kind: 'area',
       areaId: node.id,
+      ...(node.project?.projectId ? { projectRestoreId: node.project.projectId } : {}),
       ...(node.projectSourceAreaId === undefined ? {} : { projectSourceAreaId: node.projectSourceAreaId }),
+      ...('projectRestoreId' in node && typeof node.projectRestoreId === 'string' ? { projectRestoreId: node.projectRestoreId } : {}),
       ...(node.activeTabId === undefined ? {} : { activeModuleInstanceId: node.activeTabId }),
       moduleHistory: node.tabs.map(convertModule),
     }
@@ -359,7 +364,7 @@ export function normalizeWorkbenchDocument(document: WorkbenchDocumentV3): Workb
       if (editorId === 'workbench.workspace-files') {
         const { binding: _binding, pendingBinding: _pending, bindingGeneration: _generation, sessionStates: _states, sessionStateOrder: _order, ...page } = module
         const state = page.state && typeof page.state === 'object' && !Array.isArray(page.state) ? page.state : {}
-        return { ...page, editorId, editorScope: 'root' as const, state: { ...state, projectAreaId: typeof state.projectAreaId === 'string' ? state.projectAreaId : node.areaId } }
+        return { ...page, editorId, editorScope: 'root' as const, state: typeof state.projectId === 'string' ? state : { ...state, projectAreaId: typeof state.projectAreaId === 'string' ? state.projectAreaId : node.areaId } }
       }
       // A root Start may retain one native Session during message preparation.
       // Preserve the exact binding on reopen; only its accepted first prompt
@@ -374,6 +379,7 @@ export function normalizeWorkbenchDocument(document: WorkbenchDocumentV3): Workb
     return {
       kind: 'area', areaId: node.areaId, moduleHistory,
       ...(node.projectSourceAreaId === undefined ? {} : { projectSourceAreaId: node.projectSourceAreaId }),
+      ...('projectRestoreId' in node && typeof node.projectRestoreId === 'string' ? { projectRestoreId: node.projectRestoreId } : {}),
       ...(activeModuleInstanceId === undefined ? {} : { activeModuleInstanceId }),
     }
   }
@@ -464,6 +470,7 @@ export function projectDocumentV3ToLayoutV2(document: WorkbenchDocumentV3, proje
       ...(projects === undefined ? {} : { projectRequired: true }),
       ...(projects?.[node.areaId] ? { project: structuredClone(projects[node.areaId]!) } : {}),
       ...(node.projectSourceAreaId === undefined ? {} : { projectSourceAreaId: node.projectSourceAreaId }),
+      ...('projectRestoreId' in node && typeof node.projectRestoreId === 'string' ? { projectRestoreId: node.projectRestoreId } : {}),
       ...(node.activeModuleInstanceId === undefined ? {} : { activeTabId: node.activeModuleInstanceId }),
       tabs: node.moduleHistory.map(convertModule),
     }
@@ -520,7 +527,7 @@ export function validateWorkbenchDocumentV3(value: unknown, options: { allowDeta
   const decodeNode = (candidate: unknown): WorkbenchNodeV3 | undefined => {
     if (!isRecord(candidate)) return undefined
     if (candidate.kind === 'area') {
-      if (typeof candidate.areaId !== 'string' || ids.has(candidate.areaId)
+      if (typeof candidate.areaId !== 'string' || (candidate.areaId === '' && (candidate !== value.root || value.activeAreaId !== '' || candidate.activeModuleInstanceId !== undefined || candidate.projectRestoreId !== undefined || candidate.projectSourceAreaId !== undefined || candidate.areaBinding !== undefined || !Array.isArray(candidate.moduleHistory) || candidate.moduleHistory.length !== 0)) || ids.has(candidate.areaId)
         || !Array.isArray(candidate.moduleHistory)) return undefined
       ids.add(candidate.areaId)
       const moduleHistory: ModuleInstanceDocument[] = []
@@ -541,10 +548,11 @@ export function validateWorkbenchDocumentV3(value: unknown, options: { allowDeta
       return {
         kind: 'area', areaId: candidate.areaId, moduleHistory,
         ...(typeof candidate.projectSourceAreaId === 'string' ? { projectSourceAreaId: candidate.projectSourceAreaId } : {}),
+        ...(typeof candidate.projectRestoreId === 'string' ? { projectRestoreId: candidate.projectRestoreId } : {}),
         ...(active === undefined ? {} : { activeModuleInstanceId: active }),
       }
     }
-    if (candidate.kind !== 'split' || typeof candidate.id !== 'string' || ids.has(candidate.id)
+    if (candidate.kind !== 'split' || typeof candidate.id !== 'string' || !candidate.id || ids.has(candidate.id)
       || (candidate.axis !== 'horizontal' && candidate.axis !== 'vertical')
       || typeof candidate.ratio !== 'number' || !Number.isFinite(candidate.ratio)) return undefined
     ids.add(candidate.id)
@@ -557,7 +565,9 @@ export function validateWorkbenchDocumentV3(value: unknown, options: { allowDeta
     }
   }
   const root = decodeNode(value.root)
-  if (root === undefined || !areasOf(root).some(area => area.areaId === value.activeAreaId)) return undefined
+  if (root === undefined) return undefined
+  if (root.kind === 'area' && root.areaId === '' && !root.moduleHistory.length && value.activeAreaId === '') return { version: 3, root, activeAreaId: '' }
+  if (!areasOf(root).some(area => area.areaId === value.activeAreaId) || areasOf(root).length === 0) return undefined
   return { version: 3, root, activeAreaId: value.activeAreaId }
 }
 

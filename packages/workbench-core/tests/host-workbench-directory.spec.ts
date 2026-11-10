@@ -112,9 +112,14 @@ it('allows closing an area after its Bay Agent execution ends, while blocking on
   await expect(f.directory.patch({ operation: 'set', path: ['workbenches', 'workbench-one'], value: hidden, expectedRevision: f.directory.getSnapshot().revision })).resolves.toMatchObject({ status: 'committed' })
   const record = f.directory.getSnapshot().value.workbenches['workbench-one']!
   expect(areasOf(record.document.root).map(area => area.areaId)).toEqual(['area-b'])
-  expect(record.areaProjects?.['area-a']?.relativePath).toBe('app')
-  await f.directory.showArea('workbench-one', 'area-a', f.directory.getSnapshot().revision)
-  expect(areasOf(f.directory.getSnapshot().value.workbenches['workbench-one']!.document.root).map(area => area.areaId)).toEqual(['area-b', 'area-a'])
+  expect(record.areaProjects?.['area-a']).toBeUndefined()
+  expect(record.areaDefinitions?.['area-a']).toBeUndefined()
+  const project = Object.values(record.projects!)[0]!
+  expect(project.relativePath).toBe('app')
+  const opened = await f.directory.openProject({ workbenchId: 'workbench-one', projectId: project.projectId, requestId: 'reopen', expectedRevision: f.directory.getSnapshot().revision })
+  expect(opened.status).toBe('committed')
+  const ids = areasOf(f.directory.getSnapshot().value.workbenches['workbench-one']!.document.root).map(area => area.areaId)
+  expect(ids).toHaveLength(2); expect(ids).not.toContain('area-a')
 })
 it('allows rebinding an empty area while retaining historical sessions on their original project', async () => {
   const f = await setup(); await f.directory.create(f.input)

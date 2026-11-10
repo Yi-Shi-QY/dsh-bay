@@ -11,6 +11,8 @@ export interface BayAgentWorkItemV1 {
   workItemId: string
   workbenchId: string
   areaId: string
+  projectId?: string
+  projectResolution?: 'unresolved'
   objective: string
   agentPreset?: string
   workspaceId?: string
@@ -28,6 +30,8 @@ export interface BayAgentAssignmentV1 {
   assignmentId: string
   workItemId: string
   areaId: string
+  projectId?: string
+  projectResolution?: 'unresolved'
   runtimeName: string
   runtimeAssignmentId?: string
   workerSessionId?: string
@@ -51,6 +55,8 @@ export interface BayAgentAttentionV1 {
   workItemId: string
   assignmentId?: string
   areaId: string
+  projectId?: string
+  projectResolution?: 'unresolved'
   kind: 'needs_input' | 'blocked' | 'failed' | 'decision'
   question: string
   status: 'open' | 'resolved' | 'dismissed'
@@ -446,11 +452,11 @@ export class BayAgentController implements BayAgentControllerV1 {
     return portableBayAgentOrchestrationFromState(this.state(this.options.workbenchId))
   }
   /** Record a context write outcome without copying the context value into the ledger. */
-  async recordContextPatch(input: { areaId?: string; expectedRevision: number; status: 'committed' | 'conflict'; actualRevision?: number; patchFields: readonly string[] }): Promise<void> {
+  async recordContextPatch(input: { projectId?: string; areaId?: string; expectedRevision: number; status: 'committed' | 'conflict'; actualRevision?: number; patchFields: readonly string[] }): Promise<void> {
     const workbenchId = this.options.workbenchId
     const event = this.recordEvent(workbenchId, input.status === 'committed' ? 'context.patch.committed' : 'context.patch.conflicted', {
-      ...(input.areaId ? { areaId: input.areaId } : {}), expectedRevision: input.expectedRevision, ...(input.actualRevision === undefined ? {} : { actualRevision: input.actualRevision }), patchFields: [...input.patchFields],
-    }, { source: 'bay-agent', idempotencyKey: `context:${input.areaId ?? 'workbench'}:${input.expectedRevision}:${input.status}:${input.patchFields.join(',')}` })
+      ...(input.projectId ? { projectId: input.projectId } : {}), ...(input.areaId ? { areaId: input.areaId } : {}), expectedRevision: input.expectedRevision, ...(input.actualRevision === undefined ? {} : { actualRevision: input.actualRevision }), patchFields: [...input.patchFields],
+    }, { source: 'bay-agent', idempotencyKey: `context:${input.projectId ?? input.areaId ?? 'workbench'}:${input.expectedRevision}:${input.status}:${input.patchFields.join(',')}` })
     try { await this.save(workbenchId) } catch (error) { if (event) this.removeEvent(event.eventId); throw error }
   }
   private hasEventKey(workbenchId: string, idempotencyKey: string): boolean {
@@ -497,7 +503,7 @@ export class BayAgentController implements BayAgentControllerV1 {
     const objective = input.objective.trim()
     if (!objective) throw new Error('objective-required')
     const at = this.now()
-    const item: BayAgentWorkItemV1 = { workItemId: this.createId('work-item'), workbenchId, areaId: input.areaId, objective,
+    const item: BayAgentWorkItemV1 = { workItemId: this.createId('work-item'), workbenchId, areaId: input.areaId, ...(snapshot.areas.find(row => row.areaId === input.areaId)?.project?.projectId ? { projectId: snapshot.areas.find(row => row.areaId === input.areaId)!.project!.projectId! } : {}), objective,
       ...(input.agentPreset ? { agentPreset: input.agentPreset } : {}), ...(input.workspaceId ? { workspaceId: input.workspaceId } : {}),
       ...(input.scope?.trim() ? { scope: input.scope.trim() } : {}), inputs: [...(input.inputs ?? [])], successCriteria: [...(input.successCriteria ?? [])],
       status: input.start ? 'queued' : 'proposed', createdAt: at, updatedAt: at }
@@ -517,13 +523,15 @@ export class BayAgentController implements BayAgentControllerV1 {
     try { return await operation } finally { this.starts.delete(workItemId) }
   }
   private async launch(item: BayAgentWorkItemV1): Promise<BayAgentAssignmentV1> {
+    if (item.projectId && !this.options.inspect(item.workbenchId).areas.some(area => area.project?.projectId === item.projectId && !area.archived)) throw new Error('请先在新区域打开此项目，再继续任务。')
+    if (item.projectResolution === 'unresolved') throw new Error('此历史任务的项目归属尚未确认，请先处理待整理记录。')
     const previousAssignment = this.latestAssignment(item)
     await this.ensureMainSession(item.workbenchId)
-    const lease = this.options.adapter.captureExecutionLease({ workbenchId: item.workbenchId, areaId: item.areaId })
-    const prompt = this.options.adapter.capturePrompt({ workbenchId: item.workbenchId, areaId: item.areaId, workItem: projectWorkItem(item) })
+    const lease = this.options.adapter.captureExecutionLease({ workbenchId: item.workbenchId, areaId: item.areaId, ...(item.projectId ? { projectId: item.projectId } : {}) })
+    const prompt = this.options.adapter.capturePrompt({ workbenchId: item.workbenchId, areaId: item.areaId, ...(item.projectId ? { projectId: item.projectId } : {}), workItem: projectWorkItem(item) })
     const assignmentId = this.createId('assignment')
-    const assignment: BayAgentAssignmentV1 = { assignmentId, runtimeAssignmentId: assignmentId, workItemId: item.workItemId, areaId: item.areaId, runtimeName: this.runtime.name, state: 'pending', createdAt: this.now(), lease }
-    const createdEvent = this.recordEvent(item.workbenchId, 'assignment.created', { assignmentId, workItemId: item.workItemId, areaId: item.areaId, runtimeName: this.runtime.name }, { idempotencyKey: `assignment.created:${assignmentId}` })
+    const assignment: BayAgentAssignmentV1 = { assignmentId, runtimeAssignmentId: assignmentId, workItemId: item.workItemId, areaId: item.areaId, ...(item.projectId ? { projectId: item.projectId } : {}), runtimeName: this.runtime.name, state: 'pending', createdAt: this.now(), lease }
+    const createdEvent = this.recordEvent(item.workbenchId, 'assignment.created', { assignmentId, workItemId: item.workItemId, areaId: item.areaId, ...(item.projectId ? { projectId: item.projectId } : {}), runtimeName: this.runtime.name }, { idempotencyKey: `assignment.created:${assignmentId}` })
     this.assignments.set(assignmentId, assignment)
     this.updateItem(item, { status: 'running', currentAssignmentId: assignmentId })
     try { await this.save(item.workbenchId) }
@@ -662,9 +670,9 @@ export class BayAgentController implements BayAgentControllerV1 {
       if (state === 'ready' && assignment.lease) {
         try {
           const result = await this.options.adapter.applyAreaAgentReport({ lease: assignment.lease, patch: { summary, completed: [summary] } })
-          if (result.status !== 'committed') this.addAttention(item, assignment, 'decision', 'Worker 已报告完成，但区域背景已变化，未覆盖当前背景，请复核。')
+          if (result.status !== 'committed') this.addAttention(item, assignment, 'decision', 'Worker 已报告完成，但项目背景已变化，未覆盖当前背景，请复核。')
         } catch {
-          this.addAttention(item, assignment, 'decision', 'Worker 报告已保留，区域背景暂未写回，请复核。')
+          this.addAttention(item, assignment, 'decision', 'Worker 报告已保留，项目背景暂未写回，请复核。')
         }
       }
       if (state === 'blocked' || state === 'failed') this.addAttention(item, assignment, state, event.type === 'assignment.report' && event.question || summary)
@@ -684,7 +692,7 @@ export class BayAgentController implements BayAgentControllerV1 {
   }
   private addAttention(item: BayAgentWorkItemV1, assignment: BayAgentAssignmentV1, kind: BayAgentAttentionV1['kind'], question: string): void {
     if ([...this.attention.values()].some(row => row.assignmentId === assignment.assignmentId && row.status === 'open' && row.kind === kind)) return
-    const row: BayAgentAttentionV1 = { attentionId: this.createId('attention'), workItemId: item.workItemId, assignmentId: assignment.assignmentId, areaId: item.areaId, kind, question, status: 'open', createdAt: this.now() }
+    const row: BayAgentAttentionV1 = { attentionId: this.createId('attention'), workItemId: item.workItemId, assignmentId: assignment.assignmentId, areaId: item.areaId, ...(item.projectId ? { projectId: item.projectId } : {}), kind, question, status: 'open', createdAt: this.now() }
     this.recordEvent(item.workbenchId, 'attention.opened', { attentionId: row.attentionId, workItemId: item.workItemId, assignmentId: assignment.assignmentId, kind, summary: question }, { idempotencyKey: `attention.opened:${row.attentionId}` })
     this.attention.set(row.attentionId, row)
   }

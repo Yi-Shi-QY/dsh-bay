@@ -7029,7 +7029,8 @@
 
 .areaTabOverviewTrigger:hover,
 .areaTabOverviewTrigger:focus-visible,
-.areaTabOverviewTrigger[aria-expanded='true'] {
+.areaTabOverviewTrigger[aria-expanded='true'],
+.areaTabOverviewTrigger[aria-pressed='true'] {
   color: var(--dsw-alias-label-primary);
   border-color: var(--dsw-alias-border-l2);
   background: var(--dsw-alias-interactive-bg-hover);
@@ -7047,6 +7048,18 @@
   font-size: 10px;
   font-weight: 650;
   line-height: 1;
+}
+
+.areaTabOverviewTrigger .areaTabOverviewLabel {
+  display: inline;
+  min-width: 0;
+  height: auto;
+  padding: 0;
+  border-radius: 0;
+  color: inherit;
+  background: transparent;
+  font-size: 11px;
+  font-weight: 500;
 }
 
 /* The overview belongs to the Area's fixed action group. It must stay at the
@@ -7655,7 +7668,8 @@
 
 .group[data-area-collapsed] .areaTabOverviewTrigger:hover,
 .group[data-area-collapsed] .areaTabOverviewTrigger:focus-visible,
-.group[data-area-collapsed] .areaTabOverviewTrigger[aria-expanded='true'] {
+.group[data-area-collapsed] .areaTabOverviewTrigger[aria-expanded='true'],
+.group[data-area-collapsed] .areaTabOverviewTrigger[aria-pressed='true'] {
   color: var(--dsw-alias-label-primary);
   background: var(--dsw-alias-interactive-bg-hover);
 }
@@ -7730,6 +7744,10 @@
   width: 15px;
   height: 15px;
   flex: 0 0 15px;
+}
+
+.group[data-area-collapsed] .areaActions .areaTabOverviewTrigger .areaTabOverviewLabel {
+  display: none;
 }
 
 .group[data-area-collapsed] .areaActions .areaTabOverviewTrigger .areaTabOverviewCount {
@@ -7825,6 +7843,7 @@
   .group:not([data-area-collapsed]) > .areaHeader .areaTabDetach,
   .group:not([data-area-collapsed]) > .areaHeader .areaTabOverviewCount { display: none; }
   .group:not([data-area-collapsed]) > .areaHeader .areaTabOverviewTrigger { width: 28px; min-width: 28px; padding: 0; }
+  .group:not([data-area-collapsed]) > .areaHeader .areaTabOverviewLabel { display: none; }
   .group:not([data-area-collapsed]) > .areaHeader .areaTabSelect { max-width: 120px; }
   .group:not([data-area-collapsed]) > .areaHeader .areaTab:not([data-active='true']) .editorGlyph { display: inline-flex; }
   .group:not([data-area-collapsed]) > .areaHeader .areaTab:not([data-active='true']) .areaTabStatusDot:not([data-conversation-status]) { display: none; }

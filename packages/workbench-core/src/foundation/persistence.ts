@@ -104,9 +104,13 @@ export interface WorkbenchAiSelectionV1 {
 /** One named, project-neutral visual Workbench. */
 export interface WorkbenchRecordV2 {
   /** V18 file authority. rootPath is a recipient-local projection, never portable. */
-  fileWorkbench?: { schemaVersion: 1; revision: number; rootPath?: string }
+  fileWorkbench?: { schemaVersion: 1 | 2; revision: number; rootPath?: string }
+  projectModelVersion?: 1
+  projects?: Record<string, import('../workbench-directory-contract.ts').WorkbenchProjectV1>
+  /** Migration provenance, never a live Area registry. */
+  projectMigration?: { areaProjects: Record<string, string[]>; unassignedContexts: Record<string, AreaContextV1> }
   areaProjects?: Record<string, import('../workbench-directory-contract.ts').AreaProjectV1>
-  /** Stable Areas survive closing views and merging their display into another Area. */
+  /** Legacy identity catalog; new writes contain visible Areas only. */
   areaDefinitions?: Record<string, { areaId: string }>
   sessionCatalog?: Record<string, import('../workbench-directory-contract.ts').WorkbenchSessionEntryV1>
   /** Imported work is inert until the human explicitly continues it. */
@@ -558,11 +562,12 @@ function decodeSettingsV4(value: unknown): WorkbenchSettingsV4 | undefined {
     const areaIds = [...new Set([...areasOf(normalizeWorkbenchDocument(document).root).map(area => area.areaId), ...Object.keys(isRecord(raw.areaDefinitions) ? raw.areaDefinitions : {})])]
     if ((raw.areaDefinitions !== undefined && (!isRecord(raw.areaDefinitions) || Object.entries(raw.areaDefinitions).some(([id, row]) => !isRecord(row) || row.areaId !== id)))
       || (raw.areaProjects !== undefined && (!isRecord(raw.areaProjects) || Object.entries(raw.areaProjects).some(([id, row]) => !areaIds.includes(id) || !isRecord(row) || typeof row.relativePath !== 'string' || !Number.isSafeInteger(row.generation) || Number(row.generation) < 1)))
-      || (raw.sessionCatalog !== undefined && (!isRecord(raw.sessionCatalog) || Object.entries(raw.sessionCatalog).some(([id, row]) => !isRecord(row) || row.sessionKey !== id || typeof row.relativePath !== 'string' || !['main', 'user', 'worker', 'subagent'].includes(String(row.role)) || (row.role !== 'main' && !(row.role === 'user' && row.areaId === undefined) && !areaIds.includes(String(row.areaId))))))
-      || (raw.fileWorkbench !== undefined && (!isRecord(raw.fileWorkbench) || raw.fileWorkbench.schemaVersion !== 1 || !Number.isSafeInteger(raw.fileWorkbench.revision)))
+      || (raw.sessionCatalog !== undefined && (!isRecord(raw.sessionCatalog) || Object.entries(raw.sessionCatalog).some(([id, row]) => !isRecord(row) || row.sessionKey !== id || typeof row.relativePath !== 'string' || !['main', 'user', 'worker', 'subagent'].includes(String(row.role)) || (row.role !== 'main' && !(row.role === 'user' && row.areaId === undefined) && !(raw.projectModelVersion === 1 && typeof row.projectId === 'string' && isRecord(raw.projects) && isRecord(raw.projects[row.projectId]) && (raw.projects[row.projectId] as Record<string, unknown>).relativePath === row.relativePath) && !areaIds.includes(String(row.areaId))))))
+      || (raw.fileWorkbench !== undefined && (!isRecord(raw.fileWorkbench) || ![1, 2].includes(Number(raw.fileWorkbench.schemaVersion)) || !Number.isSafeInteger(raw.fileWorkbench.revision)))
       || (raw.executionPaused !== undefined && typeof raw.executionPaused !== 'boolean')) {
       invalidWorkbenches[key] = retainedInvalid(key, raw); continue
     }
+    if ((raw.projectModelVersion !== undefined && raw.projectModelVersion !== 1) || (raw.projectModelVersion === 1 && (!isRecord(raw.projects) || Object.entries(raw.projects).some(([id, row]) => !isRecord(row) || row.projectId !== id || typeof row.relativePath !== 'string' || typeof row.name !== 'string' || !Number.isSafeInteger(row.generation))))) { invalidWorkbenches[key] = retainedInvalid(key, raw); continue }
     const areaContexts = raw.areaContexts === undefined ? undefined : decodeAreaContexts(raw.areaContexts, areaIds)
     const areaMetadata = raw.areaMetadata === undefined ? undefined : decodeAreaMetadata(raw.areaMetadata, areaIds)
     if ((raw.context !== undefined && context === undefined) || (raw.areaContexts !== undefined && areaContexts === undefined)
@@ -576,6 +581,7 @@ function decodeSettingsV4(value: unknown): WorkbenchSettingsV4 | undefined {
     workbenches[key] = {
       workbenchId: key, name: raw.name, description: raw.description,
       document: normalized, createdAt: raw.createdAt, updatedAt: raw.updatedAt,
+      ...(raw.projectModelVersion === 1 ? { projectModelVersion: 1 as const, projects: structuredClone(raw.projects) as NonNullable<WorkbenchRecordV2['projects']>, ...(raw.projectMigration ? { projectMigration: structuredClone(raw.projectMigration) as NonNullable<WorkbenchRecordV2['projectMigration']> } : {}) } : {}),
       ...(raw.areaDefinitions === undefined ? {} : { areaDefinitions: structuredClone(raw.areaDefinitions) as NonNullable<WorkbenchRecordV2['areaDefinitions']> }),
       ...(raw.areaProjects === undefined ? {} : { areaProjects: structuredClone(raw.areaProjects) as NonNullable<WorkbenchRecordV2['areaProjects']> }),
       ...(raw.sessionCatalog === undefined ? {} : { sessionCatalog: structuredClone(raw.sessionCatalog) as NonNullable<WorkbenchRecordV2['sessionCatalog']> }),

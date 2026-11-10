@@ -24,7 +24,7 @@ it('selects independently from opening and pinning, drills into saved areas, and
   fireEvent.click(view.getByRole('button', { name: '打开工作台', exact: true }))
   await waitFor(() => expect(open).toHaveBeenCalledExactlyOnceWith('b'))
   fireEvent.click(view.getByRole('button', { name: /查看区域/ }))
-  expect(view.getByRole('tab', { name: '区域与内页' }).getAttribute('aria-selected')).toBe('true')
+  expect(view.getByRole('tab', { name: '项目与区域' }).getAttribute('aria-selected')).toBe('true')
   expect(view.getByText('私密对话')).toBeDefined()
   fireEvent.click(view.getByRole('tab', { name: '背景与记忆' }))
   expect(directory.memoryRequest).not.toHaveBeenCalled()

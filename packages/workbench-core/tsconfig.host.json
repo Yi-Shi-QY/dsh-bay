@@ -11,6 +11,7 @@
     "src/*.ts",
     "src/foundation/model.ts",
     "src/foundation/area-identity.ts",
+    "src/foundation/project-identity.ts",
     "src/foundation/document-v3.ts",
     "src/foundation/persistence.ts",
     "src/foundation/catalog.ts",

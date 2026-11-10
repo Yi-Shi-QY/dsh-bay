@@ -1,3 +1,4 @@
+import { upgradeTaskProjects } from './host-workbench-task-projects.ts'
 import type { BayAgentWorkStateV1 } from './foundation/workbench-bay-agent-work.ts'
 import type { WorkbenchRecordV2 } from './foundation/persistence.ts'
 import { workbenchAreas } from './foundation/area-identity.ts'
@@ -57,15 +58,15 @@ function validate(snapshot: CompleteTaskSnapshot, record: WorkbenchRecordV2) {
   const assignments = new Map(state.assignments.map(row => [row.assignmentId, row]))
   if (tasks.size !== state.workItems.length || assignments.size !== state.assignments.length || new Set(state.attention.map(row => row.attentionId)).size !== state.attention.length) throw new Error('任务快照含重复身份。')
   for (const item of state.workItems) {
-    if (item.workbenchId !== snapshot.workbenchId || !areas.has(item.areaId) || !record.areaProjects?.[item.areaId]
+    if (item.workbenchId !== snapshot.workbenchId || (record.projectModelVersion ? item.projectResolution !== 'unresolved' && (!item.projectId || !record.projects?.[item.projectId]) : !areas.has(item.areaId) || !record.areaProjects?.[item.areaId])
       || (item.currentAssignmentId && assignments.get(item.currentAssignmentId)?.workItemId !== item.workItemId)) throw new Error('任务的区域或执行引用缺失：' + item.workItemId)
   }
   for (const row of state.assignments) {
     const item = tasks.get(row.workItemId)
-    if (!item || item.areaId !== row.areaId) throw new Error('执行记录的任务归属无效：' + row.assignmentId)
+    if (!item || (item.projectId ? item.projectId !== row.projectId : item.areaId !== row.areaId)) throw new Error('执行记录的任务归属无效：' + row.assignmentId)
     if (row.runtimeName !== 'dsh-session-controller') throw new Error('此 Worker Runtime 尚未提供完整任务迁移适配器：' + row.runtimeName)
     const session = row.workerSessionId ?? row.sessionId
-    if (session && record.sessionCatalog?.[session]?.areaId !== item.areaId) throw new Error('任务的原对话缺失或归属不匹配：' + row.assignmentId)
+    if (session && (!record.sessionCatalog?.[session] || (item.projectId ? record.sessionCatalog[session]?.projectId !== item.projectId : record.sessionCatalog[session]?.areaId !== item.areaId))) throw new Error('任务的原对话缺失或归属不匹配：' + row.assignmentId)
   }
   for (const row of state.attention) if (!tasks.has(row.workItemId) || tasks.get(row.workItemId)!.areaId !== row.areaId || (row.assignmentId && assignments.get(row.assignmentId)?.workItemId !== row.workItemId)) throw new Error('Attention 引用无效：' + row.attentionId)
   let seq = state.checkpoint?.compactedThroughSeq ?? 0
@@ -97,7 +98,7 @@ function references(value: unknown, sessions: Readonly<Record<string, string>>, 
 export function exportTaskSnapshot(record: WorkbenchRecordV2, state: BayAgentWorkStateV1, sessionKeys: Record<string, string>): CompleteTaskSnapshot {
   const inverse = Object.fromEntries(Object.entries(sessionKeys).map(([key, id]) => [id, key]))
   const snapshot: CompleteTaskSnapshot = { version: 1, kind: 'workbench-task-snapshot', workbenchId: record.workbenchId,
-    state: references(state, inverse, record.workbenchId) as BayAgentWorkStateV1 }
+    state: upgradeTaskProjects(record, references(state, inverse, record.workbenchId) as BayAgentWorkStateV1) }
   validate(snapshot, record)
   return snapshot
 }
@@ -115,7 +116,7 @@ export function restoreTaskSnapshot(snapshot: CompleteTaskSnapshot, record: Work
     if (assignment.state !== 'ended') {
       assignment.state = 'ended'; assignment.endedAt = now
       state.attention.push({ attentionId: 'import-' + assignment.assignmentId, workItemId: assignment.workItemId, assignmentId: assignment.assignmentId,
-        areaId: assignment.areaId, kind: 'decision', status: 'open', question: '此任务从完整包恢复，原执行已停止。请核对结果后继续原任务。', createdAt: now })
+        areaId: assignment.areaId, ...(assignment.projectId ? { projectId: assignment.projectId } : {}), kind: 'decision', status: 'open', question: '此任务从完整包恢复，原执行已停止。请核对结果后继续原任务。', createdAt: now })
     }
   }
   return state

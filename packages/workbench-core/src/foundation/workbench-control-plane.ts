@@ -1,3 +1,4 @@
+import { projectContextForArea, projectForArea, projectForPath } from './project-identity.ts'
 import { browserSafeUuid } from '../browser-safe-id.ts'
 import { areasOf, normalizeWorkbenchDocument, type AreaNode, type ModuleInstanceDocument, type WorkbenchNodeV3 } from './document-v3.ts'
 import type { SessionBindingV1 } from './model.ts'
@@ -93,6 +94,7 @@ export interface WorkbenchControlPlaneSnapshotV1 {
   description: string
   context: WorkbenchContextV1
   bayAgentSession?: WorkbenchBayAgentSessionV1
+  projects?: readonly import('../workbench-directory-contract.ts').WorkbenchProjectV1[]
   areas: readonly WorkbenchControlPlaneAreaV1[]
   sessions?: readonly (import('../workbench-directory-contract.ts').WorkbenchSessionEntryV1 & { sessionId: string; workspaceId?: string })[]
 }
@@ -100,6 +102,7 @@ export interface WorkbenchControlPlaneSnapshotV1 {
 export type WorkbenchControlPlaneReadContext =
   | { scope: 'workbench'; workbenchId?: string }
   | { scope: 'area'; workbenchId?: string; areaId: string }
+  | { scope: 'project'; workbenchId?: string; projectId: string }
 
 export type WorkbenchControlPlaneWriteResult<T> =
   | { status: 'committed'; value: T; settingsRevision: number }
@@ -199,9 +202,10 @@ export class WorkbenchControlPlane {
       description: record.description,
       context: workbenchContextOf(record.context),
       ...(record.bayAgentSession === undefined ? {} : { bayAgentSession: structuredClone(record.bayAgentSession) }),
+      ...(record.projects ? { projects: structuredClone(Object.values(record.projects)) } : {}),
       areas: workbenchAreas(record).map(area => this.projectArea(record, area)),
       ...(record.sessionCatalog === undefined ? {} : { sessions: Object.values(record.sessionCatalog).map(entry => ({ ...entry, sessionId: entry.sessionId ?? entry.sessionKey,
-        ...(entry.areaId && record.areaProjects?.[entry.areaId]?.workspaceId ? { workspaceId: record.areaProjects[entry.areaId]!.workspaceId! } : {}) })) }),
+        ...(projectForPath(record, entry.relativePath)?.workspaceId ? { workspaceId: projectForPath(record, entry.relativePath)!.workspaceId! } : entry.areaId && record.areaProjects?.[entry.areaId]?.workspaceId ? { workspaceId: record.areaProjects[entry.areaId]!.workspaceId! } : {}) })) }),
     }
   }
 
@@ -218,14 +222,16 @@ export class WorkbenchControlPlane {
   readContext(input: WorkbenchControlPlaneReadContext): WorkbenchContextV1 | AreaContextV1 {
     const { record } = this.readRecord(input.workbenchId)
     if (input.scope === 'workbench') return workbenchContextOf(record.context)
+    if (input.scope === 'project') { const project = record.projects?.[input.projectId]; if (!project) throw new Error('项目不存在。'); return areaContextOf(project.context) }
     if (!workbenchAreas(record).some(area => area.areaId === input.areaId)) {
       throw controlPlaneError('area-not-found', `Unknown Area ${input.areaId}`)
     }
-    return areaContextOf(record.areaContexts?.[input.areaId])
+    return projectContextForArea(record, input.areaId)
   }
 
   async patchContext(input: {
-    scope: 'workbench' | 'area'
+    scope: 'workbench' | 'area' | 'project'
+    projectId?: string
     workbenchId?: string
     areaId?: string
     writer: WorkbenchContextWriter
@@ -250,18 +256,16 @@ export class WorkbenchControlPlane {
           ? settingsConflict(saved.actualRevision)
           : saved
     }
-    if (input.areaId === undefined) return { status: 'rejected', reason: 'invalid-input' }
-    const area = workbenchAreas(record).find(candidate => candidate.areaId === input.areaId)
-    if (area === undefined) return { status: 'rejected', reason: 'area-not-found' }
-    const source = areaContextOf(record.areaContexts?.[input.areaId])
+    const project = input.scope === 'project' ? record.projects?.[input.projectId ?? ''] : input.areaId ? projectForArea(record, input.areaId) : undefined
+    if (!project && (record.projectModelVersion || input.areaId === undefined || !workbenchAreas(record).some(area => area.areaId === input.areaId))) return { status: 'rejected', reason: 'area-not-found' }
+    const source = project ? areaContextOf(project.context) : areaContextOf(record.areaContexts?.[input.areaId!])
     const result = input.section === 'human'
       ? patchAreaContext(source, this.contextOptions<'human'>(input))
       : patchAreaContext(source, this.contextOptions<'agent'>(input))
     if (result.status !== 'committed') return contextWriteFailure(result)
-    const saved = await this.commitRecord(snapshot.revision, record, {
-      ...record,
-      areaContexts: { ...(record.areaContexts ?? {}), [input.areaId]: result.context },
-    })
+    const saved = await this.commitRecord(snapshot.revision, record, project ? {
+      ...record, projects: { ...record.projects, [project.projectId]: { ...project, context: result.context } },
+    } : { ...record, areaContexts: { ...(record.areaContexts ?? {}), [input.areaId!]: result.context } })
     return saved.status === 'committed'
       ? { status: 'committed', value: result.context, settingsRevision: saved.revision }
       : saved.status === 'conflict'
@@ -289,13 +293,10 @@ export class WorkbenchControlPlane {
       ...record,
       document: normalizeWorkbenchDocument({
         version: 3,
-        root: { kind: 'split', id: splitId, axis: 'horizontal', ratio: 0.5, first: record.document.root, second: area },
+        root: areasOf(record.document.root).length ? { kind: 'split', id: splitId, axis: 'horizontal', ratio: 0.5, first: record.document.root, second: area } : area,
         activeAreaId: areaId,
       }),
-      areaContexts: {
-        ...(record.areaContexts ?? {}),
-        [areaId]: areaContextWithObjective(input.objective),
-      },
+      ...(record.projectModelVersion ? {} : { areaContexts: { ...(record.areaContexts ?? {}), [areaId]: areaContextWithObjective(input.objective) } }),
       areaMetadata: {
         ...(record.areaMetadata ?? {}),
         [areaId]: {
@@ -466,7 +467,7 @@ export class WorkbenchControlPlane {
       visible: areasOf(record.document.root).some(row => row.areaId === area.areaId),
       generation: record.areaProjects?.[area.areaId]?.generation ?? 0,
       ...(record.areaProjects?.[area.areaId] ? { project: structuredClone(record.areaProjects[area.areaId]!) } : {}),
-      context: areaContextOf(record.areaContexts?.[area.areaId]),
+      context: projectContextForArea(record, area.areaId),
       modules: area.moduleHistory.map(module => ({
         moduleInstanceId: module.moduleInstanceId, editorId: module.editorId, scope: module.editorScope,
         title: module.lastKnownTitle, available: this.options.editors?.getSnapshot().some(editor => editor.id === module.editorId && editor.scope === module.editorScope) ?? true,

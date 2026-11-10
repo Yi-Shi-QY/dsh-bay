@@ -37,6 +37,7 @@ describe('Area content projection', () => {
     { editorId: 'workbench.files' },
     { sessionId: 'session-b' },
     { workspaceId: 'workspace-b' },
+    { projectId: 'project-b' },
     { bindingGeneration: 5 },
     { state: { draft: 'changed' } },
     { availability: 'missing' as const },

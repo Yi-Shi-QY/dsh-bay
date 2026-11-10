@@ -270,7 +270,7 @@ describe('settings product interactions', () => {
     expect(view.queryByRole('button', { name: 'DSH 插件管理' })).toBeNull()
     fireEvent.click(view.getByRole('tab', { name: '背景 AI' }))
     expect(view.getByLabelText('工作台背景提示词')).toBeTruthy()
-    expect(view.getByLabelText('区域背景提示词')).toBeTruthy()
+    expect(view.getByLabelText('项目背景提示词')).toBeTruthy()
     expect(view.queryByLabelText('新建工作台提示词')).toBeNull()
     expect(view.queryByLabelText('显示区域容器标签色框')).toBeNull()
   })

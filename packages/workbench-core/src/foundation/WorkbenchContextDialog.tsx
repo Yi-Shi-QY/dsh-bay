@@ -41,7 +41,7 @@ export function WorkbenchContextDialog({
   }
   const assist = async () => {
     if (generateDraft === undefined) { setError('当前环境未连接 DSH 原生 AI 服务。'); return }
-    setBusy(true); setError(undefined); setNotice(areaId === undefined ? '正在根据工作台简介、全部区域和内页生成背景草稿…' : '正在根据当前区域的全部内页生成背景草稿…')
+    setBusy(true); setError(undefined); setNotice(areaId === undefined ? '正在根据工作台简介、项目、区域和内页生成背景草稿…' : '正在根据此项目各区域的内页生成背景草稿…')
     try {
       const draft = await generateDraft(areaId === undefined
         ? { workbenchId, scope: 'workbench', currentValue: value }

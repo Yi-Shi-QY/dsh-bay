@@ -1,7 +1,7 @@
 import type { SessionController } from '@deepseek-ai/dsh-api-session-controller'
 import { randomUUID } from 'node:crypto'
 import type { BayAgentAssignmentV1, BayAgentWorkerRuntimeEventEnvelopeV1, BayAgentWorkerRuntimeEventV1, BayAgentWorkerRuntimeV1, BayAgentWorkItemV1 } from './foundation/workbench-bay-agent-work.ts'
-import { WorkbenchBayAgentAdapter } from './foundation/workbench-bay-agent-adapter.ts'
+import { WorkbenchBayAgentAdapter, projectExecutionTarget } from './foundation/workbench-bay-agent-adapter.ts'
 import type { WorkbenchControlPlane } from './foundation/workbench-control-plane.ts'
 
 export class NativeBayWorkerRuntime implements BayAgentWorkerRuntimeV1 {
@@ -31,12 +31,13 @@ export class NativeBayWorkerRuntime implements BayAgentWorkerRuntimeV1 {
     if (!input.assignment) throw new Error('Bay Assignment identity required')
     const { workItem: item, assignment } = input
     const snapshot = this.options.plane.inspect(item.workbenchId)
-    const area = snapshot.areas.find(row => row.areaId === item.areaId)
+    const area = item.projectId ? projectExecutionTarget(snapshot, item.projectId, item.areaId) : snapshot.areas.find(row => row.areaId === item.areaId)
+    if (item.projectResolution === 'unresolved' || item.projectId && !area?.visible) throw new Error('请先在新区域打开此项目，再继续任务。')
     const workspaceId = area?.project?.workspaceId ?? item.workspaceId ?? area?.binding?.workspaceId ?? area?.modules.find(row => row.binding?.workspaceId)?.binding?.workspaceId
     if (!workspaceId) throw new Error('请先为任务选择一个项目（Workspace）。')
     const previous = input.previousAssignment
     const priorPage = previous?.workerSessionId ? snapshot.areas.flatMap(row => row.modules).find(row => row.binding?.sessionId === previous.workerSessionId && row.binding?.workspaceId === workspaceId) : undefined
-    const priorSession = snapshot.sessions?.find(row => row.sessionId === previous?.workerSessionId && row.areaId === item.areaId && row.workspaceId === workspaceId && row.agentPreset === (item.agentPreset ?? 'standard'))
+    const priorSession = snapshot.sessions?.find(row => row.sessionId === previous?.workerSessionId && (item.projectId ? row.projectId === item.projectId : row.areaId === item.areaId) && row.workspaceId === workspaceId && row.agentPreset === (item.agentPreset ?? 'standard'))
     const priorTarget = priorSession ? { sessionId: priorSession.sessionId, workspaceId } : snapshot.sessions === undefined ? priorPage?.binding : undefined
     let reused: { target: { sessionId: string; workspaceId?: string }; moduleInstanceId: string } | undefined
     if (priorTarget) {
@@ -46,21 +47,21 @@ export class NativeBayWorkerRuntime implements BayAgentWorkerRuntimeV1 {
         if (state.running || state.queue?.length) throw new Error('原任务对话仍在执行，请等待当前轮次结束后继续。')
         if (priorPage) reused = { target: priorTarget, moduleInstanceId: priorPage.moduleInstanceId }
         else {
-          const opened = await this.options.plane.openSessionView({ workbenchId: item.workbenchId, areaId: item.areaId, target: priorTarget, title: item.objective })
+          const opened = await this.options.plane.openSessionView({ workbenchId: item.workbenchId, areaId: area?.areaId ?? item.areaId, target: priorTarget, title: item.objective })
           if (opened.status !== 'committed') throw new Error('无法重新打开任务对话，请重试。')
           reused = opened.value
         }
       } else if (resolved.error.code !== 'session/not-found') throw resolved.error
     }
     if (!reused) {
-      const request = { workbenchId: item.workbenchId, areaId: item.areaId, workspaceId, agentPreset: item.agentPreset ?? 'standard', title: item.objective, requestId: assignment.assignmentId, append: true }
+      const request = { workbenchId: item.workbenchId, areaId: area?.areaId ?? item.areaId, workspaceId, agentPreset: item.agentPreset ?? 'standard', title: item.objective, requestId: assignment.assignmentId, append: true }
       let created = await this.options.plane.createSession(request)
       for (let attempt = 0; created.status === 'conflict' && attempt < 3; attempt++) created = await this.options.plane.createSession(request)
       if (created.status !== 'committed') throw new Error('Worker 内页创建失败：' + JSON.stringify(created))
       reused = created.value
     }
     const { target, moduleInstanceId } = reused
-    const lease = { ...new WorkbenchBayAgentAdapter(this.options.plane).captureExecutionLease({ workbenchId: item.workbenchId, areaId: item.areaId }), moduleInstanceId, sessionId: target.sessionId }
+    const lease = { ...new WorkbenchBayAgentAdapter(this.options.plane).captureExecutionLease({ workbenchId: item.workbenchId, areaId: area?.areaId ?? item.areaId, ...(item.projectId ? { projectId: item.projectId } : {}) }), moduleInstanceId, sessionId: target.sessionId }
     const result = { runtimeAssignmentId: assignment.assignmentId, sessionId: target.sessionId, moduleInstanceId, lease }
     await input.onPrepared?.(result)
     const prepared = { ...assignment, ...result, workerSessionId: target.sessionId }
@@ -118,9 +119,9 @@ export class NativeBayWorkerRuntime implements BayAgentWorkerRuntimeV1 {
     }
   }
   private assertTarget(item: BayAgentWorkItemV1, assignment: BayAgentAssignmentV1) {
-    const snapshot = this.options.plane.inspect(item.workbenchId), area = snapshot.areas.find(row => row.areaId === item.areaId)
+    const snapshot = this.options.plane.inspect(item.workbenchId), area = item.projectId ? projectExecutionTarget(snapshot, item.projectId, item.areaId) : snapshot.areas.find(row => row.areaId === item.areaId)
     if (!area || area.archived || assignment.lease?.projectGeneration !== area.project?.generation) throw new Error('Worker project changed')
-    if (snapshot.sessions !== undefined && !snapshot.sessions.some(row => row.sessionId === assignment.workerSessionId && row.areaId === item.areaId && row.workspaceId === area.project?.workspaceId)) throw new Error('Worker conversation ownership changed')
+    if (snapshot.sessions !== undefined && !snapshot.sessions.some(row => row.sessionId === assignment.workerSessionId && (item.projectId ? row.projectId === item.projectId : row.areaId === item.areaId) && row.workspaceId === area.project?.workspaceId)) throw new Error('Worker conversation ownership changed')
   }
   finish(id: string) { this.workers.get(id)?.controller.abort(); this.workers.delete(id) }
   async cancelWorkbench(workbenchId: string) { for (const [id, row] of this.workers) if (row.workItem.workbenchId === workbenchId) await this.cancelAssignment({ runtimeAssignmentId: id }) }

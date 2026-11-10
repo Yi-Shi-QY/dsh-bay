@@ -6,11 +6,10 @@ import type { WorkbenchCoreSettingsSectionProps } from './WorkbenchCoreSettingsS
 import type { WorkbenchCoreSettingsPage } from './WorkbenchCoreSettingsDialog.tsx'
 import type { WorkbenchDirectory } from './frame-settings-adapter.ts'
 import { DESKTOP_SETTINGS_CONTEXT, type SettingsViewMemory, type WorkbenchSettingsOpenOptionsV1 } from './settings-context.ts'
-import { WorkbenchCompletePackagePanel } from './WorkbenchCompletePackagePanel.tsx'
 import { WorkbenchHome } from './WorkbenchHome.tsx'
 import { WorkbenchHomeNavigation } from './WorkbenchHomeNavigation.tsx'
 import { WorkbenchManagementPage, UnsavedFormPrompt, type PendingSettingsForm } from './WorkbenchSettingsPages.tsx'
-import { WorkbenchDistributionPage } from './WorkbenchDistributionPage.tsx'
+import { WorkbenchSharingPage } from './WorkbenchSharingPage.tsx'
 import { WorkbenchLayoutSharingPage } from './WorkbenchLayoutSharingPage.tsx'
 import css from './WorkbenchHome.module.css'
 import pageCss from './WorkbenchSettings.module.css'
@@ -82,7 +81,7 @@ export function WorkbenchHomeCenter(props: WorkbenchHomeCenterProps) {
       <div className={css.centerContent + ' ' + pageCss.settingsRoot} style={{ height: 'auto' }}>
         {snapshot.status !== 'ready' ? <p role="alert">工作台连接暂不可用，当前资料已保留。请恢复连接后重试。</p> : null}
         {section === 'workbenches' ? <WorkbenchManagementPage key={destination?.workbenchId ?? 'list'} {...pageProps} />
-          : props.distributionPackage ? <>{props.directory.completeRequest ? <WorkbenchCompletePackagePanel workbenchId={destination?.workbenchId ?? snapshot.value?.activeWorkbenchId ?? ''} {...(props.directory.pickParentDirectory ? { pickParentDirectory: props.directory.pickParentDirectory } : {})} /> : null}<WorkbenchDistributionPage key={destination?.shareMode + ':' + destination?.workbenchId} {...pageProps} distributionPackage={props.distributionPackage} /></>
+          : props.distributionPackage ? <WorkbenchSharingPage key={destination?.shareMode + ':' + destination?.shareType + ':' + destination?.workbenchId} {...pageProps} distributionPackage={props.distributionPackage} />
             : <WorkbenchLayoutSharingPage key={destination?.shareMode + ':' + destination?.workbenchId} {...pageProps} />}
       </div>
     </main> : <WorkbenchHome value={snapshot.value ?? lastValue.current} directory={props.directory} editors={editors} navigate={navigate} {...(props.windowController ? { windowController: props.windowController } : {})} onOpenWorkbench={openWorkbench} onCreated={props.onCreated} {...(props.generateContextDraft === undefined ? {} : { generateContextDraft: props.generateContextDraft })} />}

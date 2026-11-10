@@ -4,7 +4,7 @@ import type { SettingsPageProps } from './WorkbenchSettingsPages.tsx'
 import { BACKGROUND_AI_SCOPES, DEFAULT_BACKGROUND_AI_PREFERENCES, backgroundAiPreferencesOf, decodeBackgroundAiPreferences, type BackgroundAiPreferencesV1, type BackgroundAiScope } from './background-ai-preferences.ts'
 import css from './WorkbenchSettings.module.css'
 
-const LABELS: Record<BackgroundAiScope, string> = { create: '新建工作台', workbench: '工作台背景', area: '区域背景' }
+const LABELS: Record<BackgroundAiScope, string> = { create: '新建工作台', workbench: '工作台背景', area: '项目背景' }
 const SOURCES: Record<BackgroundAiScope, string> = {
   create: '自动附加当前填写的名称、简介和草稿。',
   workbench: '自动附加工作台名称、简介、全部区域及其内页清单和当前草稿。',
@@ -63,7 +63,7 @@ export function WorkbenchBackgroundAiSettings(props: Pick<SettingsPageProps, 'va
   const effort = effective?.reasoningEffort ?? effectiveModel?.reasoning?.defaultEffort
   const restorePrompt = (scope: BackgroundAiScope) => edit({ ...value, prompts: { ...value.prompts, [scope]: DEFAULT_BACKGROUND_AI_PREFERENCES.prompts[scope] } })
   return <section className={css.backgroundAi} aria-label="背景 AI 辅助填写">
-    <div className={css.sectionHeader}><div><h4>背景 AI 辅助填写</h4><p>{browser ? '保存为当前工作台的专属配置，随完整工作台包迁移。用于工作台与区域背景生成；新建工作台仍使用主机默认配置。' : '主机默认配置用于新建工作台，以及未设置专属配置的工作台和区域。三个入口分别使用各自的提示词。'}独立生成草稿，不进入 Bay Agent 主会话。</p></div></div>
+    <div className={css.sectionHeader}><div><h4>背景 AI 辅助填写</h4><p>{browser ? '保存为当前工作台的专属配置，随完整工作台包迁移。用于工作台与项目背景生成；新建工作台仍使用主机默认配置。' : '主机默认配置用于新建工作台，以及未设置专属配置的工作台和项目。三个入口分别使用各自的提示词。'}独立生成草稿，不进入 Bay Agent 主会话。</p></div></div>
     <fieldset disabled={!writable || busy}>
       <div className={css.backgroundAiModels}>
         <label>模型供应商<select aria-label="背景生成模型供应商" value={value.selection?.provider ?? ''} onChange={event => {

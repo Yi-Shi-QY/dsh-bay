@@ -772,7 +772,7 @@ export interface WorkbenchOfficialAreaEditorSetV1 {
 export function createWorkbenchOfficialAreaEditors(ctx: Context): WorkbenchOfficialAreaEditorSetV1 {
   const conversation = createWorkbenchNativeConversationEditors(ctx)
   return {
-    files: owner => <ProjectFilesEditor workbenchId={owner.workbenchId} areaId={typeof (owner.state as { projectAreaId?: unknown } | undefined)?.projectAreaId === 'string' ? (owner.state as { projectAreaId: string }).projectAreaId : owner.areaId} />,
+    files: owner => <ProjectFilesEditor projectId={typeof (owner.state as { projectId?: unknown } | undefined)?.projectId === 'string' ? (owner.state as { projectId: string }).projectId : undefined} workbenchId={owner.workbenchId} areaId={typeof (owner.state as { projectAreaId?: unknown } | undefined)?.projectAreaId === 'string' ? (owner.state as { projectAreaId: string }).projectAreaId : owner.areaId} />,
     terminal: owner => <NativeSidebarAreaEditor
       key={`${owner.instanceId}:${owner.sessionId}:${owner.runtimeIdentity ? owner.bindingGeneration : owner.areaClaim}`}
       owner={owner}
