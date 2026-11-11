@@ -1,5 +1,7 @@
 # DSH ecosystem reference
 
+> 归档日期：2026-11-11。本文保留历史设计与证据，正文状态只代表原记录时点。现行规则见[当前说明](../../PRODUCT-DIRECTION.zh-CN.md)；归档原因见[归档索引](../README.md)。原文内容保留，相对链接已修正。
+
 DSH Bay follows the repository conventions that make popular DSH projects
 easy to understand and install. The references below were checked on
 2026-11-04. They are product and documentation references only; DSH Bay does

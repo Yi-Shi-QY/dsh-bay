@@ -1,6 +1,6 @@
 # Workbench 容器内页扩展插件开发规范
 
-更新时间：2026-11-10
+更新时间：2026-11-11（文档与引用复核；未改变接口版本）
 规范版本：1.1
 适用基线：Workbench Core `0.2.2-alpha.18.0`、DSH `0.2.2-rc.1`（commit `66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db`）
 状态：**Core 接口与自动化合同说明；正式桌面扩展生命周期验收仍未完成**
@@ -290,7 +290,7 @@ Portability descriptor 是运行时函数，不会序列化进包。descriptor �
 
 | 内容 | 扩展分发制品 | 完整工作台包 V5 |
 |---|---|---|
-| 扩展 `package.json`、Client/Host 入口、Bundle patch、许可证 | 必须由 `distribution.runtimeFiles` 精确列出 | 作为可验证依赖制品嵌入 `offline-embedded` 包 |
+| 扩展 `package.json`、Client/Host 入口、Bundle patch、许可证 | 必须由 `distribution.runtimeFiles` 精确列出 | 作为可验证扩展依赖制品随 V5 恢复；制品沿用离线嵌入收集规则 |
 | 内页的受限 JSON 状态 | 由 `portability.exportState/importState` 转换 | 随布局和内页引用恢复 |
 | 工作台根目录、区域项目文件和空目录 | 不包含 | 包含全部工作文件，按导出排除项报告处理 |
 | 原生 Session、附件和子会话 | 不包含 | 由 Host 的原生 Session 迁移适配器收集和恢复 |
@@ -442,7 +442,7 @@ DSH Plugin Manager 安装标准插件包
 | 显示 `incompatible` | `coreCompatibility` 和 `dshGeneration` 与实际运行版本 | 针对锁定版本构建兼容声明；不要把范围字符串当成当前已支持的范围表达式 |
 | 显示未允许或需重新确认 | Workbench consent 是否存在、合同 fingerprint 是否变化 | 在 Workbench 设置中明确允许/重新确认；这不会替代 DSH 启用 |
 | 扩展已允许但添加菜单没有内页 | 每个实际 Slot 是否注册、runtime extension ID 集是否完整、Slot `scope` 是否对应 | 查 editor catalog、DSH Slot ledger 与声明集；不要仅检查 package.json |
-| 内页显示 pending | 声明要求的精确 Workspace/Session 是否由该 Area 绑定 | 由 Core 的绑定动作完成；不要通过全局 Session 猜测 |
+| 内页显示 pending | 声明要求的精确 Workspace/Session 是否由该内页 owner 提供 | 由 Core 的绑定动作完成；不要通过全局 Session 或同区域第一张标签猜测 |
 | 状态超限导致内页不挂载 | 保存 JSON 的编码大小是否超过声明 `maxBytes` | 先备份/检查状态，再使用 UI 明示的清空恢复操作；不要直接删布局记录 |
 | 更新后旧标签不可用 | DSH 新版本是否运行、editor ID 是否稳定、Core 是否要求重新确认 | 先恢复兼容版本/重新允许；旧布局引用应保留 |
 
@@ -482,18 +482,18 @@ Known unsupported/unverified behavior:
 
 ## 20. 18.0 分发要求
 
-扩展包支持普通持久 Bundle 的 client-only 和 client-host。声明 distribution.version=1、exportPolicy、runtimeKind、精确 runtimeFiles、requires；包含所有入口、必要静态资源、Bundle 配置和 LICENSE。Bundle row ID 必须全局唯一。依赖打入产物，或使用本代宿主提供的精确 peer；禁止安装构建脚本。client-only 只能有模板中的空 Host shim。要进入完整工作台的 `offline-embedded` 包，扩展必须使用 `exportPolicy: 'embed'` 并通过静态闭包检查。
+扩展包支持普通持久 Bundle 的 client-only 和 client-host。声明 distribution.version=1、exportPolicy、runtimeKind、精确 runtimeFiles、requires；包含所有入口、必要静态资源、Bundle 配置和 LICENSE。Bundle row ID 必须全局唯一。依赖打入产物，或使用本代宿主提供的精确 peer；禁止安装构建脚本。client-only 只能有模板中的空 Host shim。扩展必须使用 `exportPolicy: 'embed'` 并通过静态闭包检查，才能作为离线制品进入分享包。`offline-embedded` 是扩展/布局分发的模式；完整工作台迁移格式是 V5 `workbench-complete`，两者不能混称。
 
 inject 返回的 workbenchEditor 同时提供 portability.exportState/importState 与 distribution；Host 根据原生清单和文件校验补充 provenance。仅处理器输出的受限 JSON 可迁移，无状态内页使用明确空投影。配置恢复须精确匹配包名、版本、运行摘要、editor ID、scope 和授权，缺失项保留 Host 待恢复数据。
 
 新安装和启用后必须重启；实际注册通过才恢复配置并提交工作台。扩展 artifact 不迁移 Session、模型、工作目录、凭据或整个 Profile；完整工作台 V5 另行负责根目录文件、Area 项目、Session、附件、记忆和任务关系。签名不是沙箱，静态闭包检查不是任意代码安全证明。
-# 18.0 浮动展示补充契约
+## 21. 18.0 浮动展示补充契约
 
-17.3 维持 Settings V4、布局与分发格式。所有内页共用 owner 绑定/权限/状态校验。新增可选 `presentation.floating`（false 禁止浮窗）、`owner.presentation`、稳定 `owner.runtimeIdentity`、`registerCloseGuard`。位置不是实例身份；浮窗固定到 Area 不能重建任务或原生 occurrence。
+浮动内页沿用既有 owner 绑定/权限/状态校验。当前提供可选 `presentation.floating`（false 禁止浮窗）、`owner.presentation`、稳定 `owner.runtimeIdentity`、`registerCloseGuard`。位置不是实例身份；浮窗固定到 Area 不能重建任务或原生 occurrence。Settings 投影、工作台文件信封和完整包是独立版本层，不能从 Settings V4 推断文件或包格式。
 
 生命周期隐藏必须撤销焦点，pause 仅暂停展示工作，dispose 仅释放可恢复视图；不得取消底层任务。未保存内容必须注册关闭保护。Core 的关闭、删除/归档和受控刷新/关闭流程等待该保护；操作系统强杀、崩溃及原生未提供异步拦截的退出只能提示，无法保证恢复。
 
-资源通过 owner 打开接口接入；不允许借用原生全局侧栏 owner。需要真实 Area 几何或没有完整绑定/生命周期契约的内页应声明禁止浮窗。完整示例及验收清单见模板 README 的“17.3 展示位置与实例生命周期”。
+资源通过 owner 打开接口接入；不允许借用原生全局侧栏 owner。需要真实 Area 几何或没有完整绑定/生命周期契约的内页应声明禁止浮窗。完整示例及验收清单见[模板的项目身份与实例生命周期](templates/workbench-editor/README.md#180-项目身份与实例生命周期)。
 
 ## 项目归属修订（2026-11-10）
 

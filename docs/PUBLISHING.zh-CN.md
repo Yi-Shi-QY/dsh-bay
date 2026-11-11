@@ -1,48 +1,57 @@
-# DSH Bay 对外发布清单
+# DSH Bay 封包与发布
 
-这份清单描述从当前私有候选到公开 npm 包和官网的最短路径。发布动作必须
-绑定同一份源码提交、构建输入、归档和校验摘要。
+更新日期：2026-11-11。当前私有候选为 `dsh-bay@0.2.2-alpha.18.0`，目标 DSH `0.2.2-rc.1`。最新已交付包身份与验证范围见 [VALIDATION.md](VALIDATION.md)。
 
-## 当前仓库边界
+## 私有实验包流程
 
-- 唯一可发布运行时：`packages/workbench-core`。
-- 默认安装包：`dsh-bay`。
-- 兼容目标：DSH `0.2.2-rc.1`。
-- 安装、更新、停用和卸载继续由 DSH 原生 Plugin Manager 负责。
-- `node_modules`、`lib`、`tmp`、`output` 和本地试用目录不进入发布提交。
+1. 记录实际源码提交和工作树状态，保留用户未提交成果。按用户要求确定先提交还是先交付实验包，不自动混入无关文件。
+2. 功能变更完成后执行兼容检查、相应回归、类型检查和构建；封包前确认完整回归已有对应基线证据。
+3. 执行 `pnpm pack:core`。脚本清理 `packages/workbench-core/lib`，重建 Host/Client 运行时及声明，按 `files` 白名单封装。
+4. 检查实际 tarball 的版本、DSH 代际、上游身份、构建输入、文件闭包、大小与摘要。
+5. 交付包路径、源码提交、校验值及真实验收边界，按用户安装结果推进下一阶段。
 
-## 发布前门禁
+```sh
+pnpm check:rc1
+pnpm test
+pnpm typecheck
+pnpm verify:workbench-package
+pnpm build
+pnpm pack:core
+```
 
-1. `pnpm check:rc1`、`pnpm test`、`pnpm typecheck`、`pnpm build` 和
-   `pnpm pack:core` 在同一提交上通过。
-2. 在干净 DSH rc1 Profile 中验证进入/退出工作台、重启恢复、多轮输入、
-   浮动工作区、锁定布局、容器内页和离线包导出导入。
-3. 检查 package manifest、`files` 白名单、依赖闭包、许可证、第三方声明、
-   provenance、source digest、lockfile digest 和 SHA-256。
-4. 更新 README、CHANGELOG、兼容矩阵、安装迁移说明、FAQ 和已知限制。
-5. 确认版本阶段、npm dist-tag、GitHub 可见性、域名和静态站点托管方式。
+默认输出：
 
-## 渠道职责
+```text
+releases/alpha18.0-rc1-private/
+├─ dsh-bay-0.2.2-alpha.18.0.tgz
+└─ candidate.json
+```
 
-| 渠道 | 职责 |
-| --- | --- |
-| 官网 | 品牌、定位、真实演示、安装文档、兼容矩阵、FAQ 和发布记录 |
-| npm | 分发 `dsh-bay` 包和机器可读的版本元数据 |
-| GitHub | 源码、问题反馈、变更记录、Release 和 provenance |
-| DSH Plugin Manager | 用户 Profile 内的安装、启用、更新、停用和卸载 |
-| 生态目录 | 在公开包和文档稳定后申请收录，不在 DSH Bay 内重复建设市场 |
+需要保留同版本不同候选时，可使用现有入口指定新的仓库 releases 子目录，例如：
 
-## 发布顺序
+```sh
+pnpm pack:core --output=releases/alpha18.0-review-private
+```
 
-1. 冻结发布提交，记录构建输入和归档 SHA-256。
-2. 创建对应 Git tag 和 GitHub Release，附安装包、校验文件和变更记录。
-3. 从发布提交执行 npm publish，使用与版本阶段一致的 dist-tag。
-4. 从官方 npm registry 和干净 DSH Profile 反向安装一次。
-5. 检查官网安装入口、兼容说明、下载链接和校验摘要均指向同一版本。
-6. 保留回滚版本与停用旧包的迁移说明，不自动修改用户 Profile。
+保持路径简单且不含空格。默认文件名和 candidateId 不因重打包自动唯一化；交付记录须同时保存提交与摘要。
 
-## 官网首发范围
+## 最终归档检查
 
-首发官网只提供静态内容、文档、下载、发布记录和问题反馈。账号同步、
-在线布局分享、作品社区、远程工作区和云端执行需要独立的后端、身份、存储
-和运维方案，暂不放入首发承诺。
+- 包内 `package.json`、`lib/build-inputs.json` 与 `candidate.json` 的包名、版本、DSH generation 和上游提交一致。
+- SHA-256、SHA-512 integrity 与实际文件字节一致；运行时与本次生成的 lib 一致。
+- 归档文件符合 `packages/workbench-core/package.json` 的 `files` 白名单；必要声明、技能和模板完整。
+- 不带入 `node_modules`、用户 Profile、临时数据、无关研究目录或历史自定义 Creator preset。
+- `lib` 是 Git 忽略的生成目录，但其中白名单内容必须进入安装包。根目录 `.bay` 工作文件只属于工作台迁移包，不属于插件 npm 包。
+- `verify:workbench-package` 检查工作台包服务，不替代最终插件 tarball 检查。`package-verification.json` 若额外生成，必须绑定本次实际归档，不能沿用旧报告。
+
+## 安装后基础验收
+
+至少验证创建和目录重名处理、项目概览、多会话、关闭/重新打开项目、Main 标签显隐、原版模式往返输入、浏览器接管/关页/收回，以及完整包预览、导入、历史附件和主动续聊。
+
+数据恢复、运行环境与任务可执行性分别判断。三平台、另一台局域网设备、真实大包和长时间真实模型运行独立记录，不从单元测试推导为通过。
+
+## 公开发布边界
+
+公开 npm、GitHub Release、tag 和网站是独立发布动作，按用户明确要求执行。发布前需绑定同一源码/制品，完成干净 DSH Profile 反向安装、许可与来源检查、版本说明和已知限制。
+
+当前 CI 只在 Ubuntu 运行 `pnpm verify`，公开发布不能把独立类型检查、封包与跨平台验收当成既有 CI 保证。保留此前可用制品及其数据兼容说明；18.0 项目数据不应直接交给不支持它的旧版本读取。

@@ -1,8 +1,10 @@
 # DSH Bay 下一大版本：Workbench Control Plane 草稿
 
+> 归档日期：2026-11-11。本文保留历史设计与证据，正文状态只代表原记录时点。现行规则见[当前说明](../../ARCHITECTURE.zh-CN.md)；归档原因见[归档索引](../README.md)。原文内容保留，相对链接已修正。
+
 状态：产品契约与实验版进度草稿（2026-11-07 更新；未提交）
 
-2026-11-09 更新：18.0 实施以 [重构计划书](./V18-REFACTOR-PLAN.zh-CN.md)为准；当前布局、区域生命周期、插件来源、任务续用及旧提示残余见 [区域/会话解耦核查与更新方案](./V18-AREA-SESSION-DECOUPLING-AUDIT.zh-CN.md)。本文保留早期讨论记录，区域级单 Session 绑定和旧包迁移描述不再作为实现依据。
+2026-11-09 更新：18.0 实施以 [重构计划书](V18-REFACTOR-PLAN.zh-CN.md)为准；当前布局、区域生命周期、插件来源、任务续用及旧提示残余见 [区域/会话解耦核查与更新方案](V18-AREA-SESSION-DECOUPLING-AUDIT.zh-CN.md)。本文保留早期讨论记录，区域级单 Session 绑定和旧包迁移描述不再作为实现依据。
 
 目标版本：下一个大版本
 
@@ -248,9 +250,9 @@ Session 崩溃时结束 Assignment，保留 Work Item、Context 和原始证据�
 
 当前代码位置：
 
-- [layout-only package](../packages/workbench-core/src/foundation/workbench-layout-package.ts)
-- [portable Workbench projection](../packages/workbench-core/src/foundation/workbench-sharing.ts)
-- [full package format](../packages/workbench-core/src/foundation/workbench-package-v4.ts)
+- [layout-only package](../../../packages/workbench-core/src/foundation/workbench-layout-package.ts)
+- [portable Workbench projection](../../../packages/workbench-core/src/foundation/workbench-sharing.ts)
+- [full package format](../../../packages/workbench-core/src/foundation/workbench-package-v4.ts)
 
 因此，旧格式继续按严格的旧文件数量和字段集合校验读取；只有新包的 manifest 明确声明 `portableLayout: 3` 时才接受 Context 文件。完整包的 Context 仍通过可选字段和文件清单参与校验，旧包没有这些字段时按无 Context 处理。
 
@@ -486,7 +488,7 @@ Bay Agent 的 system prompt 和 `bay_inspect` 使用当前投影；新增 `bay_h
 
 用户在另一台机器实测提出：Area 应绑定项目文件夹，同区域允许多个不同 Session 的对话内页，内页仍精确绑定一个对话。当前代码中的显式 Area Session 绑定、整区域重绑、同 Session 合并限制与 Bay Agent 追加独立 Worker 的路径存在语义冲突；Worker 通用标题及每次 Assignment 新建对话也需要配套处理。
 
-已完成静态代码影响梳理并形成[区域项目绑定与多对话编排讨论稿](./AREA-PROJECT-BINDING-PROPOSAL.zh-CN.md)。该项已在 alpha18.0 工作树实施：区域按项目目录归属，内页按来源 Session 绑定，任务续用与插件来源均不再依赖区域代表会话；同项目多区域和有内容区域换项目按 18.0 计划执行。
+已完成静态代码影响梳理并形成[区域项目绑定与多对话编排讨论稿](AREA-PROJECT-BINDING-PROPOSAL.zh-CN.md)。该项已在 alpha18.0 工作树实施：区域按项目目录归属，内页按来源 Session 绑定，任务续用与插件来源均不再依赖区域代表会话；同项目多区域和有内容区域换项目按 18.0 计划执行。
 
 2026-11-09 用户已确认任务继续策略：同一任务优先续用原对话，新任务另建；原对话失效或需要隔离时允许另建。实现需要区分任务、执行尝试和对话身份，保留重复请求幂等、原生输入等待及旧执行迟到报告的校验；具体规则与验收场景已同步到讨论稿。
 
@@ -494,7 +496,7 @@ Bay Agent 的 system prompt 和 `bay_inspect` 使用当前投影；新增 `bay_h
 
 用户进一步提出：创建工作台时选位置新建工作台文件夹，区域选择或新建根内文件夹，区域对话默认使用该目录作为项目。该方向为区域项目绑定增加工作台级文件归属，也将工作文件携带和导入落盘纳入包设计。
 
-已形成[18.0 工作台目录架构讨论稿](./V18-WORKBENCH-DIRECTORY-ARCHITECTURE.zh-CN.md)，并在 alpha18.0 工作树完成根目录登记、区域相对路径、Host 统一目录/持久服务和原生 Session 迁移适配器。已有任务续用决策继续适用；真实模型长时间运行和跨平台实机迁移仍待验收。
+已形成[18.0 工作台目录架构讨论稿](V18-WORKBENCH-DIRECTORY-ARCHITECTURE.zh-CN.md)，并在 alpha18.0 工作树完成根目录登记、区域相对路径、Host 统一目录/持久服务和原生 Session 迁移适配器。已有任务续用决策继续适用；真实模型长时间运行和跨平台实机迁移仍待验收。
 
 用户随后明确两项核心要求：完整包导入后恢复整个目录、工作文件、对话和资源关系，接收方无需逐个重绑即可继续工作；Bay Agent 使用工作台根目录作为项目，并在其中维护专属持久记忆，记忆随包迁移。18.0 必须交付完整历史/附件/子会话迁移、Main 历史和记忆恢复及实际续聊验证，不能以对话模板或仅恢复审计历史作为完整包验收。原生 DSH 已有完整会话导出和持久化读写基础；工作台级导入、引用映射与恢复仍需实现和验证。
 

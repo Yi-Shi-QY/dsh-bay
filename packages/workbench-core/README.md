@@ -1,43 +1,25 @@
-# DSH Bay
+# DSH Bay｜湾域
 
-DSH Bay is a multi-area workbench extension for developing, validating, and
-sharing DSH plugins. This package contains the runtime core and its DSH client
-integration.
+DSH Bay is a multi-area workbench for DSH projects, native conversations, inner-page extensions, and Bay Agent tasks. This package contains the Host runtime, client integration, and extension development skill.
 
-## Compatibility
+## Compatibility and installation
 
-This candidate targets **DSH `0.2.2-rc.1`** and is published as
-`0.2.2-alpha.17.6`. Install it only in a compatible DSH profile. The package
-name and client module id are both `dsh-bay`; the internal workbench module id
-remains `workbench.core` for migration compatibility.
+This private candidate is **`dsh-bay@0.2.2-alpha.18.0`**, targeting **DSH `0.2.2-rc.1`**. The package name and client module ID are `dsh-bay`; the internal module ID is `workbench.core`.
 
-The package uses DSH's native Plugin Manager lifecycle. Disable the legacy
-`@dsh-workbench/core` package before enabling `dsh-bay` in the same profile so
-that two workbench cores are not registered at the same time.
+Install the supplied `dsh-bay-0.2.2-alpha.18.0.tgz` through DSH's native Plugin Manager and follow its restart instructions. The repository's local build output is `releases/alpha18.0-rc1-private/`; public registry publication is not recorded for this candidate.
 
-## Install
+Disable the legacy `@dsh-workbench/core` package before enabling `dsh-bay` in the same Profile. Package renaming does not imply migration of 17.x workbenches or old complete-package formats; those are unsupported by the 18.0 directory workflow.
 
-```text
-pnpm add dsh-bay
-```
+## The 18.0 model
 
-For a private trial, install the matching `.tgz` artifact from the repository's
-`releases/alpha17.6-rc1-private/` directory. The repository release record is
-the source of truth for its SHA-256, provenance and validation status.
+A Workbench owns its root directory and persistent Projects. Projects own background, memory, and conversation/task relationships; Areas are disposable views. One Area can show multiple Sessions. Closing an Area preserves its Project; reopening the project shows an overview before the user opens historical tabs or resumes a task.
+
+Bay Agent has a persistent Main Session and discovers available native Worker modes. Its native Session compaction, orchestration checkpoints, and background/memory projections are separate mechanisms. Browser takeover uses the same Host services. Complete Workbench V5 packages restore files, native history, attachments, and task relationships; imported tasks wait for the user.
 
 ## Package boundary
 
-The default delivery is Core-only. Conversation Suite and the SVG pet remain
-separate modules and are intentionally excluded from this package. DSH owns
-the host lifecycle, native pages, Plugin Manager, sessions and agent runtime;
-DSH Bay adds the workbench surface, Area/session placement, native page
-projection with fallback, and package provenance metadata.
+DSH owns the native Agent Loop, Session persistence, tools, and Plugin Manager. Conversation Suite and SVG Pet remain separate, excluded modules. The bundled development skill is available to native `cordis` mode; this package does not install a replacement Creator preset.
 
-This candidate is private staging material. Its repository validation covers
-source identity, dependency closure, tests, type declarations, build output and
-archive contents. A real DSH desktop smoke test is still required before a
-public release.
+Read the included [extension development skill](presets/workbench-creator/skills/workbench-extension-development/SKILL.md) and [extension specification](presets/workbench-creator/skills/workbench-extension-development/WORKBENCH-CONTAINER-INNER-PAGE-EXTENSION-SPEC.zh.md) for portable state and runtime artifact rules.
 
-See the repository documentation for the current [validation record](https://github.com/Yi-Shi-QY/dsh-bay/blob/main/docs/VALIDATION.md)
-and [publishing checklist](https://github.com/Yi-Shi-QY/dsh-bay/blob/main/docs/PUBLISHING.zh-CN.md).
-The package license is included as [`LICENSE`](./LICENSE).
+Automated checks and private packaging do not prove acceptance in a clean DSH desktop, across platforms, or during long real-model runs. The repository [validation record](https://github.com/Yi-Shi-QY/dsh-bay/blob/main/docs/VALIDATION.md) and [documentation index](https://github.com/Yi-Shi-QY/dsh-bay/blob/main/docs/README.md) state the evidence and remaining checks. License: [MIT](LICENSE).

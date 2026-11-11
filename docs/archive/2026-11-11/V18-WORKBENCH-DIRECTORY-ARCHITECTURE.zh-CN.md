@@ -1,10 +1,12 @@
 # 18.0 工作台目录架构讨论稿
 
+> 归档日期：2026-11-11。本文保留历史设计与证据，正文状态只代表原记录时点。现行规则见[当前说明](../../ARCHITECTURE.zh-CN.md)；归档原因见[归档索引](../README.md)。原文内容保留，相对链接已修正。
+
 日期：2026-11-09（Asia/Shanghai）  
 状态：历史讨论稿，保留当时的分析，不作为当前实现状态或实施契约。后续已进入 alpha18.0 实施阶段。  
 基线：当前 main 工作树，包括 alpha17.6 的未提交实现。
 
-实施依据为 [18.0 重构计划书](./V18-REFACTOR-PLAN.zh-CN.md)，最新残余问题与修复顺序见 [区域、会话与布局操作解耦核查](./V18-AREA-SESSION-DECOUPLING-AUDIT.zh-CN.md)。本文后续出现的“尚未实施”、旧格式迁移、单独 layout/context 主数据文件及待确认选项均属于历史讨论；与新计划冲突时，以新计划为准。现行约束为 `.bay/workbench.json` 单一工作台定义、不迁移 17.x 数据、区域项目与内页会话分离。
+实施依据为 [18.0 重构计划书](V18-REFACTOR-PLAN.zh-CN.md)，最新残余问题与修复顺序见 [区域、会话与布局操作解耦核查](V18-AREA-SESSION-DECOUPLING-AUDIT.zh-CN.md)。本文后续出现的“尚未实施”、旧格式迁移、单独 layout/context 主数据文件及待确认选项均属于历史讨论；与新计划冲突时，以新计划为准。现行约束为 `.bay/workbench.json` 单一工作台定义、不迁移 17.x 数据、区域项目与内页会话分离。
 
 ## 1. 用户提出的方向
 
@@ -15,7 +17,7 @@
 5. 接收方导入整个工作台包后，目录、文件、对话历史和关联完整恢复，无需逐个重新绑定对话，可以继续工作。
 6. Bay Agent 直接使用工作台根文件夹作为项目目录，在其中持久化存储和更新该工作台专属记忆；记忆随完整工作台包迁移。
 
-这比上一版“区域绑定任意现有项目”的建议更进一步：工作台本身拥有根目录，区域项目受到工作台根目录约束。本稿作为上一份[区域项目绑定讨论稿](./AREA-PROJECT-BINDING-PROPOSAL.zh-CN.md)的上层设计；上一稿关于内页绑定、任务继续、插件来源和多对话迁移的分析仍然适用。
+这比上一版“区域绑定任意现有项目”的建议更进一步：工作台本身拥有根目录，区域项目受到工作台根目录约束。本稿作为上一份[区域项目绑定讨论稿](AREA-PROJECT-BINDING-PROPOSAL.zh-CN.md)的上层设计；上一稿关于内页绑定、任务继续、插件来源和多对话迁移的分析仍然适用。
 
 已确认的任务策略继续有效：同一任务优先续用原对话，新任务另建；对话失效或需要隔离时允许另建。
 
@@ -23,13 +25,13 @@
 
 | 模块 | 当前事实 | 18.0 所需变化 |
 | --- | --- | --- |
-| [WorkbenchCreateDialog.tsx](../packages/workbench-core/src/foundation/WorkbenchCreateDialog.tsx) | 创建表单只有名称、简介、背景和布局选择 | 增加存放位置与最终目录预览，向 Host 提交创建请求 |
-| [frame-settings-adapter.ts](../packages/workbench-core/src/foundation/frame-settings-adapter.ts) | `directory.create` 生成 ID 并写 Settings；这里的 Directory 是工作台名录，不是磁盘文件夹 | 建立 Host 工作台目录服务，协调目录创建、持久元数据和本机登记 |
-| [persistence.ts](../packages/workbench-core/src/foundation/persistence.ts) | 工作台结构、背景和区域信息保存在 WorkbenchRecord/Settings | 定义根目录关联、区域相对路径、版本迁移和文件型工作台的持久边界 |
-| [apply-core.ts](../packages/workbench-core/src/foundation/apply-core.ts) / [conversation-area-coordinator.ts](../packages/workbench-core/src/foundation/conversation-area-coordinator.ts) | 已接入目录选择、Workspace 登记和 Session 创建 | 先独立完成区域目录绑定，再按需创建 Session，不让选目录隐含新建对话 |
-| [host-bay-agent-worker.ts](../packages/workbench-core/src/host-bay-agent-worker.ts) | 创建 Worker 时推断 workspaceId，再调用原生 Session 服务 | 由区域相对路径解析目标目录，登记或复用对应 Workspace，派发前校验归属 |
-| [host-bay-agent-store.ts](../packages/workbench-core/src/host-bay-agent-store.ts) | 执行状态、NDJSON 和 checkpoint 在 Profile 中 | 导出任务和历史的可恢复快照，导入重建本机关联，活动执行先进入待接管状态 |
-| [workbench-package-v4.ts](../packages/workbench-core/src/foundation/workbench-package-v4.ts) / [workbench-layout-package.ts](../packages/workbench-core/src/foundation/workbench-layout-package.ts) | 包格式已有布局、背景、编排审计和扩展制品；没有通用的工作台项目文件闭包 | 增加相对目录结构、可选工作文件、文件清单/摘要及 Host 落盘事务 |
+| [WorkbenchCreateDialog.tsx](../../../packages/workbench-core/src/foundation/WorkbenchCreateDialog.tsx) | 创建表单只有名称、简介、背景和布局选择 | 增加存放位置与最终目录预览，向 Host 提交创建请求 |
+| [frame-settings-adapter.ts](../../../packages/workbench-core/src/foundation/frame-settings-adapter.ts) | `directory.create` 生成 ID 并写 Settings；这里的 Directory 是工作台名录，不是磁盘文件夹 | 建立 Host 工作台目录服务，协调目录创建、持久元数据和本机登记 |
+| [persistence.ts](../../../packages/workbench-core/src/foundation/persistence.ts) | 工作台结构、背景和区域信息保存在 WorkbenchRecord/Settings | 定义根目录关联、区域相对路径、版本迁移和文件型工作台的持久边界 |
+| [apply-core.ts](../../../packages/workbench-core/src/foundation/apply-core.ts) / [conversation-area-coordinator.ts](../../../packages/workbench-core/src/foundation/conversation-area-coordinator.ts) | 已接入目录选择、Workspace 登记和 Session 创建 | 先独立完成区域目录绑定，再按需创建 Session，不让选目录隐含新建对话 |
+| [host-bay-agent-worker.ts](../../../packages/workbench-core/src/host-bay-agent-worker.ts) | 创建 Worker 时推断 workspaceId，再调用原生 Session 服务 | 由区域相对路径解析目标目录，登记或复用对应 Workspace，派发前校验归属 |
+| [host-bay-agent-store.ts](../../../packages/workbench-core/src/host-bay-agent-store.ts) | 执行状态、NDJSON 和 checkpoint 在 Profile 中 | 导出任务和历史的可恢复快照，导入重建本机关联，活动执行先进入待接管状态 |
+| [workbench-package-v4.ts](../../../packages/workbench-core/src/foundation/workbench-package-v4.ts) / [workbench-layout-package.ts](../../../packages/workbench-core/src/foundation/workbench-layout-package.ts) | 包格式已有布局、背景、编排审计和扩展制品；没有通用的工作台项目文件闭包 | 增加相对目录结构、可选工作文件、文件清单/摘要及 Host 落盘事务 |
 
 会话能力核查：已安装 DSH 的 `dsh-session-log-export` 公共入口提供 `sessionLogZipEntries` / `streamSessionLogZip` 等能力，文档说明包含完整已提交会话日志、子会话和图片/文件附件。`sessionPersistence` 提供 `create/open` 与句柄 `read/append/flush/close`；Session 支持从 seed/history 恢复。这些是实现会话可迁移适配器的基础，不表示当前已有跨机器一键导入能力。需要验证重建 header、cwd、血缘和事件引用后的原生恢复。不能通过复制聊天 Markdown 来替代可续聊的原生历史。
 
@@ -196,4 +198,4 @@ Bay Agent 通过 Host 的语义接口创建/查看工作台内目录、创建绑
 
 ## 18.0 当前实施状态
 
-18.0 已在当前 `main` 工作树的 alpha18.0 基线上完成本轮目录、区域项目、多会话、Bay Agent 任务恢复和 V5 完整包实现。Bay Agent 的编排账本使用 NDJSON 与 checkpoint，Native Session 通过迁移适配器恢复，V5 Host 导入保持执行暂停；UI 已统一为“区域项目 + 内页来源对话”。完整自动化回归、类型检查和 RC1 兼容检查已通过，真实模型长时间运行、跨平台实机迁移仍需要用户实测。详见 [18.0 重构计划书](./V18-REFACTOR-PLAN.zh-CN.md)。
+18.0 已在当前 `main` 工作树的 alpha18.0 基线上完成本轮目录、区域项目、多会话、Bay Agent 任务恢复和 V5 完整包实现。Bay Agent 的编排账本使用 NDJSON 与 checkpoint，Native Session 通过迁移适配器恢复，V5 Host 导入保持执行暂停；UI 已统一为“区域项目 + 内页来源对话”。完整自动化回归、类型检查和 RC1 兼容检查已通过，真实模型长时间运行、跨平台实机迁移仍需要用户实测。详见 [18.0 重构计划书](V18-REFACTOR-PLAN.zh-CN.md)。

@@ -1,12 +1,14 @@
 # 区域项目绑定与多对话编排讨论稿
 
+> 归档日期：2026-11-11。本文保留历史设计与证据，正文状态只代表原记录时点。现行规则见[当前说明](../../V18-PROJECT-AREA-OWNERSHIP.zh-CN.md)；归档原因见[归档索引](../README.md)。原文内容保留，相对链接已修正。
+
 日期：2026-11-09（Asia/Shanghai）  
 状态：历史代码核查与设计建议。任务继续策略已于 2026-11-09 经用户确认；后续目录方案已进入 alpha18.0 实施阶段，本文不代表当前完成状态。  
 核查基线：当前 `main`，HEAD `768dd4c`，包括现有未提交的背景 AI、UI 和 Bay Agent 编排改动。
 
-现行实施依据：[18.0 重构计划书](./V18-REFACTOR-PLAN.zh-CN.md)。最新问题与更新方案：[区域、会话与布局操作解耦核查](./V18-AREA-SESSION-DECOUPLING-AUDIT.zh-CN.md)。下文的旧包手动重绑/迁移方案不能作为 18.0 完整包实现依据；旧格式不迁移，轻量模板若保留也必须按来源组而非全区域批量绑定。
+现行实施依据：[18.0 重构计划书](V18-REFACTOR-PLAN.zh-CN.md)。最新问题与更新方案：[区域、会话与布局操作解耦核查](V18-AREA-SESSION-DECOUPLING-AUDIT.zh-CN.md)。下文的旧包手动重绑/迁移方案不能作为 18.0 完整包实现依据；旧格式不迁移，轻量模板若保留也必须按来源组而非全区域批量绑定。
 
-后续方向（2026-11-09）：用户提出在 18.0 让工作台拥有根文件夹，区域选择或新建根内文件夹，对话默认使用区域目录，并明确完整包必须携带目录、文件和可继续的对话；Bay Agent 直接使用根目录，维护随包迁移的专属记忆。[18.0 工作台目录架构讨论稿](./V18-WORKBENCH-DIRECTORY-ARCHITECTURE.zh-CN.md)作为最新上层约束；本文的“任意已有项目”绑定建议收敛为根内项目。本文第 7 节的模板/手动重绑方案仅适用于旧格式和轻量模板，新完整包按 18.0 方案自动恢复会话。已确认的任务续用策略继续有效。
+后续方向（2026-11-09）：用户提出在 18.0 让工作台拥有根文件夹，区域选择或新建根内文件夹，对话默认使用区域目录，并明确完整包必须携带目录、文件和可继续的对话；Bay Agent 直接使用根目录，维护随包迁移的专属记忆。[18.0 工作台目录架构讨论稿](V18-WORKBENCH-DIRECTORY-ARCHITECTURE.zh-CN.md)作为最新上层约束；本文的“任意已有项目”绑定建议收敛为根内项目。本文第 7 节的模板/手动重绑方案仅适用于旧格式和轻量模板，新完整包按 18.0 方案自动恢复会话。已确认的任务续用策略继续有效。
 
 ## 1. 本次问题与目标
 
@@ -24,16 +26,16 @@
 
 | 位置 | 当前行为 | 改造影响 |
 | --- | --- | --- |
-| [model.ts](../packages/workbench-core/src/foundation/model.ts) / [document-v3.ts](../packages/workbench-core/src/foundation/document-v3.ts) | `GroupNode` / `AreaNode` 的 `areaBinding` 是 `SessionBindingV1`；存在显式绑定时，校验区域内 Session 内页使用同一对话 | 增加区域项目身份，改为校验项目一致，保留内页自己的 Session |
-| [workbench-control-plane.ts](../packages/workbench-core/src/foundation/workbench-control-plane.ts) | `createSession(append: true)` 删除旧 `areaBinding`，追加独立内页；`ensureEditor` 仍从区域 Session 取绑定，并按 editorId/scope 找已有内页 | 将追加对话作为正式能力；插件实例查找需要包括目标绑定 |
-| [host-bay-agent-worker.ts](../packages/workbench-core/src/host-bay-agent-worker.ts) | 项目从 Work Item、区域 Session、区域某个内页依次推断；每个 Assignment 走新建对话路径 | 默认从区域项目获取，禁止任务悄悄覆盖项目；增加继续既有 Worker 的路径 |
-| [host-bay-agent.ts](../packages/workbench-core/src/host-bay-agent.ts) | Worker Session ID 按 Assignment/requestId 派生；已有 Session 会复用；只看到 Main 显式改名为 Bay Agent，Worker 创建没有任务标题参数 | 保留相同请求幂等；增加命名与明确的任务目标；不能把所有新增对话归因于创建接口重复执行 |
-| [repository.ts](../packages/workbench-core/src/foundation/repository.ts) / [session-binding-picker.ts](../packages/workbench-core/src/foundation/session-binding-picker.ts) | 绑定或切换区域来源对话时，会批量重绑 Session 内页；部分新建入口把已有对话内页替换为同一实例 | 拆开区域选择项目与内页选择对话；按内页实例操作 |
-| [area-session-binding.ts](../packages/workbench-core/src/foundation/area-session-binding.ts) / [WorkbenchFrame.tsx](../packages/workbench-core/src/foundation/WorkbenchFrame.tsx) | 顶栏、标记等优先使用区域 Session，缺失时退回当前内页；浮窗放入区域和区域合并有同 Session 限制 | 顶栏使用固定项目；状态和标记跟随各内页；同项目不同对话允许合并或放入 |
-| [area-tab-rows.ts](../packages/workbench-core/src/foundation/area-tab-rows.ts) | 标签标题取 `lastKnownTitle`，而控制面创建 Worker 内页写的是“对话” | 同时处理原生 Session 标题和内页展示标题 |
-| [module-contract.ts](../packages/workbench-core/src/module-contract.ts) / [official-area-registrar.ts](../packages/workbench-core/src/client/official-area-registrar.ts) | 声明已有 none/workspace/session 要求，但官方 Session 内页默认 `sharing: area`；文件、终端、浏览器等也声明需要 Session | 不能只改声明字符串；必须明确项目来源与具体 Session 来源，兼容旧插件 |
-| [workbench-sharing.ts](../packages/workbench-core/src/foundation/workbench-sharing.ts) | 旧 portable 会话模板按区域当前内页生成 `areaKey -> templateId`，默认 active-editors-only | 新格式需要项目、Session 模板与内页三层关联，不能漏掉同区域其他对话 |
-| [workbench-layout-package.ts](../packages/workbench-core/src/foundation/workbench-layout-package.ts) | layout 包保留全部内页，但导入重绑参数按 Area 给一个 Session，并用于该区域各个需绑定内页 | 保留所有内页之间的不同 Session 关系；V4 分发及其重绑界面同步升级 |
+| [model.ts](../../../packages/workbench-core/src/foundation/model.ts) / [document-v3.ts](../../../packages/workbench-core/src/foundation/document-v3.ts) | `GroupNode` / `AreaNode` 的 `areaBinding` 是 `SessionBindingV1`；存在显式绑定时，校验区域内 Session 内页使用同一对话 | 增加区域项目身份，改为校验项目一致，保留内页自己的 Session |
+| [workbench-control-plane.ts](../../../packages/workbench-core/src/foundation/workbench-control-plane.ts) | `createSession(append: true)` 删除旧 `areaBinding`，追加独立内页；`ensureEditor` 仍从区域 Session 取绑定，并按 editorId/scope 找已有内页 | 将追加对话作为正式能力；插件实例查找需要包括目标绑定 |
+| [host-bay-agent-worker.ts](../../../packages/workbench-core/src/host-bay-agent-worker.ts) | 项目从 Work Item、区域 Session、区域某个内页依次推断；每个 Assignment 走新建对话路径 | 默认从区域项目获取，禁止任务悄悄覆盖项目；增加继续既有 Worker 的路径 |
+| [host-bay-agent.ts](../../../packages/workbench-core/src/host-bay-agent.ts) | Worker Session ID 按 Assignment/requestId 派生；已有 Session 会复用；只看到 Main 显式改名为 Bay Agent，Worker 创建没有任务标题参数 | 保留相同请求幂等；增加命名与明确的任务目标；不能把所有新增对话归因于创建接口重复执行 |
+| [repository.ts](../../../packages/workbench-core/src/foundation/repository.ts) / [session-binding-picker.ts](../../../packages/workbench-core/src/foundation/session-binding-picker.ts) | 绑定或切换区域来源对话时，会批量重绑 Session 内页；部分新建入口把已有对话内页替换为同一实例 | 拆开区域选择项目与内页选择对话；按内页实例操作 |
+| [area-session-binding.ts](../../../packages/workbench-core/src/foundation/area-session-binding.ts) / [WorkbenchFrame.tsx](../../../packages/workbench-core/src/foundation/WorkbenchFrame.tsx) | 顶栏、标记等优先使用区域 Session，缺失时退回当前内页；浮窗放入区域和区域合并有同 Session 限制 | 顶栏使用固定项目；状态和标记跟随各内页；同项目不同对话允许合并或放入 |
+| [area-tab-rows.ts](../../../packages/workbench-core/src/foundation/area-tab-rows.ts) | 标签标题取 `lastKnownTitle`，而控制面创建 Worker 内页写的是“对话” | 同时处理原生 Session 标题和内页展示标题 |
+| [module-contract.ts](../../../packages/workbench-core/src/module-contract.ts) / [official-area-registrar.ts](../../../packages/workbench-core/src/client/official-area-registrar.ts) | 声明已有 none/workspace/session 要求，但官方 Session 内页默认 `sharing: area`；文件、终端、浏览器等也声明需要 Session | 不能只改声明字符串；必须明确项目来源与具体 Session 来源，兼容旧插件 |
+| [workbench-sharing.ts](../../../packages/workbench-core/src/foundation/workbench-sharing.ts) | 旧 portable 会话模板按区域当前内页生成 `areaKey -> templateId`，默认 active-editors-only | 新格式需要项目、Session 模板与内页三层关联，不能漏掉同区域其他对话 |
+| [workbench-layout-package.ts](../../../packages/workbench-core/src/foundation/workbench-layout-package.ts) | layout 包保留全部内页，但导入重绑参数按 Area 给一个 Session，并用于该区域各个需绑定内页 | 保留所有内页之间的不同 Session 关系；V4 分发及其重绑界面同步升级 |
 
 ## 3. 建议的领域关系
 
@@ -193,4 +195,4 @@ Workbench：整体目标、背景、持久 Bay Agent Main
 
 ## 18.0 当前实施状态
 
-18.0 已在当前 `main` 工作树的 alpha18.0 基线上完成本轮目录、区域项目、多会话、Bay Agent 任务恢复和 V5 完整包实现。Bay Agent 的编排账本使用 NDJSON 与 checkpoint，Native Session 通过迁移适配器恢复，V5 Host 导入保持执行暂停；UI 已统一为“区域项目 + 内页来源对话”。完整自动化回归、类型检查和 RC1 兼容检查已通过，真实模型长时间运行、跨平台实机迁移仍需要用户实测。详见 [18.0 重构计划书](./V18-REFACTOR-PLAN.zh-CN.md)。
+18.0 已在当前 `main` 工作树的 alpha18.0 基线上完成本轮目录、区域项目、多会话、Bay Agent 任务恢复和 V5 完整包实现。Bay Agent 的编排账本使用 NDJSON 与 checkpoint，Native Session 通过迁移适配器恢复，V5 Host 导入保持执行暂停；UI 已统一为“区域项目 + 内页来源对话”。完整自动化回归、类型检查和 RC1 兼容检查已通过，真实模型长时间运行、跨平台实机迁移仍需要用户实测。详见 [18.0 重构计划书](V18-REFACTOR-PLAN.zh-CN.md)。

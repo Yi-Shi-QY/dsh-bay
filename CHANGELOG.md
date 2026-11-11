@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.2.2-alpha.18.0 — private staging
+
+- Added directory-backed Workbenches, persistent Projects, project-local
+  background and memory, and multiple explicitly bound Sessions per Area.
+- Made Areas disposable project views. Closing an Area preserves its Project,
+  conversations and tasks; reopening starts with the project overview.
+- Added persistent Bay Main, native compaction, live Worker mode discovery,
+  task continuation, orchestration checkpoints and durable report delivery.
+- Added browser control handoff, progress-aware reclaim and recovery after
+  direct tab closure; browser owners inherit the desktop extension settings.
+- Added complete V5 packages with native history, attachments, project data,
+  task snapshots, persistent jobs and separate data/environment/task reports.
+- Refined the overview, native sidebar pinning, inner-page folders, Creator
+  repair sessions, and creation/import UI with directory checks and retry.
+- Updated the native Creator extension skill, templates and portable-state
+  guidance for the Project/Area model.
+
+Latest validated feature commit: `ab2a7d8`; private package validation records
+162 test files and 1048 passing tests. See [validation](docs/VALIDATION.md) for
+artifact hashes and outstanding real-device/model checks. No public release
+or complete cross-platform acceptance is claimed.
+
+Documentation maintenance on 2026-11-11 consolidated current guidance and
+archived superseded plans. It does not change the previously delivered package.
+
 ## 0.2.2-alpha.17.6 - private staging
 
 - Refined the Workbench container inner-page tab status indicators, tab

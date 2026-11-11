@@ -1,42 +1,59 @@
-# DSH Bay private repository structure
+# DSH Bay 仓库结构与源码导航
 
-This repository follows the useful conventions seen in active DSH plugin
-repositories: a bilingual README, a small root package manifest, a single
-plugin package, `dsh.bundle.patch.yml`, tests, docs, provenance and one
-current release manifest. The repository deliberately keeps the runtime
-package small and does not include the launcher or a second plugin marketplace.
+更新日期：2026-11-11。版本 `0.2.2-alpha.18.0`；功能基线 `ab2a7d8`。这里记录当前文件结构，不是待实施的目录重构方案。
 
-The ecosystem choices behind this shape are recorded in
-[ECOSYSTEM-REFERENCE.md](ECOSYSTEM-REFERENCE.md). The repository identity change
-from the original private candidate is recorded in
-[REPOSITORY-RENAME.md](REPOSITORY-RENAME.md). The repository is private
-staging for now, but its identity, install boundary and validation record are
-already explicit enough to support a later catalog submission. Historical
-candidate folders and obsolete compatibility snapshots are kept in Git history
-rather than in the current release tree.
+```text
+dsh-bay/
+├─ packages/workbench-core/       唯一交付包 dsh-bay
+│  ├─ src/
+│  │  ├─ index.ts                Host 插件入口
+│  │  ├─ client/                 客户端入口、原生集成与浏览器适配
+│  │  ├─ foundation/             UI、布局、模型、控制器和上游适配
+│  │  └─ host-*.ts / *-contract.ts 宿主服务与跨端协议
+│  ├─ tests/                     单元、组件和跨服务测试
+│  ├─ presets/workbench-creator/ 原生创造模式使用的开发技能与模板
+│  ├─ lib/                       构建与声明输出，Git 忽略；白名单部分进入安装包
+│  └─ package.json               导出、DSH 元数据及发布 files 白名单
+├─ scripts/                      检查、测试、构建、封包与专项浏览器验证
+├─ docs/                         当前说明；archive/ 保存历史文档
+├─ compat/                       DSH RC1 兼容记录
+├─ provenance/                   来源审计快照
+├─ releases/                     历史候选记录及本地产物
+└─ .github/workflows/quality.yml Ubuntu 自动检查
+```
 
-## Runtime package
+## 按功能定位
 
-`packages/workbench-core` is the only package shipped by the current candidate.
-Its public exports cover the Core lifecycle, module contracts, composition
-packages, install plans, artifact staging, native DSH Plugin Manager seams and
-the client Area projection.
+以下路径相对 `packages/workbench-core/src/`。
 
-## Source and provenance
+| 功能 | 主要文件 |
+| --- | --- |
+| 目录、项目与注册 | `host-workbench-directory-service.ts`、`host-workbench-directory.ts`、`host-workbench-projects.ts`、`workbench-directory-contract.ts` |
+| 定义和布局投影 | `foundation/persistence.ts`、`foundation/document-v3.ts`、`foundation/project-identity.ts`、`client/file-workbench-settings.ts` |
+| 创建和总览 | `foundation/WorkbenchCreateDialog.tsx`、`foundation/WorkbenchOverviewDetail.tsx`、`foundation/WorkbenchHomePreview.tsx` |
+| 项目概览 | `foundation/WorkbenchProjectOverview.tsx`；背景和记忆由目录服务与 `host-workbench-memory.ts` 处理 |
+| 画布、浮动和内页 | `foundation/WorkbenchFrame.tsx`、`foundation/WorkbenchFloatingWorkspace.tsx`、`foundation/WorkbenchEditorPicker.tsx` |
+| Bay Main / Worker | `host-bay-agent.ts`、`host-bay-agent-worker.ts`、`host-bay-agent-store.ts`、`foundation/workbench-bay-agent-work.ts` |
+| 浏览器交接 | `host-browser-window-controller.ts`、`host-workbench-owner-gateway.ts`、`client/browser-window-controller.ts`、`workbench-reclaim.ts` |
+| 在线协作 | `host-workbench-access.ts`、`host-workbench-native-access.ts`、`host-workbench-share-*.ts` |
+| 完整包 V5 | `host-workbench-complete.ts`、`host-workbench-complete-files.ts`、`host-native-session-portability.ts`、`host-workbench-task-snapshot.ts` |
+| 导入 UI | `foundation/WorkbenchSharingPage.tsx`、`foundation/WorkbenchImportFlow.tsx`、`foundation/WorkbenchCompletePackagePanel.tsx`、`foundation/WorkbenchCompleteJob.tsx` |
+| 扩展发现与安装接缝 | `client/workbench-extension-registry.ts`、`client/read-dsh-extension-inventory.ts`、`host-distribution-*.ts` |
 
-The Sidebar/Workspace source index records the DSH rc1 commit and source digest.
-The private repository provenance file records that this checkout was derived
-from the merged Workbench candidate. It is not a claim that every future
-DSH Bay feature has already been validated in a clean rc1 desktop.
+## 构建与交付目录
 
-The current tree contains only the rc1 compatibility manifest, rc1 source
-mirror, current candidate record and active build/test entry points. Generated
-`node_modules`, `lib`, `tmp` and `output` content is ignored and is never part
-of the published package.
+`node_modules/`、`lib/`、`tmp/`、`output/`、`prototypes/` 和临时日志不是源码提交。`lib/index.js`、`lib/client.js`、声明及构建输入是安装包的必要内容，按 package.json 白名单进入包；“Git 忽略 lib”不等于“不打包 lib”。
 
-## Product layers
+`releases/alpha18.0-rc1-private/` 默认被忽略，每次 `pack:core` 更新同名制品和 `candidate.json`。历史 17.5/17.6 的部分记录仍被跟踪，不代表当前版本。本地未跟踪 `dsh-superagent/` 只作独立研究材料，不是 Core 的依赖或交付输入。
 
-The first repository contains the Core runtime. Future layers may add a
-developer-facing creator, a contract verifier UI, composition presets and a
-sharing/catalog surface. Those layers must consume the Core contracts and may
-not bypass DSH's native Plugin Manager or package lifecycle.
+`presets/workbench-creator/` 的历史自定义 preset 不再作为运行时安装；发布白名单保留其中的技能、规范和模板，DSH 的 `cordis` 模式负责实际创造模式执行。
+
+## 文档与来源边界
+
+从[文档导航](README.md)进入当前说明，从[归档索引](archive/README.md)查阅旧讨论。包内扩展技能使用相邻规范，不依赖仓库根的 docs 目录。
+
+兼容 manifest、上游 source index 和 provenance 各自保留记录时点的证据。当前制品由 `candidate.json` 和包内 `lib/build-inputs.json` 确认；不要通过修改旧来源记录“同步”新版本。
+
+## 目录优化尚待讨论
+
+目前 `foundation` 同时承载界面、领域与适配职责，根层 Host 服务也较集中。下一轮可以按目录/项目、会话与内页、Agent、在线访问、完整包划分模块边界；需要先列依赖和公共契约，再移动代码。此次只整理文档，没有移动运行时代码或改变构建入口。

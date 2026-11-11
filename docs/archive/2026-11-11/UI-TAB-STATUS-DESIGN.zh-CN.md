@@ -1,5 +1,7 @@
 # 容器内页标签状态指示设计
 
+> 归档日期：2026-11-11。本文保留历史设计与证据，正文状态只代表原记录时点。现行规则见[当前说明](../../V18-INNER-PAGE-MENU.zh-CN.md)；归档原因见[归档索引](../README.md)。原文内容保留，相对链接已修正。
+
 状态：设计与实施记录 v0.2；第一批对话标签已实现，待人工验收。其他内页仍按下文草案逐项推进。
 
 日期：2026-11-08（Asia/Shanghai）
@@ -233,18 +235,18 @@
 
 以下链接指向当前代码，用于实现定位；非对话类型仍不代表本文目标已全部实现。
 
-- [标签状态计算](../packages/workbench-core/src/foundation/area-tab-rows.ts)：可用性状态、对话绑定与业务状态合并。
-- [对话状态观察](../packages/workbench-core/src/client/conversation-tab-status.ts)：原生轮次、审批、队列和连接状态，共享引用与清理。
-- [状态显示组件](../packages/workbench-core/src/foundation/WorkbenchTabStatus.tsx)：区域、列表和浮窗共用的状态标记。
-- [容器标签及列表](../packages/workbench-core/src/foundation/WorkbenchFrame.tsx)：标签渲染、收起策略、内页列表和实际内容可用性。
-- [标签样式](../packages/workbench-core/src/foundation/WorkbenchFrame.module.css)：圆点大小、颜色、窄容器与收起布局。
-- [侧边栏会话状态投影](../packages/workbench-core/src/foundation/workbench-sidebar-session-list.ts)：running 以外的待交互与完成提醒。
-- [侧边栏会话状态订阅](../packages/workbench-core/src/foundation/workbench-sidebar-browser.tsx)：复用 DSH sessionStatus 的现有入口。
-- [官方内页](../packages/workbench-core/src/client/official-area-editors.tsx)：终端连接与浏览器预览的实际状态边界。
-- [官方内页声明](../packages/workbench-core/src/client/official-area-registrar.ts)：各内页的绑定与生命周期策略。
-- [内页声明契约](../packages/workbench-core/src/module-contract.ts)：现有绑定、持久化、生命周期字段。
-- [预览契约](../packages/workbench-core/src/foundation/workbench-slot-contracts.ts)：已有预览模型，不等同于业务状态报告接口。
-- [浮动工作区](../packages/workbench-core/src/foundation/WorkbenchFloatingWorkspace.tsx)：未读点、Bay Agent 身份标记和浮动标签。
+- [标签状态计算](../../../packages/workbench-core/src/foundation/area-tab-rows.ts)：可用性状态、对话绑定与业务状态合并。
+- [对话状态观察](../../../packages/workbench-core/src/client/conversation-tab-status.ts)：原生轮次、审批、队列和连接状态，共享引用与清理。
+- [状态显示组件](../../../packages/workbench-core/src/foundation/WorkbenchTabStatus.tsx)：区域、列表和浮窗共用的状态标记。
+- [容器标签及列表](../../../packages/workbench-core/src/foundation/WorkbenchFrame.tsx)：标签渲染、收起策略、内页列表和实际内容可用性。
+- [标签样式](../../../packages/workbench-core/src/foundation/WorkbenchFrame.module.css)：圆点大小、颜色、窄容器与收起布局。
+- [侧边栏会话状态投影](../../../packages/workbench-core/src/foundation/workbench-sidebar-session-list.ts)：running 以外的待交互与完成提醒。
+- [侧边栏会话状态订阅](../../../packages/workbench-core/src/foundation/workbench-sidebar-browser.tsx)：复用 DSH sessionStatus 的现有入口。
+- [官方内页](../../../packages/workbench-core/src/client/official-area-editors.tsx)：终端连接与浏览器预览的实际状态边界。
+- [官方内页声明](../../../packages/workbench-core/src/client/official-area-registrar.ts)：各内页的绑定与生命周期策略。
+- [内页声明契约](../../../packages/workbench-core/src/module-contract.ts)：现有绑定、持久化、生命周期字段。
+- [预览契约](../../../packages/workbench-core/src/foundation/workbench-slot-contracts.ts)：已有预览模型，不等同于业务状态报告接口。
+- [浮动工作区](../../../packages/workbench-core/src/foundation/WorkbenchFloatingWorkspace.tsx)：未读点、Bay Agent 身份标记和浮动标签。
 
 ## 9. 第一批实施记录（2026-11-08）
 
@@ -284,11 +286,11 @@ Bay Agent 的绿点只证明**主控对话本轮完成**，不证明所有 Worke
 
 ### 10.2 实现与验证
 
-- [标签信息模型](../packages/workbench-core/src/foundation/tab-information.ts)：从会话、项目、绑定和白名单资源状态生成提示、搜索文本和读屏标签。
-- [Agent 模式名称](../packages/workbench-core/src/foundation/agent-preset-label.ts)：集中维护内置模式显示名。
-- [标签悬浮组件](../packages/workbench-core/src/foundation/WorkbenchTabTooltip.tsx)：Area 标签、总览、收起预览和浮动标签共用。
-- [标签行模型](../packages/workbench-core/src/foundation/area-tab-rows.ts)：为每个标签组合实时信息，跟随会话标题和模式投影更新。
-- [信息模型测试](../packages/workbench-core/tests/tab-information.spec.ts)：覆盖标题优先级、模式缺失/未配置、子会话、文件、浏览器、终端、计划、待绑定和敏感字段过滤。
+- [标签信息模型](../../../packages/workbench-core/src/foundation/tab-information.ts)：从会话、项目、绑定和白名单资源状态生成提示、搜索文本和读屏标签。
+- [Agent 模式名称](../../../packages/workbench-core/src/foundation/agent-preset-label.ts)：集中维护内置模式显示名。
+- [标签悬浮组件](../../../packages/workbench-core/src/foundation/WorkbenchTabTooltip.tsx)：Area 标签、总览、收起预览和浮动标签共用。
+- [标签行模型](../../../packages/workbench-core/src/foundation/area-tab-rows.ts)：为每个标签组合实时信息，跟随会话标题和模式投影更新。
+- [信息模型测试](../../../packages/workbench-core/tests/tab-information.spec.ts)：覆盖标题优先级、模式缺失/未配置、子会话、文件、浏览器、终端、计划、待绑定和敏感字段过滤。
 - 浏览器使用实际 WorkbenchFrame、浮动工作区和真实 Tooltip，检查桌面 1440×900、窄屏 390×844/320×740、收起预览、浮动列表、名称/模式/路径搜索、键盘焦点与 Esc、浅色/深色主题；未发现页面异常或应用控制台错误。
 - 定向回归：4 个测试文件、80 项测试通过；`pnpm typecheck`、`pnpm check:rc1`、`git diff --check` 通过。
 
