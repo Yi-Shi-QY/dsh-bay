@@ -24,6 +24,8 @@ or complete cross-platform acceptance is claimed.
 
 Documentation maintenance on 2026-11-11 consolidated current guidance and
 archived superseded plans. It does not change the previously delivered package.
+The project handbook and user guide now document positioning, goals, current
+capabilities, the proposed long-term roadmap, and the complete usage workflow.
 
 ## 0.2.2-alpha.17.6 - private staging
 
