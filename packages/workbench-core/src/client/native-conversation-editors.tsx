@@ -12,16 +12,11 @@ import type { WorkbenchEditorOwnerProps } from './editor-slots.ts'
 import { retainWorkbenchArea } from './native-area-reference.ts'
 import { createWorkbenchNativeAreaSlotRenderer } from './native-area-slot-renderer.tsx'
 import type { WorkbenchCollaborationClientV1 } from './workbench-collaboration-client.ts'
-import type { DraftOperationV1 } from '../workbench-collaboration-contract.ts'
+import { createWorkbenchSharedDraftBinding, type WorkbenchSharedDraftBindingV1 } from './workbench-shared-draft-binding.ts'
+import { draftRangeAt, draftSelectionOf, findDraftEditable } from './draft-selection-dom.ts'
 
 type NativeOwner = WorkbenchEditorOwnerProps & PropsRenderFactories & {
   SessionProvider: SessionProviderComponent
-}
-
-type PendingDraftOperation = {
-  readonly draftId: string
-  readonly operations: readonly DraftOperationV1[]
-  readonly requestId: string
 }
 
 type StartPlacement =
@@ -89,32 +84,87 @@ function conversationInputState(ctx: Context, binding: SessionReference['binding
   return conversationInput(ctx, binding)?.state
 }
 
-function textDelta(before: string, after: string): readonly DraftOperationV1[] {
-  let prefix = 0
-  while (prefix < before.length && prefix < after.length && before[prefix] === after[prefix]) prefix += 1
-  let suffix = 0
-  while (suffix < before.length - prefix && suffix < after.length - prefix
-    && before[before.length - 1 - suffix] === after[after.length - 1 - suffix]) suffix += 1
-  const operations: DraftOperationV1[] = []
-  if (prefix > 0) operations.push({ type: 'retain', count: prefix })
-  const deleted = before.length - prefix - suffix
-  if (deleted > 0) operations.push({ type: 'delete', count: deleted })
-  const inserted = after.slice(prefix, after.length - suffix)
-  if (inserted.length > 0) operations.push({ type: 'insert', text: inserted })
-  if (suffix > 0) operations.push({ type: 'retain', count: suffix })
-  return operations
+interface RemoteDraftMark {
+  readonly participantId: string
+  readonly name: string
+  readonly color: string
+  readonly left: number
+  readonly top: number
+  readonly height: number
+  readonly highlights: readonly { readonly left: number; readonly top: number; readonly width: number; readonly height: number }[]
 }
 
-function selectionOffsets(root: HTMLElement): { readonly start: number; readonly end: number } | undefined {
-  const selection = globalThis.getSelection?.()
-  if (selection === null || selection === undefined || selection.rangeCount === 0 || !root.contains(selection.anchorNode) || !root.contains(selection.focusNode)) return undefined
-  const offset = (node: Node, position: number): number => {
-    const range = document.createRange()
-    range.selectNodeContents(root)
-    try { range.setEnd(node, position) } catch { return 0 }
-    return range.toString().length
-  }
-  return { start: offset(selection.anchorNode!, selection.anchorOffset), end: offset(selection.focusNode!, selection.focusOffset) }
+function participantColor(participantId: string): string {
+  let hash = 0
+  for (let index = 0; index < participantId.length; index += 1) hash = (hash * 31 + participantId.charCodeAt(index)) >>> 0
+  return `hsl(${hash % 360} 70% 45%)`
+}
+
+/** Shows where other participants' cursors and selections are in the shared draft. */
+function RemoteDraftCarets({ client, owner, scopeRef }: {
+  client: WorkbenchCollaborationClientV1
+  owner: NativeOwner
+  scopeRef: { readonly current: HTMLDivElement | null }
+}) {
+  const snapshot = useSyncExternalStore(client.subscribe, client.getSnapshot, client.getSnapshot)
+  const draft = snapshot === undefined ? undefined : Object.values(snapshot.drafts).find(value =>
+    value.areaId === owner.areaId && value.editorId === owner.editorId && value.sessionId === owner.sessionId)
+  const selections = draft?.selections
+  const text = draft?.text
+  const participants = snapshot?.participants
+  const [marks, setMarks] = useState<readonly RemoteDraftMark[]>([])
+  useEffect(() => {
+    const scope = scopeRef.current
+    const publish = (next: readonly RemoteDraftMark[]) => setMarks(current => JSON.stringify(current) === JSON.stringify(next) ? current : next)
+    if (scope === null || selections === undefined) { publish([]); return }
+    const measure = () => {
+      const editable = findDraftEditable(scope)
+      const next: RemoteDraftMark[] = []
+      if (editable !== undefined) {
+        const base = scope.getBoundingClientRect()
+        // The shared canvas may be scaled; positions inside it are unscaled.
+        const scale = scope.offsetWidth > 0 && base.width > 0 ? base.width / scope.offsetWidth : 1
+        const place = (rect: { left: number; top: number; width: number; height: number }) => ({
+          left: (rect.left - base.left) / scale + scope.scrollLeft,
+          top: (rect.top - base.top) / scale + scope.scrollTop,
+          width: rect.width / scale, height: rect.height / scale,
+        })
+        for (const [participantId, selection] of Object.entries(selections)) {
+          if (participantId === client.participantId) continue
+          const presence = participants?.find(row => row.participantId === participantId)
+          if (presence === undefined || presence.connectionState === 'stale') continue
+          const range = draftRangeAt(editable, selection.start, selection.end)
+          if (range === undefined || typeof range.getClientRects !== 'function') continue
+          const rects = [...range.getClientRects()].filter(rect => rect.height > 0)
+          const fallback = editable.getBoundingClientRect()
+          const last = rects.at(-1) ?? { left: fallback.left, top: fallback.top, width: 0, height: Math.min(fallback.height, 20 * scale) }
+          const caret = place(last)
+          next.push({
+            participantId,
+            name: presence.displayName || (presence.role === 'owner' ? '\u623f\u4e3b' : '\u534f\u4f5c\u8005'),
+            color: participantColor(participantId),
+            left: caret.left + caret.width, top: caret.top, height: caret.height,
+            highlights: selection.start === selection.end ? [] : rects.map(place),
+          })
+        }
+      }
+      publish(next)
+    }
+    measure()
+    // The composer applies remote text in its own render pass.
+    const frame = requestAnimationFrame(measure)
+    window.addEventListener('resize', measure)
+    scope.addEventListener('scroll', measure, true)
+    return () => { cancelAnimationFrame(frame); window.removeEventListener('resize', measure); scope.removeEventListener('scroll', measure, true) }
+  }, [client, participants, scopeRef, selections, text])
+  if (marks.length === 0) return null
+  return <div data-workbench-remote-carets aria-hidden style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'hidden', zIndex: 2 }}>
+    {marks.map(mark => <div key={mark.participantId} data-workbench-remote-caret={mark.participantId}>
+      {mark.highlights.map((rect, index) => <span key={index} style={{ position: 'absolute', left: rect.left, top: rect.top, width: rect.width, height: rect.height, background: mark.color, opacity: 0.22 }} />)}
+      <span style={{ position: 'absolute', left: mark.left, top: mark.top, width: 2, height: mark.height, background: mark.color }} />
+      <span style={{ position: 'absolute', left: mark.left, top: mark.top - 14, padding: '0 4px', borderRadius: 3, background: mark.color, color: '#fff', fontSize: 10, lineHeight: '14px', whiteSpace: 'nowrap' }}>{mark.name}</span>
+    </div>)}
+  </div>
 }
 
 function CollaborationPresenceBar({ ctx, owner, binding, scopeRef, client, session, conversation }: {
@@ -147,13 +197,10 @@ function CollaborationPresenceBar({ ctx, owner, binding, scopeRef, client, sessi
   const draftId = draft?.draftId ?? (owner.areaId && owner.editorId
     ? `draft:${owner.areaId}:${owner.editorId}:${owner.sessionId ?? ''}`
     : undefined)
-  const lastLocalText = useRef<string | undefined>(undefined)
-  const applyingRemote = useRef(false)
+  const draftBinding = useRef<WorkbenchSharedDraftBindingV1 | undefined>(undefined)
   const ensuredDraft = useRef<string | undefined>(undefined)
   const lastAttachments = useRef<string | undefined>(undefined)
   const composing = useRef(false)
-  const pendingDraftOperations = useRef<PendingDraftOperation[]>([])
-  const flushingDraftOperations = useRef(false)
   const [selection, setSelection] = useState<{ readonly start: number; readonly end: number }>()
   const role = client.participantId === 'owner' ? 'owner' as const : 'participant' as const
   const runtime = session as (SessionSnapshot & { running?: boolean; promptAttempted?: boolean }) | undefined
@@ -167,10 +214,10 @@ function CollaborationPresenceBar({ ctx, owner, binding, scopeRef, client, sessi
       const active = document.activeElement
       const next = active instanceof HTMLElement && root.contains(active) && (active.isContentEditable || active instanceof HTMLTextAreaElement || active instanceof HTMLInputElement)
       setFocused(next)
-      setSelection(selectionOffsets(root))
+      setSelection(draftSelectionOf(root))
     }
     const compositionStart = () => { composing.current = true }
-    const compositionEnd = () => { composing.current = false; refresh() }
+    const compositionEnd = () => { composing.current = false; draftBinding.current?.compositionEnded(); refresh() }
     root.addEventListener('focusin', refresh)
     root.addEventListener('focusout', refresh)
     root.addEventListener('compositionstart', compositionStart)
@@ -183,85 +230,34 @@ function CollaborationPresenceBar({ ctx, owner, binding, scopeRef, client, sessi
       document.removeEventListener('selectionchange', refresh)
     }
   }, [scopeRef, identityKey])
+  const getConnected = useCallback(() => client.getState() === 'connected', [client])
+  const connected = useSyncExternalStore(client.subscribe, getConnected, getConnected)
   useEffect(() => {
-    if (draftId === undefined || owner.areaId === undefined || owner.editorId === undefined || client.getState() !== 'connected') return
+    // A new connection may be a different collaboration session.
+    if (!connected) { ensuredDraft.current = undefined; return }
+    if (draftId === undefined || owner.areaId === undefined || owner.editorId === undefined) return
     if (ensuredDraft.current === draftId) return
     ensuredDraft.current = draftId
     void client.command({
       kind: 'draft.ensure', draftId, areaId: owner.areaId, editorId: owner.editorId,
       ...(owner.sessionId === undefined ? {} : { sessionId: owner.sessionId }),
     }).catch(() => { if (ensuredDraft.current === draftId) ensuredDraft.current = undefined })
-  }, [client, draftId, owner.areaId, owner.editorId, owner.sessionId])
-  const flushDraftOperations = useCallback(async () => {
-    if (flushingDraftOperations.current || client.getState() !== 'connected' || draftId === undefined) return
-    flushingDraftOperations.current = true
-    try {
-      while (pendingDraftOperations.current.length > 0 && client.getState() === 'connected') {
-        const pending = pendingDraftOperations.current[0]
-        if (pending === undefined || pending.draftId !== draftId) { pendingDraftOperations.current.shift(); continue }
-        const current = client.getSnapshot()?.drafts[pending.draftId]
-        if (current === undefined) break
-        const result = await client.command({
-          kind: 'draft.apply',
-          operation: { draftId: pending.draftId, baseRevision: current.revision, requestId: pending.requestId, participantId: client.participantId, operations: pending.operations },
-        })
-        if (!result.ok) {
-          pendingDraftOperations.current.shift()
-          const latest = client.getSnapshot()?.drafts[pending.draftId]
-          if (latest !== undefined && input !== undefined) {
-            applyingRemote.current = true
-            input.setDraft(latest.text)
-            lastLocalText.current = latest.text
-            queueMicrotask(() => { applyingRemote.current = false })
-          }
-          break
-        }
-        pendingDraftOperations.current.shift()
-      }
-    } finally {
-      flushingDraftOperations.current = false
-    }
+  }, [client, connected, draftId, owner.areaId, owner.editorId, owner.sessionId])
+  // The shared draft is Host state. The binding reconciles the real DSH
+  // composer with it through the draft OT adapter: unconfirmed local typing
+  // is transformed against remote operations instead of being overwritten.
+  useEffect(() => {
+    if (input === undefined || draftId === undefined) return
+    const binding = createWorkbenchSharedDraftBinding({
+      client, draftId,
+      getEditorText: () => { const value = input.state.getSnapshot().draft; return typeof value === 'string' ? value : '' },
+      setEditorText: text => { input.setDraft(text) },
+      isComposing: () => composing.current,
+    })
+    draftBinding.current = binding
+    return () => { binding.dispose(); if (draftBinding.current === binding) draftBinding.current = undefined }
   }, [client, draftId, input])
-  useEffect(() => {
-    if (draftId === undefined) pendingDraftOperations.current = []
-    else pendingDraftOperations.current = pendingDraftOperations.current.filter(value => value.draftId === draftId)
-  }, [draftId])
-  useEffect(() => {
-    if (input === undefined || draft === undefined || draftId === undefined || composing.current || client.getState() !== 'connected') return
-    const sharedText = draft.text
-    if (lastLocalText.current === undefined) {
-      lastLocalText.current = draftText
-      if (draftText.length === 0 && sharedText.length > 0) {
-        applyingRemote.current = true
-        input.setDraft(sharedText)
-        lastLocalText.current = sharedText
-        queueMicrotask(() => { applyingRemote.current = false })
-      } else if (draftText.length > 0 && sharedText.length === 0) {
-        pendingDraftOperations.current.push({ draftId, requestId: `${Date.now()}-${Math.random()}`, operations: textDelta('', draftText) })
-        void flushDraftOperations()
-      }
-      return
-    }
-    if (applyingRemote.current) return
-    if (draftText === sharedText) {
-      lastLocalText.current = draftText
-      return
-    }
-    // A remote event arrived while the local editor had not changed. Apply it
-    // into the real DSH composer so every surface renders the same draft.
-    if (lastLocalText.current === draftText) {
-      applyingRemote.current = true
-      input.setDraft(sharedText)
-      lastLocalText.current = sharedText
-      queueMicrotask(() => { applyingRemote.current = false })
-      return
-    }
-    const previous = lastLocalText.current
-    const operations = textDelta(previous, draftText)
-    lastLocalText.current = draftText
-    pendingDraftOperations.current.push({ draftId, requestId: `${Date.now()}-${Math.random()}`, operations })
-    void flushDraftOperations()
-  }, [client, draft, draftId, draftText, flushDraftOperations, input])
+  useEffect(() => { draftBinding.current?.editorChanged() }, [draftText])
   useEffect(() => {
     if (input === undefined || draft === undefined || draftId === undefined || client.getState() !== 'connected') return
     const attachments = (inputSnapshot.attachmentIds ?? []).map(value => String(value))
@@ -323,7 +319,10 @@ function SharePresenceBar(props: {
   conversation?: ConversationSnapshot
 }) {
   if (props.owner.collaborationClient === undefined) return null
-  return <CollaborationPresenceBar {...props} client={props.owner.collaborationClient} />
+  return <>
+    <CollaborationPresenceBar {...props} client={props.owner.collaborationClient} />
+    <RemoteDraftCarets client={props.owner.collaborationClient} owner={props.owner} scopeRef={props.scopeRef} />
+  </>
 }
 function conversationPresentationOf(
   sessionId: string | undefined,
@@ -650,7 +649,7 @@ export function createWorkbenchNativeConversationEditors(ctx: Context) {
       ? <SessionProvider session={reference}>{content}</SessionProvider>
       : <>{header}{content}</>
     const scopeRef = useRef<HTMLDivElement>(null)
-    return <div ref={scopeRef} data-workbench-native-conversation={view} data-workbench-session-id={owner.sessionId} data-workbench-conversation-ready={presentation.phase !== 'settling'} style={{ display: 'flex', minHeight: 0, height: '100%', flexDirection: 'column' }}>
+    return <div ref={scopeRef} data-workbench-native-conversation={view} data-workbench-session-id={owner.sessionId} data-workbench-conversation-ready={presentation.phase !== 'settling'} style={{ position: 'relative', display: 'flex', minHeight: 0, height: '100%', flexDirection: 'column' }}>
       {view === 'chat' ? <SharePresenceBar ctx={ctx} owner={owner} binding={reference.binding} scopeRef={scopeRef} session={session as SessionSnapshot} conversation={conversation} /> : null}
       <WorkbenchPageTransition loading={presentation.phase === 'settling'} label={view === 'trajectory' ? '轨迹' : owner.instanceId === 'bay-agent-main' ? 'Bay Agent' : '对话'} icon={view === 'trajectory' ? 'trajectory' : 'message'}>{renderedContent}</WorkbenchPageTransition>
     </div>

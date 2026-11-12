@@ -266,7 +266,7 @@ describe('Host browser Workbench window controller', () => {
     expect(response.status).toBe(400)
     await dispose?.()
     expect(unregisterRpc).toHaveBeenCalledOnce()
-    expect(unregisterFetch).toHaveBeenCalledTimes(7)
+    expect(unregisterFetch).toHaveBeenCalledTimes(11)
   })
 
   it('registers desktop WebServer RPC routes with Connection response envelopes', async () => {

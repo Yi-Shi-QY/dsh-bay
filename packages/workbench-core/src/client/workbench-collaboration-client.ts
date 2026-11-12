@@ -182,8 +182,9 @@ export function createWorkbenchCollaborationClient(options: WorkbenchCollaborati
     else if (event.kind === 'canvas.layout.changed') snapshot = { ...snapshot, sharedCanvas: { ...snapshot.sharedCanvas, layout: event.payload } }
     else if (event.kind === 'canvas.floating-panels.changed' && Array.isArray(event.payload)) snapshot = { ...snapshot, sharedCanvas: { ...snapshot.sharedCanvas, floatingPanels: event.payload } }
     else if (event.kind === 'task.changed' && isRecord(event.payload) && Array.isArray(event.payload.tasks)) snapshot = { ...snapshot, tasks: event.payload.tasks }
-    else if (event.kind === 'draft.created' && isRecord(event.payload) && typeof event.payload.draftId === 'string') {
-      const draft = event.payload as unknown as WorkbenchCollaborationSnapshotV1['drafts'][string]
+    else if ((event.kind === 'draft.created' || event.kind === 'draft.cleared') && isRecord(event.payload) && typeof event.payload.draftId === 'string') {
+      const { baseRevision: _baseRevision, operations: _operations, ...fields } = event.payload
+      const draft = fields as unknown as WorkbenchCollaborationSnapshotV1['drafts'][string]
       snapshot = { ...snapshot, drafts: { ...snapshot.drafts, [draft.draftId]: draft } }
     }
     else if (event.kind === 'draft.changed' && isRecord(event.payload) && typeof event.payload.draftId === 'string') {

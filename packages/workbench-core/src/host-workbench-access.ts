@@ -357,7 +357,7 @@ export async function executeWorkbenchCollaborationCommand(access: HostWorkbench
     const bytes = Buffer.from(encoded, 'base64')
     if (typeof payload.expectedHash === 'string') {
       const current = await access.directory.readProjectFile(workbenchId, relativePath)
-      if (contentHash(current) !== payload.expectedHash) throw new WorkbenchAccessError('revision-conflict', '文件已被其他参与者修改，请重新读取后重试。', 409)
+      if (contentHash(current) !== payload.expectedHash) throw new WorkbenchAccessError('file-conflict', '文件已被其他参与者修改，请重新读取后重试。', 409)
     }
     await access.directory.writeProjectFile(workbenchId, relativePath, bytes)
     return { relativePath, bytes: bytes.byteLength, hash: contentHash(bytes) }
@@ -506,16 +506,18 @@ export class HostWorkbenchAccess {
     if (current.actor !== 'lan-guest') return
     const grant = current.grant!
     if (!grant.capabilities.includes(capability)) throw new WorkbenchAccessError('capability-denied', '此操作需要主控授权：' + capability)
-    const areaId = target.areaId ?? (target.sessionId ? this.sessionTarget(target.sessionId)?.areaId : undefined)
     if (target.relativePath !== undefined) {
       const relative = target.relativePath
       if (relative.startsWith('/') || relative.includes('\\') || relative.split('/').some(part => part === '..' || part.toLowerCase() === '.bay') || /[\u0000-\u001f:]/u.test(relative)) throw new WorkbenchAccessError('path-scope-denied', '文件路径不在授权范围内。')
-      const within = (value: string, prefix: string) => prefix === '' || value === prefix || value.startsWith(prefix + '/')
       const root = realpathSync(record.fileWorkbench!.rootPath!), absolute = path.resolve(root, relative)
       let existing = absolute
       while (!existsSync(existing) && path.dirname(existing) !== existing) existing = path.dirname(existing)
       const resolved = path.resolve(realpathSync(existing), path.relative(existing, absolute))
       const actual = path.relative(root, resolved).split(path.sep).join('/')
+      // The lexical path is inside the Workbench; the resolved one must be
+      // too, otherwise a symlink or junction leads out of the shared root or
+      // into the Host-private `.bay` directory.
+      if (actual === '..' || actual.startsWith('../') || path.isAbsolute(actual) || actual.split('/').some(part => part.toLowerCase() === '.bay')) throw new WorkbenchAccessError('path-scope-denied', '文件链接目标不在工作台内。')
     }
   }
   /** Build the full, redacted Workbench seed used by shared-control sessions. */
@@ -558,9 +560,13 @@ export class HostWorkbenchAccess {
    * durable v3 document before the patch is committed.
    */
   async persistCollaborationLayout(workbenchId: string, layout: unknown) {
-    const candidate = validateLayout(layout)
-    if (candidate === undefined) throw new WorkbenchAccessError('invalid-layout', '共享布局无效，无法保存。', 400)
-    const document = migrateDocumentV2ToV3(candidate)
+    const shape = layout as { version?: unknown; root?: unknown; activeGroupId?: unknown } | null
+    if (typeof shape !== 'object' || shape === null || shape.version !== 2 || typeof shape.root !== 'object' || shape.root === null || typeof shape.activeGroupId !== 'string') {
+      throw new WorkbenchAccessError('invalid-layout', '共享布局无效，无法保存。', 400)
+    }
+    let document: ReturnType<typeof migrateDocumentV2ToV3>
+    try { document = migrateDocumentV2ToV3(structuredClone(layout) as Parameters<typeof migrateDocumentV2ToV3>[0]) }
+    catch { throw new WorkbenchAccessError('invalid-layout', '共享布局无法转换为工作台定义。', 400) }
     if (!validateWorkbenchDocumentV3(document)) throw new WorkbenchAccessError('invalid-layout', '共享布局无法转换为工作台定义。', 400)
     const snapshot = this.directory.getSnapshot()
     const record = snapshot.value.workbenches[workbenchId]

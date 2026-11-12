@@ -1,6 +1,6 @@
 # Contributing to DSH Bay
 
-The current candidate is `dsh-bay@0.2.2-alpha.18.1`, targeting DSH `0.2.2-rc.1`. Start with the [documentation index](docs/README.md), [architecture](docs/ARCHITECTURE.zh-CN.md), [source map](docs/REPOSITORY-STRUCTURE.md), and [validation record](docs/VALIDATION.md).
+The current candidate is `dsh-bay@0.2.2-alpha.18.2`, targeting DSH `0.2.2-rc.1`. Start with the [documentation index](docs/README.md), [architecture](docs/ARCHITECTURE.zh-CN.md), [source map](docs/REPOSITORY-STRUCTURE.md), and [validation record](docs/VALIDATION.md).
 
 ## Preserve the domain boundaries
 

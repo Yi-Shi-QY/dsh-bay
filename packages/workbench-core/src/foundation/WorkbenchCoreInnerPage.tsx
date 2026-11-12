@@ -113,6 +113,8 @@ export type WorkbenchCoreInnerPageProps =
  * The Workbench surface is an overlay contribution, so official DSH remains
  * mounted and untouched until the user explicitly enters Workbench mode.
  */
+import { WorkbenchSharedCanvasViewport } from './WorkbenchSharedCanvasViewport.tsx'
+
 export function WorkbenchCoreInnerPage(props: WorkbenchCoreInnerPageProps): ReactNode {
   const fallbackRuntime = useMemo(() => createFloatingWorkspaceRuntime(), [])
   const runtime = props.floatingRuntime ?? fallbackRuntime
@@ -319,7 +321,9 @@ function WorkbenchCoreInnerPageView(props: WorkbenchCoreInnerPageProps): ReactNo
 
   return createPortal(<div data-workbench-inner-page data-workbench-mode={mode.mode} data-workbench-id={mode.workbenchId} data-workbench-surface={surfaceContext.kind} data-workbench-desktop-content={desktopGeometry.desktop || undefined} aria-busy={mode.mode === 'exiting'} style={surfaceStyle}>
     <div {...(mode.mode === 'exiting' ? { inert: '' } : {})} style={{ position: 'absolute', inset: 0 }}>
-      <WorkbenchFrame {...frameProps} />
+      <WorkbenchSharedCanvasViewport client={props.collaborationClient} enabled={surfaceContext.kind === 'lan-participant'}>
+        <WorkbenchFrame {...frameProps} />
+      </WorkbenchSharedCanvasViewport>
     </div>
     {catalog.length === 0 && surfaceView === 'workbench' ? <section data-workbench-core-empty-state style={{
       position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', pointerEvents: 'none',

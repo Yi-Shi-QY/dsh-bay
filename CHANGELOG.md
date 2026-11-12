@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.2.2-alpha.18.2 — private staging
+
+- Joined the browser owner and the DSH desktop owner to the same Host
+  collaboration session as LAN participants. A session is held per user, so
+  stopping a share removes its participants without ending the owner's session.
+- Replaced whole-text draft overwrites with a client OT adapter: unconfirmed
+  local typing is transformed against remote operations, input method
+  composition is never broadcast half finished, and nothing is submitted while
+  the Host is unreachable.
+- An accepted message now clears the shared draft of its Session for every
+  participant as one Host operation.
+- LAN participants render the owner's logical canvas size, scaled to their
+  page. Remote cursors and selections are shown in the shared draft.
+- Shared writes are refused while the collaboration is recovering or has
+  ended, and the surface says which of the two it is.
+- Hardened Host checks: symlink targets outside the Workbench root or inside
+  `.bay` are refused, file write conflicts return `file-conflict`, and layout
+  control leases cover the layout document and every split in it.
+- LAN collaboration has passed automated tests only. It has not been run in a
+  real DSH with a second device.
+
 ## 0.2.2-alpha.18.1 — private staging
 
 - Added explicit desktop and browser-owner workbench surfaces with a shared

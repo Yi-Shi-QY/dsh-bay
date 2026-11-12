@@ -15,6 +15,7 @@ import { SHARED_CONTROL_GRANT, WORKBENCH_ACCESS_SERVICE, parseWorkbenchGrant } f
 import { createFileWorkbenchCollaborationStore, createWorkbenchCollaborationManager } from './host-workbench-collaboration.ts'
 import { executeWorkbenchCollaborationCommand, type HostWorkbenchAccess } from './host-workbench-access.ts'
 import { WORKBENCH_NATIVE_SERVICE } from './host-workbench-native-service.ts'
+import { createWorkbenchDesktopCollaborationChannel, WORKBENCH_DESKTOP_COLLABORATION_ACTIONS } from './host-workbench-collaboration-desktop.ts'
 import type { createGuestNativeTransport } from './host-workbench-native-access.ts'
 import { createWorkbenchOwnerGateway } from './host-workbench-owner-gateway.ts'
 
@@ -808,12 +809,10 @@ export function installWorkbenchBrowserWindowController(ctx: BrowserWindowHostCo
     openExternalBrowser,
     prepareOwnerUrl: async (view): Promise<string> => {
       if (!native) throw new Error('browser-scoped-transport-unavailable')
-      // The browser-owner surface must keep using the single-workbench native
-      // Host path until the LAN shared-control surface is explicitly joined.
-      // Starting collaboration here changes the owner canvas into a separate
-      // in-memory projection and makes ordinary browser layout/editor actions
-      // depend on the unfinished LAN protocol.
-      ownerGateway ??= createWorkbenchOwnerGateway({ access, native, upstreamOrigin: server.getOrigin(),
+      // The browser owner joins the same Host collaboration session as LAN
+      // participants, so its layout, focus and drafts are the shared facts.
+      // Each owner view holds the session, which outlives a stopped share.
+      ownerGateway ??= createWorkbenchOwnerGateway({ access, native, upstreamOrigin: server.getOrigin(), collaboration: collaborations,
         handleView: async (action, payload): Promise<ConnectionRpcHandlerResult> => {
           const result = await controller.handle(action, payload)
           if (result.ok && ['attach', 'ready', 'suspend', 'reclaimed', 'reclaim', 'failed', 'closed'].includes(action)) native.refresh()
@@ -864,6 +863,11 @@ export function installWorkbenchBrowserWindowController(ctx: BrowserWindowHostCo
           : 'layout' as const
       access.authorize(context, capability, { workbenchId })
     },
+  })
+  // A sent message empties the shared draft of its Session for every
+  // participant, whichever surface sent it.
+  const stopPromptClear = native?.onPromptAccepted?.(({ workbenchId, sessionId, actor, accessId }) => {
+    collaborations.get(workbenchId)?.clearSessionDrafts(sessionId, actor === 'lan-guest' && accessId !== undefined ? accessId : 'owner')
   })
   // The desktop owner still writes the durable Workbench through the normal
   // directory service. Reflect those commits into an active collaboration
@@ -976,6 +980,24 @@ export function installWorkbenchBrowserWindowController(ctx: BrowserWindowHostCo
       } catch { return new Response(null, { status: 400 }) }
     },
   }))
+  // The desktop owner joins the collaboration session of a shared Workbench
+  // through the same authenticated exact routes. Only owner Peers reach them.
+  const desktopCollaboration = createWorkbenchDesktopCollaborationChannel({
+    collaboration: collaborations,
+    canControl: workbenchId => access.controller(workbenchId) === 'desktop',
+  })
+  const unregisterDesktopCollaboration = WORKBENCH_DESKTOP_COLLABORATION_ACTIONS.map(action => registerShareRoutes({
+    path: `/api/workbench-collaboration/${action}`, methods: ['POST'], requestBody: 'buffered',
+    async fetch(request) {
+      try {
+        const envelope = await request.json() as { type?: unknown; rpcId?: unknown; method?: unknown; payload?: unknown }
+        if (envelope.type !== 'client-request' || typeof envelope.rpcId !== 'string' || envelope.method !== `workbench-collaboration/${action}`) return new Response(null, { status: 400 })
+        const result = await desktopCollaboration.handle(action, envelope.payload)
+        const body = result.ok ? { ok: true, value: result.value } : { ok: false, error: { code: result.code, message: result.code, details: {} } }
+        return new Response(JSON.stringify({ type: 'server-response', rpcId: envelope.rpcId, result: body }), { status: 200, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } })
+      } catch { return new Response(null, { status: 400 }) }
+    },
+  }))
   // DSH Desktop routes its app protocol through the authenticated shared
   // `/api` carrier. A standalone RPC prefix works on plain HTTP but is
   // rejected by `dsh-app://` with HTTP 405.
@@ -1029,8 +1051,11 @@ export function installWorkbenchBrowserWindowController(ctx: BrowserWindowHostCo
     void shareGateway?.close()
     void collaborations.dispose()
     shareSessions.dispose()
+    stopPromptClear?.()
     stopCollaborationRefresh()
     unregisterWorkbenchDocument?.(); unregisterDesktop?.(); void unregister(); void unregisterClose()
     for (const dispose of unregisterShareRoutes) void dispose()
+    desktopCollaboration.dispose()
+    for (const dispose of unregisterDesktopCollaboration) void dispose()
   }
 }

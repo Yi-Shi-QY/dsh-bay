@@ -104,6 +104,14 @@ export interface WorkbenchNativeApproval {
  * Terminate native HTTP/mux at a real non-owner Peer. An upstream owner cookie
  * is deliberately never used for a guest request, including read subscriptions.
  */
+/** A message the native Session path accepted for a Workbench Session. */
+export interface WorkbenchPromptAcceptedV1 {
+  readonly workbenchId: string
+  readonly sessionId: string
+  readonly actor: 'desktop' | 'browser-owner' | 'lan-guest'
+  readonly accessId?: string
+}
+
 export function createGuestNativeTransport(ctx: Context, access: HostWorkbenchAccess) {
   const connection = ctx.get('connection', false), gateway = ctx.get('typertGateway', false), remoteAccess = ctx.get('remoteAccess', false)
   if (!connection || !gateway || !remoteAccess) return undefined
@@ -116,6 +124,10 @@ export function createGuestNativeTransport(ctx: Context, access: HostWorkbenchAc
   const approvals = new Map<string, { value: WorkbenchNativeApproval; digest: string; resolve: (allow: boolean) => void }>()
   const approved = new Map<ToolExecution['token'], { accessId: string; revisions: Readonly<Record<string, number>>; workbenchRevision: number; digest: string }>()
   const snapshotExecuting = new Map<string, Set<Agent>>()
+  const promptListeners = new Set<(input: WorkbenchPromptAcceptedV1) => void>()
+  const notifyPromptAccepted = (input: WorkbenchPromptAcceptedV1) => {
+    for (const listener of [...promptListeners]) { try { listener(input) } catch { /* a listener must not fail the accepted prompt */ } }
+  }
   const disposers: (() => void)[] = []
   const wss = new WebSocketServer({ noServer: true, maxPayload: LIMIT, perMessageDeflate: false })
   let disposed = false
@@ -509,6 +521,10 @@ export function createGuestNativeTransport(ctx: Context, access: HostWorkbenchAc
           }
           const [namespace, method] = endpoint.split('/')
           const value = await gateway.invoke({ namespace: namespace!, method: method!, args: obj(obj(envelope.payload).args), peer: peerFor(input), signal: request.signal })
+          if (endpoint === 'session/prompt') {
+            const accepted = current(input)
+            notifyPromptAccepted({ workbenchId: accepted.workbenchId!, sessionId: targetId, actor: accepted.actor === 'browser-owner' ? 'browser-owner' : 'lan-guest', accessId: accepted.accessId })
+          }
           return Response.json({ type: 'server-response', rpcId, result: { ok: true, value } })
         }
         const headers = new Headers({ 'content-type': 'application/json' })
@@ -519,6 +535,9 @@ export function createGuestNativeTransport(ctx: Context, access: HostWorkbenchAc
       }
     },
     openStream,
+    /** Subscribe to accepted prompts, including the desktop owner's. */
+    onPromptAccepted(listener: (input: WorkbenchPromptAcceptedV1) => void) { promptListeners.add(listener); return () => { promptListeners.delete(listener) } },
+    notifyPromptAccepted,
     handleUpgrade(request: IncomingMessage, socket: Duplex, head: Buffer, input: WorkbenchAccessContext,
       authorizeFrame?: (endpoint: string, payload: unknown, phase: 'open' | 'item' | 'out') => void) {
       try { current(input); if (request.url !== '/api/remote.mux') throw failure('不支持的流地址。') }
@@ -616,6 +635,7 @@ export function installWorkbenchNativeMutationRoutes(ctx: Context, access: HostW
         if (target) access.authorize(context, endpoint === 'session/prompt' ? 'message' : 'tasks', target)
         const [namespace, method] = endpoint.split('/')
         const value = await gateway.invoke({ namespace: namespace!, method: method!, args, peer: connection.browserPeer, signal: request.signal })
+        if (endpoint === 'session/prompt' && target) transport.notifyPromptAccepted?.({ workbenchId: target.workbenchId, sessionId: targetId, actor: 'desktop' })
         return Response.json({ type: 'server-response', rpcId, result: { ok: true, value } })
       } catch (error) {
         return Response.json({ type: 'server-response', rpcId: rpcId ?? 'invalid-request', result: { ok: false, error: gateway.wireStream.failure(error) } })

@@ -97,6 +97,7 @@ export async function createWorkbenchOwnerGateway(options: WorkbenchOwnerGateway
       const cookieName = 'bay-owner-' + randomBytes(8).toString('hex'), cookieHash = digest(cookie)
       const sockets = new Map<Duplex, string>()
       const collaborationWss = new WebSocketServer({ noServer: true })
+      const collaborationHolder = `browser-owner:${input.windowId}`
       const pageProofs = new Set<string>()
       let activeProof: string | undefined, activePageId: string | undefined
       let view: OwnerView | undefined, ownerCookie = '', ticketAvailable = true, documentHtml: string | undefined
@@ -265,6 +266,7 @@ export async function createWorkbenchOwnerGateway(options: WorkbenchOwnerGateway
           const pageProof = randomBytes(24).toString('base64url'); pageProofs.add(pageProof)
           if (pageProofs.size > 32) for (const item of pageProofs) { if (item !== activeProof) { pageProofs.delete(item); break } }
           const collaboration = options.collaboration === undefined ? undefined : await options.collaboration.start(input.workbenchId, 'owner')
+          options.collaboration?.hold(input.workbenchId, collaborationHolder)
           const collaborationMarker = collaboration === undefined ? '' : `globalThis.__WORKBENCH_COLLABORATION__=${scriptJson({ collaborationId: collaboration.collaborationId, participantId: 'owner', role: 'owner' })};`
           const injection = `<script>globalThis.__WORKBENCH_WINDOW_VIEW__=${scriptJson(view)};globalThis.__DSH_REMOTE_ACCESS__=${scriptJson(options.native.bootstrap(context))};globalThis.__WORKBENCH_GATEWAY_PAGE__=${scriptJson(pageProof)};${collaborationMarker}
  (()=>{const p=globalThis.__WORKBENCH_GATEWAY_PAGE__,f=globalThis.fetch.bind(globalThis);globalThis.fetch=(input,init)=>{const u=new URL(input instanceof Request?input.url:String(input),location.href);if(u.origin===location.origin&&u.pathname.startsWith('/api/')){const h=new Headers(init?.headers??(input instanceof Request?input.headers:undefined));h.set('${PAGE_HEADER}',p);return f(input,{...init,headers:h})}return f(input,init)};const W=globalThis.WebSocket;globalThis.WebSocket=class extends W{constructor(url,protocols){const u=new URL(String(url),location.href);if(u.host===location.host&&(u.pathname==='/api/remote.mux'||u.pathname==='/api/workbench-collaboration'))u.searchParams.set('bay-page',p);if(protocols===undefined)super(u.href);else super(u.href,protocols)}};if(typeof Worker==='function'){const send=Worker.prototype.postMessage;Worker.prototype.postMessage=function(message,transfer){if(message&&typeof message.url==='string'){const u=new URL(message.url,location.href);if(u.origin===location.origin&&u.pathname==='/api/session/uploadFileBinary')message={...message,headers:{...message.headers,'${PAGE_HEADER}':p}}}return transfer===undefined?send.call(this,message):send.call(this,message,transfer)}}})();</script>`
@@ -336,7 +338,9 @@ export async function createWorkbenchOwnerGateway(options: WorkbenchOwnerGateway
         closed = true
         clearTimeout(expiredTimer); if (revokedTimer) clearTimeout(revokedTimer); unsubscribe()
         for (const socket of sockets.keys()) socket.destroy()
+        for (const client of collaborationWss.clients) client.close(1001, 'Owner view closed')
         collaborationWss.close()
+        await options.collaboration?.stop(input.workbenchId, collaborationHolder).catch(() => {})
         server.closeAllConnections()
         await new Promise<void>(resolve => server.close(() => resolve()))
       }

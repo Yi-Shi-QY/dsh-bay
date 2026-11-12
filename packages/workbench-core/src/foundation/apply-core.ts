@@ -69,6 +69,7 @@ import {
   WORKBENCH_WINDOW_CONTROLLER_SERVICE_NAME,
 } from '../client/workbench-window-controller.ts'
 import { createBrowserWindowController } from '../client/browser-window-controller.ts'
+import { createDesktopWorkbenchCollaborationClient } from '../client/workbench-collaboration-desktop.ts'
 import { requestBrowserWorkbenchReclaim } from '../client/resolve-browser-window-view.ts'
 import { readWorkbenchWindowView } from '../client/workbench-window-view.ts'
 import type { WorkbenchSurfaceContextV1, WorkbenchSurfaceContextV2 } from '../client/workbench-surface-context.ts'
@@ -237,6 +238,34 @@ export function applyWorkbenchCoreFoundation(
       return () => collaborationClient.disconnect()
     }, 'workbench: shared-control collaboration')
   }
+  // The desktop owner has no page marker. It follows the collaboration
+  // session of the active Workbench while that Workbench is shared, so the
+  // owner's presence and drafts are the same facts LAN participants see.
+  const desktopCollaboration = collaborationMarker === undefined && windowView === undefined && typeof window !== 'undefined' && shareController !== undefined
+    ? createDesktopWorkbenchCollaborationClient({
+      call: async (action, payload) => {
+        const rpc = resolveConnectionRpc()
+        if (rpc === undefined) throw new Error('workbench-collaboration-connection-unavailable')
+        const result = await rpc.call('/api', `workbench-collaboration/${action}`, payload, AbortSignal.timeout(10_000))
+        if (!result.ok) throw new Error(result.error.code)
+        return result.value
+      },
+    })
+    : undefined
+  if (desktopCollaboration !== undefined && shareController !== undefined) {
+    ctx.effect(() => {
+      const sync = () => {
+        const workbenchId = settings.getSnapshot().value?.activeWorkbenchId
+        const share = shareController.getSnapshot()
+        const shared = workbenchId !== undefined && (share.links[workbenchId] !== undefined || share.sessions.some(row => row.workbenchId === workbenchId))
+        desktopCollaboration.setTarget(shared ? workbenchId : undefined)
+      }
+      const stops = [shareController.subscribe(sync), settings.subscribe(sync)]
+      sync()
+      return () => { for (const stop of stops) stop(); desktopCollaboration.dispose() }
+    }, 'workbench: desktop owner collaboration')
+  }
+  const frameCollaborationClient = collaborationClient ?? desktopCollaboration?.client
   const browserController = suppliedWindowController === undefined
     ? createBrowserWindowController({
       restoreDesktop: async () => {
@@ -351,7 +380,17 @@ export function applyWorkbenchCoreFoundation(
     ],
     coreVersion: WORKBENCH_CORE_VERSION,
     dshGeneration: WORKBENCH_DSH_GENERATION,
-    readDshInventory: () => readDshExtensionInventoryV1(ctx.remote),
+    readDshInventory: readWorkbenchCollaborationPageMarker()?.role === 'participant'
+      ? async () => {
+        const response = await workbenchFetch('/api/workbench/directory/v1', {
+          method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ action: 'extension-inventory' }),
+        })
+        const result = await response.json() as { value?: unknown; error?: string }
+        if (!response.ok || result.value === undefined) throw new Error(result.error ?? '插件清单服务不可用。')
+        return result.value as Awaited<ReturnType<typeof readDshExtensionInventoryV1>>
+      }
+      : () => readDshExtensionInventoryV1(ctx.remote),
     subscribeDshChanges: listener => ctx.remote.$on('plugin-manager/changed', listener),
     subscribeConnectionReset: listener => {
       const off = ctx.on?.('connection/reset', listener)
@@ -654,7 +693,7 @@ export function applyWorkbenchCoreFoundation(
       workbenchDirectory: directory,
       windowController,
       ...(shareController === undefined ? {} : { shareController }),
-      ...(collaborationClient === undefined ? {} : { collaborationClient }),
+      ...(frameCollaborationClient === undefined ? {} : { collaborationClient: frameCollaborationClient }),
       runtimeMetrics,
       connectWorkspace: async (workspaceId, options) => {
         const previous = new Set(ctx.sessions.list.getSnapshot().ids)

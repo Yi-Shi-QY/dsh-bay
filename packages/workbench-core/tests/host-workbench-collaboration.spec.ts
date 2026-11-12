@@ -91,6 +91,83 @@ describe('Host Workbench collaboration session', () => {
     })
     expect(denied).toMatchObject({ ok: false, code: 'control-lease-required' })
   })
+
+  it('lets only the holder of a split lease write the layout until the lease ends', async () => {
+    let now = 1_000
+    const session = createWorkbenchCollaborationSession('collab-split', 'workbench-split', 'owner', {}, { now: () => now })
+    session.connect({ collaborationId: 'collab-split', workbenchId: 'workbench-split', participantId: 'owner', displayName: 'Owner', role: 'owner' })
+    session.connect({ collaborationId: 'collab-split', workbenchId: 'workbench-split', participantId: 'guest', displayName: 'Guest', role: 'participant' })
+    const layout = (ratio: number) => ({ version: 2, ratio })
+    const write = (participantId: string, requestId: string, ratio: number, leaseId?: string) => session.command({
+      requestId, collaborationId: 'collab-split', workbenchId: 'workbench-split', participantId, baseRevision: 0,
+      operation: { kind: 'canvas.set-layout', layout: layout(ratio), ...(leaseId === undefined ? {} : { leaseId }) },
+    })
+    const lease = session.acquireControlLease('guest', 'split:main')
+    if (!lease.ok) throw new Error('lease not granted')
+    expect(session.acquireControlLease('owner', 'split:main')).toEqual({ ok: false, error: 'control-lease-held' })
+    expect(await write('guest', 'split-guest', 0.4, lease.leaseId)).toMatchObject({ ok: true })
+    expect(await write('owner', 'split-owner-blocked', 0.7)).toMatchObject({ ok: false, code: 'control-lease-required' })
+    expect(session.snapshot().sharedCanvas.layout).toEqual(layout(0.4))
+    // Using the lease renews it; without further writes it expires on its own.
+    now += 1_500
+    expect(await write('guest', 'split-guest-2', 0.45, lease.leaseId)).toMatchObject({ ok: true })
+    now += 1_500
+    expect(await write('owner', 'split-owner-still-blocked', 0.7)).toMatchObject({ ok: false, code: 'control-lease-required' })
+    now += 2_001
+    expect(await write('owner', 'split-owner', 0.7)).toMatchObject({ ok: true })
+    expect(await write('guest', 'split-guest-expired', 0.2, lease.leaseId)).toMatchObject({ ok: false, code: 'control-lease-required' })
+    expect(session.snapshot().sharedCanvas.layout).toEqual(layout(0.7))
+  })
+
+  it('releases layout control as soon as the controller disconnects', async () => {
+    const session = createWorkbenchCollaborationSession('collab-drop', 'workbench-drop', 'owner')
+    session.connect({ collaborationId: 'collab-drop', workbenchId: 'workbench-drop', participantId: 'owner', displayName: 'Owner', role: 'owner' })
+    session.connect({ collaborationId: 'collab-drop', workbenchId: 'workbench-drop', participantId: 'guest', displayName: 'Guest', role: 'participant' })
+    expect(session.acquireControlLease('guest', 'split:main').ok).toBe(true)
+    session.disconnect('guest')
+    expect(await session.command({
+      requestId: 'drop-owner', collaborationId: 'collab-drop', workbenchId: 'workbench-drop', participantId: 'owner', baseRevision: 0,
+      operation: { kind: 'canvas.set-layout', layout: { version: 2 } },
+    })).toMatchObject({ ok: true })
+  })
+
+  it('keeps draft typing from invalidating a concurrent Workbench command', async () => {
+    const executed: string[] = []
+    const session = createWorkbenchCollaborationSession('collab-rev', 'workbench-rev', 'owner', {
+      drafts: { draft: { draftId: 'draft', areaId: 'area', editorId: 'editor', text: '', revision: 0, attachments: [], selections: {} } },
+    }, { executeCommand: ({ operation }) => { executed.push(operation.operation); return { done: true } } })
+    session.connect({ collaborationId: 'collab-rev', workbenchId: 'workbench-rev', participantId: 'owner', displayName: 'Owner', role: 'owner' })
+    session.connect({ collaborationId: 'collab-rev', workbenchId: 'workbench-rev', participantId: 'guest', displayName: 'Guest', role: 'participant' })
+    const base = session.snapshot().workbenchRevision
+    await session.command({
+      requestId: 'rev-typing', collaborationId: 'collab-rev', workbenchId: 'workbench-rev', participantId: 'guest', baseRevision: base,
+      operation: { kind: 'draft.apply', operation: { draftId: 'draft', baseRevision: 0, requestId: 'rev-typing', participantId: 'guest', operations: [{ type: 'insert', text: 'hi' }] } },
+    })
+    expect(session.snapshot().workbenchRevision).toBe(base)
+    expect(await session.command({
+      requestId: 'rev-area', collaborationId: 'collab-rev', workbenchId: 'workbench-rev', participantId: 'owner', baseRevision: base,
+      operation: { kind: 'workbench.command', operation: 'area.create' },
+    })).toMatchObject({ ok: true })
+    // A command built on the now superseded Workbench revision is refused
+    // with the latest snapshot and is not executed a second time.
+    const stale = await session.command({
+      requestId: 'rev-stale', collaborationId: 'collab-rev', workbenchId: 'workbench-rev', participantId: 'guest', baseRevision: base,
+      operation: { kind: 'workbench.command', operation: 'area.create' },
+    })
+    expect(stale).toMatchObject({ ok: false, code: 'revision-conflict', current: { schemaVersion: 1, workbenchId: 'workbench-rev' } })
+    expect(executed).toEqual(['area.create'])
+  })
+
+  it('reports a concurrent file write as an explicit file conflict', async () => {
+    const session = createWorkbenchCollaborationSession('collab-file', 'workbench-file-conflict', 'owner', {}, {
+      executeCommand: () => { throw Object.assign(new Error('file changed'), { code: 'file-conflict' }) },
+    })
+    session.connect({ collaborationId: 'collab-file', workbenchId: 'workbench-file-conflict', participantId: 'owner', displayName: 'Owner', role: 'owner' })
+    expect(await session.command({
+      requestId: 'file-write', collaborationId: 'collab-file', workbenchId: 'workbench-file-conflict', participantId: 'owner', baseRevision: 0,
+      operation: { kind: 'workbench.command', operation: 'project.write' },
+    })).toMatchObject({ ok: false, code: 'file-conflict' })
+  })
 })
 
 describe('Workbench collaboration manager', () => {
@@ -124,6 +201,106 @@ describe('Workbench collaboration manager', () => {
     expect(manager.getById(first.collaborationId)).toBe(first.session)
     await manager.stop('workbench-a')
     expect(manager.get('workbench-a')).toBeUndefined()
+  })
+
+  it('applies concurrent layout writes one after another', async () => {
+    let revision = 0
+    let writing = 0
+    let overlapped = false
+    const saved: unknown[] = []
+    const session = createWorkbenchCollaborationSession('collab-serial', 'workbench-serial', 'owner', {}, {
+      persistLayout: async ({ layout }) => {
+        // Like the directory writer: read a revision, wait, then commit it.
+        const expected = revision
+        writing += 1
+        if (writing > 1) overlapped = true
+        await new Promise(resolve => setTimeout(resolve, 5))
+        writing -= 1
+        if (expected !== revision) throw Object.assign(new Error('conflict'), { code: 'revision-conflict' })
+        revision += 1
+        saved.push(layout)
+      },
+    })
+    session.connect({ collaborationId: 'collab-serial', workbenchId: 'workbench-serial', participantId: 'owner', displayName: 'Owner', role: 'owner' })
+    const results = await Promise.all([1, 2, 3].map(marker => session.command({
+      requestId: `layout-${String(marker)}`, collaborationId: 'collab-serial', workbenchId: 'workbench-serial', participantId: 'owner', baseRevision: 0,
+      operation: { kind: 'canvas.set-layout', layout: { version: 2, marker } },
+    })))
+    expect(results.map(result => result.ok)).toEqual([true, true, true])
+    expect(overlapped).toBe(false)
+    expect(saved).toEqual([{ version: 2, marker: 1 }, { version: 2, marker: 2 }, { version: 2, marker: 3 }])
+    expect(session.snapshot().sharedCanvas.layout).toEqual({ version: 2, marker: 3 })
+  })
+
+  it('keeps a held session alive until its last holder lets go', async () => {
+    const manager = createWorkbenchCollaborationManager({ randomId: () => 'held' })
+    const started = await manager.start('workbench-held', 'owner')
+    manager.hold('workbench-held', 'lan-share')
+    manager.hold('workbench-held', 'browser-owner:window-1')
+    await manager.stop('workbench-held', 'lan-share')
+    expect(manager.get('workbench-held')).toBe(started.session)
+    // Letting go twice, or as an unknown holder, does not end the session.
+    await manager.stop('workbench-held', 'lan-share')
+    expect(manager.get('workbench-held')).toBe(started.session)
+    await manager.stop('workbench-held', 'browser-owner:window-1')
+    expect(manager.get('workbench-held')).toBeUndefined()
+    expect(manager.getById(started.collaborationId)).toBeUndefined()
+  })
+
+  it('ends a held session when it is stopped without a holder', async () => {
+    const manager = createWorkbenchCollaborationManager({ randomId: () => 'forced' })
+    await manager.start('workbench-forced', 'owner')
+    manager.hold('workbench-forced', 'lan-share')
+    await manager.stop('workbench-forced')
+    expect(manager.get('workbench-forced')).toBeUndefined()
+    // A new session starts without the old holder.
+    await manager.start('workbench-forced', 'owner')
+    await manager.stop('workbench-forced', 'browser-owner:window-2')
+    expect(manager.get('workbench-forced')).toBeUndefined()
+  })
+
+  it('removes a participant, its selections and its control lease from the shared state', async () => {
+    const session = createWorkbenchCollaborationSession('collab-remove', 'workbench-remove', 'owner', {
+      areas: [{ areaId: 'area-a' }], editors: [{ areaId: 'area-a', editorId: 'editor-a' }],
+    })
+    session.connect({ collaborationId: 'collab-remove', workbenchId: 'workbench-remove', participantId: 'owner', displayName: 'Owner', role: 'owner' })
+    session.connect({ collaborationId: 'collab-remove', workbenchId: 'workbench-remove', participantId: 'guest', displayName: 'Guest', role: 'participant' })
+    const send = (participantId: string, requestId: string, operation: Parameters<typeof session.command>[0]['operation']) =>
+      session.command({ requestId, collaborationId: 'collab-remove', workbenchId: 'workbench-remove', participantId, baseRevision: session.snapshot().workbenchRevision, operation })
+    await send('guest', 'ensure', { kind: 'draft.ensure', draftId: 'draft-a', areaId: 'area-a', editorId: 'editor-a' })
+    await send('guest', 'select', { kind: 'draft.set-selection', draftId: 'draft-a', selection: { start: 0, end: 0 }, baseRevision: 0 })
+    expect(session.acquireControlLease('guest', 'layout').ok).toBe(true)
+    const events: string[] = []
+    session.subscribe(event => { events.push(event.kind) })
+
+    session.remove('guest')
+    expect(session.snapshot().participants.map(row => row.participantId)).toEqual(['owner'])
+    expect(session.snapshot().drafts['draft-a']!.selections).toEqual({})
+    expect(events).toContain('participant.left')
+    expect(session.acquireControlLease('owner', 'layout').ok).toBe(true)
+    expect((await send('guest', 'after', { kind: 'canvas.set-focus', focus: { areaId: 'area-a', editorId: 'editor-a' } })).ok).toBe(false)
+    // The owner is never removed this way.
+    session.remove('owner')
+    expect(session.snapshot().participants.map(row => row.participantId)).toEqual(['owner'])
+  })
+
+  it('prefers the durable layout over a logged layout when a session is restored', async () => {
+    const store = createMemoryWorkbenchCollaborationStore()
+    let layout: unknown = { version: 2, marker: 'before' }
+    const options = { store, loadSeed: () => ({ sharedCanvas: { layout } }), persistLayout: (input: { layout: unknown }) => { layout = input.layout } }
+    const first = createWorkbenchCollaborationManager({ ...options, randomId: () => 'layout-a' })
+    const started = await first.start('workbench-layout', 'owner')
+    await started.session.command({
+      requestId: 'viewport', collaborationId: started.collaborationId, workbenchId: 'workbench-layout', participantId: 'owner', baseRevision: 0,
+      operation: { kind: 'canvas.set-viewport', viewport: { width: 1600, height: 900, scaleMode: 'contain' } },
+    })
+    // The desktop changes the Workbench while no session is running.
+    layout = { version: 2, marker: 'after' }
+    const second = createWorkbenchCollaborationManager({ ...options, randomId: () => 'layout-b' })
+    const restored = await second.start('workbench-layout', 'owner')
+    expect(restored.collaborationId).toBe(started.collaborationId)
+    expect(restored.session.snapshot().sharedCanvas.layout).toEqual({ version: 2, marker: 'after' })
+    expect(restored.session.snapshot().sharedCanvas.viewport.width).toBe(1600)
   })
 
   it('restores an active session with its original collaboration identity', async () => {

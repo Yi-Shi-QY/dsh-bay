@@ -78,6 +78,21 @@ describe('Workbench LAN share gateway', () => {
       const html = await document.text()
       expect(html).toContain('__WORKBENCH_WINDOW_VIEW__')
       expect(html).toContain('history.replaceState(null,"","/workbench")')
+      const view = JSON.parse(html.match(/__WORKBENCH_WINDOW_VIEW__=(\{[^;]+\});/u)![1]!) as { windowId: string; closeToken: string }
+      const windowRpc = (action: string, payload: unknown) => fetch(`http://${gateway.host}:${String(gateway.port)}/api/workbench-window/${action}`, {
+        method: 'POST', headers: { cookie: shareCookie!, 'content-type': 'application/json' },
+        body: JSON.stringify({ type: 'client-request', rpcId: action, method: `workbench-window/${action}`, payload }),
+      })
+      // The participant page registers itself with its own close token.
+      expect((await windowRpc('attach', { closeToken: view.closeToken, pageId: 'page-1' })).status).toBe(200)
+      expect((await windowRpc('attach', { closeToken: 'someone-else', pageId: 'page-1' })).status).toBe(403)
+      expect((await windowRpc('status', { windowId: view.windowId })).status).toBe(200)
+      // The browser client reads a floating handoff before it mounts.
+      const floating = await windowRpc('floating-read', { windowId: view.windowId, closeToken: view.closeToken })
+      expect(floating.status).toBe(200)
+      expect((await floating.json() as { result: { ok: boolean; value: unknown } }).result).toEqual({ ok: true, value: { snapshot: null } })
+      expect((await windowRpc('floating-read', { windowId: 'another-window' })).status).toBe(403)
+      expect((await windowRpc('reclaim', { windowId: view.windowId })).status).toBe(403)
       const proxied = await fetch(`http://${gateway.host}:${String(gateway.port)}/api/echo`, { method: 'POST', headers: { cookie: shareCookie!, 'content-type': 'text/plain' }, body: 'ok' })
       expect(proxied.status).toBe(403)
       expect(seenOwnerCookie).toBe('')

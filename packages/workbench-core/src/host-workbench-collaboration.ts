@@ -75,8 +75,17 @@ export interface WorkbenchCollaborationSessionViewV1 {
   /** Refresh durable Workbench facts without replacing live canvas or drafts. */
   refresh(seed: WorkbenchCollaborationSeedV1): void
   publishTaskSnapshot(tasks: readonly unknown[]): void
-  connect(input: WorkbenchCollaborationConnectV1): WorkbenchCollaborationSnapshotV1 | { readonly error: string }
+  /**
+   * Join the session. Every call counts as one connection of that
+   * participant unless `presenceOnly` is set, which only registers presence.
+   */
+  connect(input: WorkbenchCollaborationConnectV1, options?: { readonly presenceOnly?: boolean }): WorkbenchCollaborationSnapshotV1 | { readonly error: string }
+  /** Close one connection. The participant goes stale when its last one closes. */
   disconnect(participantId: string): void
+  /** Drop a participant whose access ended. Its presence leaves the shared state. */
+  remove(participantId: string): void
+  /** Clear the unsent drafts of a Session after the Host accepted its message. */
+  clearSessionDrafts(sessionId: string, actorId: string): void
   command(input: WorkbenchCommandEnvelopeV1): Promise<WorkbenchCommandResultV1>
   publishPresence(presence: ParticipantPresenceV1): void
   subscribe(listener: (event: WorkbenchCollaborationEventV1) => void): () => void
@@ -214,11 +223,15 @@ export function createWorkbenchCollaborationSession(
   const commandResults = new Map<string, WorkbenchCommandResultV1>()
   const eventLog: WorkbenchCollaborationEventV1[] = []
   const leases = new Map<string, Lease>()
+  const connectionCounts = new Map<string, number>()
   const state = makeState(collaborationId, workbenchId, ownerParticipantId, seed)
   if (options.initialSnapshot !== undefined) {
     state.workbenchRevision = options.initialSnapshot.workbenchRevision
     state.canvasRevision = options.initialSnapshot.canvasRevision
-    state.sharedCanvas = structuredClone(options.initialSnapshot.sharedCanvas)
+    state.sharedCanvas = {
+      ...structuredClone(options.initialSnapshot.sharedCanvas),
+      ...(seed.sharedCanvas?.layout === undefined ? {} : { layout: structuredClone(seed.sharedCanvas.layout) }),
+    }
     state.drafts = structuredClone(options.initialSnapshot.drafts)
     for (const participant of options.initialSnapshot.participants) state.participants[participant.participantId] = { ...participant, connectionState: 'stale', intent: 'recovering' }
     const persisted = options.initialSnapshot as PersistedCollaborationSnapshotV1
@@ -292,6 +305,20 @@ export function createWorkbenchCollaborationSession(
     for (const [key, lease] of leases) if (lease.participantId === participantId) leases.delete(key)
   }
 
+  /**
+   * Empty a draft. The event carries the delete as a draft operation, so a
+   * late operation from another participant is transformed against it and
+   * every client converges on the same text.
+   */
+  const clearDraft = (draft: SharedDraftStateV1, actorId: string, requestId?: string): SharedDraftStateV1 => {
+    const operations = draft.text.length === 0 ? [] : [{ type: 'delete' as const, count: draft.text.length }]
+    const selections = Object.fromEntries(Object.keys(draft.selections).map(participantId => [participantId, { start: 0, end: 0 }]))
+    const next: SharedDraftStateV1 = { ...draft, text: '', attachments: [], selections, revision: draft.revision + 1 }
+    state.drafts[draft.draftId] = next
+    emit(actorId, 'draft.cleared', { ...next, baseRevision: draft.revision, operations }, requestId, true)
+    return next
+  }
+
   const currentResult = (requestId: string): WorkbenchCommandResultV1 | undefined => commandResults.get(requestId)
   const success = (requestId: string, value?: unknown): WorkbenchCommandResultV1 => ({ ok: true, requestId, workbenchRevision: state.workbenchRevision, canvasRevision: state.canvasRevision, ...(value === undefined ? {} : { value: structuredClone(value) }) })
   const failure = (requestId: string, code: Extract<WorkbenchCommandResultV1, { ok: false }>['code'], message: string, current?: unknown): WorkbenchCommandResultV1 => ({ ok: false, requestId, code, message, workbenchRevision: state.workbenchRevision, canvasRevision: state.canvasRevision, ...(current === undefined ? {} : { current: structuredClone(current) }) })
@@ -302,7 +329,27 @@ export function createWorkbenchCollaborationSession(
     return lease?.leaseId === leaseId ? lease : undefined
   }
 
-  const command = async (input: WorkbenchCommandEnvelopeV1): Promise<WorkbenchCommandResultV1> => {
+  /** The whole layout document and every split inside it are one write family. */
+  const layoutTarget = (targetId: string): boolean => targetId === 'layout' || targetId.startsWith('split:')
+
+  /**
+   * Decide whether a continuous canvas write may proceed. A supplied lease id
+   * must be a live lease of this participant on a matching target; a write
+   * without a lease is refused while another participant controls the target.
+   * A valid lease is renewed so a long drag does not expire between frames.
+   */
+  const controlDenied = (participantId: string, leaseId: string | undefined, matches: (targetId: string) => boolean): boolean => {
+    pruneLeases()
+    if (leaseId !== undefined) {
+      const own = [...leases.values()].find(lease => lease.participantId === participantId && lease.leaseId === leaseId && matches(lease.targetId))
+      if (own === undefined) return true
+      own.expiresAt = now() + CONTROL_LEASE_MS
+      return false
+    }
+    return [...leases.values()].some(lease => lease.participantId !== participantId && matches(lease.targetId))
+  }
+
+  const execute = async (input: WorkbenchCommandEnvelopeV1): Promise<WorkbenchCommandResultV1> => {
     pruneStaleParticipants()
     const repeated = currentResult(input.requestId)
     if (repeated !== undefined) return repeated
@@ -340,7 +387,9 @@ export function createWorkbenchCollaborationSession(
             text: '', revision: 0, attachments: [], selections: {},
           }
           state.drafts[operation.draftId] = draft
-          emit(input.participantId, 'draft.created', draft, input.requestId)
+          // Drafts are live session state. They advance the canvas revision so
+          // typing never invalidates a concurrent durable Workbench command.
+          emit(input.participantId, 'draft.created', draft, input.requestId, true)
           result = success(input.requestId, draft)
         }
         }
@@ -351,7 +400,7 @@ export function createWorkbenchCollaborationSession(
         let operations = normalizeDraftOperations(draftInput.operations)
         if (draftInput.baseRevision > draft.revision) { result = failure(input.requestId, 'draft-conflict', '共享草稿版本无效。', draft); rememberResult(input.requestId, result); return result }
         if (draftInput.baseRevision < draft.revision) {
-          const history = eventLog.filter(event => event.kind === 'draft.changed' && event.payload && typeof event.payload === 'object' && (event.payload as { draftId?: unknown }).draftId === draftInput.draftId)
+          const history = eventLog.filter(event => (event.kind === 'draft.changed' || event.kind === 'draft.cleared') && event.payload && typeof event.payload === 'object' && (event.payload as { draftId?: unknown }).draftId === draftInput.draftId)
           for (const event of history) {
             const payload = event.payload as { baseRevision?: number; operations?: readonly unknown[] }
             if (payload.baseRevision !== undefined && payload.baseRevision >= draftInput.baseRevision && Array.isArray(payload.operations)) {
@@ -366,7 +415,7 @@ export function createWorkbenchCollaborationSession(
         }]))
         const next: SharedDraftStateV1 = { ...draft, text, selections, revision: draft.revision + 1 }
         state.drafts[draftInput.draftId] = next
-        emit(input.participantId, 'draft.changed', { draftId: draftInput.draftId, baseRevision: draft.revision, operations, text, selections, revision: next.revision }, input.requestId)
+        emit(input.participantId, 'draft.changed', { draftId: draftInput.draftId, baseRevision: draft.revision, operations, text, selections, revision: next.revision }, input.requestId, true)
         result = success(input.requestId, next)
       } else if (operation.kind === 'draft.set-attachments') {
         const draft = state.drafts[operation.draftId]
@@ -375,7 +424,7 @@ export function createWorkbenchCollaborationSession(
         else {
           const next = { ...draft, attachments: structuredClone(operation.attachments), revision: draft.revision + 1 }
           state.drafts[operation.draftId] = next
-          emit(input.participantId, 'draft.attachments.changed', next, input.requestId)
+          emit(input.participantId, 'draft.attachments.changed', next, input.requestId, true)
           result = success(input.requestId, next)
         }
       } else if (operation.kind === 'draft.set-selection') {
@@ -394,15 +443,10 @@ export function createWorkbenchCollaborationSession(
         const draft = state.drafts[operation.draftId]
         if (draft === undefined) result = failure(input.requestId, 'draft-not-found', '共享草稿不存在。')
         else if (operation.baseRevision !== draft.revision) result = failure(input.requestId, 'draft-conflict', '共享草稿版本已变化。', draft)
-        else {
-          const next = { ...draft, text: '', attachments: [], revision: draft.revision + 1 }
-          state.drafts[operation.draftId] = next
-          emit(input.participantId, 'draft.cleared', next, input.requestId)
-          result = success(input.requestId, next)
-        }
+        else result = success(input.requestId, clearDraft(draft, input.participantId, input.requestId))
       } else if (operation.kind === 'canvas.set-viewport') {
         if (!validViewport(operation.viewport)) result = failure(input.requestId, 'invalid-operation', '共享画布尺寸无效。')
-        else if (operation.leaseId !== undefined && leaseFor(input.participantId, 'viewport', operation.leaseId) === undefined) result = failure(input.requestId, 'control-lease-required', '调整画布需要有效控制租约。')
+        else if (controlDenied(input.participantId, operation.leaseId, targetId => targetId === 'viewport')) result = failure(input.requestId, 'control-lease-required', '调整画布需要有效控制租约。')
         else {
           state.sharedCanvas = { ...state.sharedCanvas, viewport: { ...operation.viewport } }
           emit(input.participantId, 'canvas.viewport.changed', operation.viewport, input.requestId, true)
@@ -423,7 +467,7 @@ export function createWorkbenchCollaborationSession(
           result = success(input.requestId, state.sharedCanvas)
         }
       } else if (operation.kind === 'canvas.set-layout') {
-        if (operation.leaseId !== undefined && leaseFor(input.participantId, 'layout', operation.leaseId) === undefined) result = failure(input.requestId, 'control-lease-required', '调整布局需要有效控制租约。')
+        if (controlDenied(input.participantId, operation.leaseId, layoutTarget)) result = failure(input.requestId, 'control-lease-required', '调整布局需要有效控制租约。')
         else {
           if (options.persistLayout !== undefined) await options.persistLayout({
             collaborationId,
@@ -436,7 +480,7 @@ export function createWorkbenchCollaborationSession(
           result = success(input.requestId, operation.layout)
         }
       } else if (operation.kind === 'canvas.set-floating-panels') {
-        if (operation.leaseId !== undefined && leaseFor(input.participantId, 'floating-panels', operation.leaseId) === undefined) result = failure(input.requestId, 'control-lease-required', '调整浮动面板需要有效控制租约。')
+        if (controlDenied(input.participantId, operation.leaseId, targetId => targetId === 'floating-panels' || targetId.startsWith('floating:'))) result = failure(input.requestId, 'control-lease-required', '调整浮动面板需要有效控制租约。')
         else {
           state.sharedCanvas = { ...state.sharedCanvas, floatingPanels: structuredClone(operation.floatingPanels) }
           emit(input.participantId, 'canvas.floating-panels.changed', operation.floatingPanels, input.requestId, true)
@@ -466,6 +510,8 @@ export function createWorkbenchCollaborationSession(
         : undefined
       result = code === 'revision-conflict'
         ? failure(input.requestId, 'revision-conflict', error instanceof Error ? error.message : '工作台已经发生变化，请重新同步后重试。', stateSnapshot(state))
+        : code === 'file-conflict'
+          ? failure(input.requestId, 'file-conflict', error instanceof Error ? error.message : '文件已被其他参与者修改。')
         : code === 'invalid-operation'
           ? failure(input.requestId, 'invalid-operation', error instanceof Error ? error.message : 'invalid collaboration operation', stateSnapshot(state))
           : code === 'capability-denied' || code === 'workbench-scope-denied' || code === 'access-expired'
@@ -474,6 +520,15 @@ export function createWorkbenchCollaborationSession(
     }
     rememberResult(input.requestId, result)
     return result
+  }
+
+  /** Layout writes are applied one after another, in arrival order. */
+  let layoutWrites: Promise<unknown> = Promise.resolve()
+  const command = (input: WorkbenchCommandEnvelopeV1): Promise<WorkbenchCommandResultV1> => {
+    if (input.operation?.kind !== 'canvas.set-layout') return execute(input)
+    const run = layoutWrites.then(() => execute(input))
+    layoutWrites = run.catch(() => {})
+    return run
   }
 
   const thisAcquire = (participantId: string, targetId: string) => {
@@ -565,7 +620,7 @@ export function createWorkbenchCollaborationSession(
       state.seed = { ...state.seed, tasks: structuredClone(tasks) }
       emit('host', 'task.changed', { tasks: state.seed.tasks })
     },
-    connect(input) {
+    connect(input, connectOptions) {
       pruneStaleParticipants()
       if (input.collaborationId !== collaborationId || input.workbenchId !== workbenchId) return { error: 'collaboration-not-found' }
       const connectedCount = Object.values(state.participants).filter(participant => participant.connectionState === 'connected').length
@@ -578,13 +633,31 @@ export function createWorkbenchCollaborationSession(
         connectionState: 'connected',
         updatedAt: now(),
       }
+      if (connectOptions?.presenceOnly !== true) connectionCounts.set(input.participantId, (connectionCounts.get(input.participantId) ?? 0) + 1)
       emit(input.participantId, 'participant.joined', state.participants[input.participantId], undefined, true)
       return stateSnapshot(state)
     },
     disconnect(participantId) {
       if (state.participants[participantId] === undefined) return
+      const remaining = (connectionCounts.get(participantId) ?? 0) - 1
+      if (remaining > 0) { connectionCounts.set(participantId, remaining); return }
+      connectionCounts.delete(participantId)
       markParticipantStale(participantId)
       emit(participantId, 'participant.left', { participantId }, undefined, true)
+    },
+    remove(participantId) {
+      if (state.participants[participantId] === undefined || participantId === state.ownerParticipantId) return
+      clearParticipantSelections(participantId)
+      connectionCounts.delete(participantId)
+      for (const [key, lease] of leases) if (lease.participantId === participantId) leases.delete(key)
+      delete state.participants[participantId]
+      emit(participantId, 'participant.left', { participantId }, undefined, true)
+    },
+    clearSessionDrafts(sessionId, actorId) {
+      for (const draft of Object.values(state.drafts)) {
+        if (draft.sessionId !== sessionId || (draft.text.length === 0 && draft.attachments.length === 0)) continue
+        clearDraft(draft, actorId)
+      }
     },
     command,
     publishPresence(presence) {
@@ -611,7 +684,16 @@ export interface WorkbenchCollaborationManagerV1 {
   getById(collaborationId: string): WorkbenchCollaborationSessionViewV1 | undefined
   start(workbenchId: string, ownerParticipantId: string, seed?: WorkbenchCollaborationSeedV1): Promise<{ readonly collaborationId: string; readonly session: WorkbenchCollaborationSessionViewV1 }>
   refresh(workbenchId: string): Promise<void>
-  stop(workbenchId: string): Promise<void>
+  /**
+   * Register a user of the session, for example the LAN share or one browser
+   * owner view. A held session survives `stop` calls from its other users.
+   */
+  hold(workbenchId: string, holder: string): void
+  /**
+   * End the session. With a holder, only that holder lets go and the session
+   * ends when no holder is left. Without one the session always ends.
+   */
+  stop(workbenchId: string, holder?: string): Promise<void>
   dispose(): Promise<void>
 }
 
@@ -682,6 +764,7 @@ export function createWorkbenchCollaborationManager(options: WorkbenchCollaborat
   const sessions = new Map<string, { readonly workbenchId: string; readonly session: WorkbenchCollaborationSessionViewV1 }>()
   const byId = new Map<string, WorkbenchCollaborationSessionViewV1>()
   const taskSubscriptions = new Map<string, () => void>()
+  const holders = new Map<string, Set<string>>()
   const store = options.store ?? createMemoryWorkbenchCollaborationStore()
   return {
     get(workbenchId) { return sessions.get(workbenchId)?.session },
@@ -692,9 +775,15 @@ export function createWorkbenchCollaborationManager(options: WorkbenchCollaborat
       const collaborationId = `collab-${(options.randomId ?? randomUUID)()}`
       const stored = store.loadActive === undefined ? await store.load(collaborationId) : await store.loadActive(workbenchId)
       const durable = options.loadSeed === undefined ? inputSeed : await options.loadSeed(workbenchId)
+      // A layout change is written to the Workbench before it is acknowledged,
+      // so the durable layout is never older than the logged one. It is newer
+      // when the desktop changed it while no session was active.
       const seed = stored === undefined ? durable : {
         ...durable,
-        sharedCanvas: stored.sharedCanvas,
+        sharedCanvas: {
+          ...stored.sharedCanvas,
+          ...(durable.sharedCanvas?.layout === undefined ? {} : { layout: durable.sharedCanvas.layout }),
+        },
         drafts: stored.drafts,
       }
       const session = createWorkbenchCollaborationSession(stored?.collaborationId ?? collaborationId, workbenchId, ownerParticipantId, seed, { ...options, ...(stored === undefined ? {} : { initialSnapshot: stored }) })
@@ -704,7 +793,7 @@ export function createWorkbenchCollaborationManager(options: WorkbenchCollaborat
         participantId: ownerParticipantId,
         displayName: '房主',
         role: 'owner',
-      })
+      }, { presenceOnly: true })
       const actualCollaborationId = session.snapshot().collaborationId
       sessions.set(workbenchId, { workbenchId, session }); byId.set(actualCollaborationId, session)
       const unsubscribeTasks = options.subscribeTaskChanges?.(workbenchId, tasks => session.publishTaskSnapshot(tasks))
@@ -716,7 +805,19 @@ export function createWorkbenchCollaborationManager(options: WorkbenchCollaborat
       if (row === undefined || options.loadSeed === undefined) return
       row.session.refresh(await options.loadSeed(workbenchId))
     },
-    async stop(workbenchId) {
+    hold(workbenchId, holder) {
+      if (!sessions.has(workbenchId)) return
+      const current = holders.get(workbenchId) ?? new Set<string>()
+      current.add(holder)
+      holders.set(workbenchId, current)
+    },
+    async stop(workbenchId, holder) {
+      if (holder !== undefined) {
+        const current = holders.get(workbenchId)
+        current?.delete(holder)
+        if (current !== undefined && current.size > 0) return
+      }
+      holders.delete(workbenchId)
       const existing = sessions.get(workbenchId)
       if (existing === undefined) return
       taskSubscriptions.get(workbenchId)?.()

@@ -11,7 +11,8 @@ import { isDeepStrictEqual } from 'node:util'
 import { areasOf } from './foundation/document-v3.ts'
 
 export function installWorkbenchDirectoryRoute(connection: HostConnectionHandle, directory: HostWorkbenchDirectory, ensureMain: (id: string) => Promise<unknown>, memory?: HostWorkbenchMemory,
-  createSession?: (input: { workbenchId: string; areaId: string; requestId: string; agentPreset: string; workspaceId: string }) => Promise<string>, access?: HostWorkbenchAccess) {
+  createSession?: (input: { workbenchId: string; areaId: string; requestId: string; agentPreset: string; workspaceId: string }) => Promise<string>, access?: HostWorkbenchAccess,
+  readExtensionInventory?: () => Promise<unknown>) {
   const requests = new Map<string, { fingerprint: string; result: Promise<Response> }>()
   return connection.fetch.register({ path: WORKBENCH_DIRECTORY_ROUTE, methods: ['POST'], requestBody: 'streaming', async fetch(request) {
     try {
@@ -85,6 +86,7 @@ export function installWorkbenchDirectoryRoute(connection: HostConnectionHandle,
       switch (body.action) {
         case 'create-preflight': value = await directory.checkCreateLocation(text('parentPath'), text('folderName')); break
         case 'snapshot': break
+        case 'extension-inventory': if (!readExtensionInventory) throw new Error('插件清单服务不可用。'); value = await readExtensionInventory(); break
         case 'prepare-creator-repair': value = await directory.prepareCreatorRepair({ workbenchId: text('workbenchId'), moduleId: text('moduleId'), ...(body.packageName === undefined ? {} : { packageName: text('packageName') }) }); break
         case 'create-session': if (!createSession) throw new Error('会话服务不可用。'); value = await createSession({ workbenchId: text('workbenchId'), areaId: text('areaId'), requestId: text('requestId'), agentPreset: typeof body.agentPreset === 'string' ? body.agentPreset : 'standard', workspaceId: text('workspaceId') }); break
         case 'open-project': value = await directory.openProject({ workbenchId: text('workbenchId'), projectId: text('projectId'), requestId: text('requestId'), expectedRevision: Number(body.expectedRevision) }); break

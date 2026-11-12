@@ -2,7 +2,7 @@
 
 DSH Bay 是面向 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的多区域工作台。它把项目文件、原生对话、工具内页与 Bay Agent 任务组织在同一个工作台中，并支持浏览器接管和完整工作台包迁移。
 
-当前候选为 **`0.2.2-alpha.18.1`**，兼容 **DSH `0.2.2-rc.1`**。这是包含未提交工作树改动的私有实验包；源码基线和制品校验值见[验证记录](docs/VALIDATION.md)。安装验收仍待实际试用，自动化通过不代表跨平台迁移或真实模型长时间运行已经验证。
+当前候选为 **`0.2.2-alpha.18.2`**，兼容 **DSH `0.2.2-rc.1`**。这是私有实验包；源码基线和制品校验值见[验证记录](docs/VALIDATION.md)。安装验收仍待实际试用，自动化通过不代表跨平台迁移或真实模型长时间运行已经验证。
 
 ## 从这里开始
 
@@ -43,12 +43,12 @@ DSH Bay 是面向 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-har
 | --- | --- |
 | 安装包 / 客户端模块 | `dsh-bay` |
 | 内部模块标识 | `workbench.core` |
-| 插件版本 | `0.2.2-alpha.18.1` |
+| 插件版本 | `0.2.2-alpha.18.2` |
 | DSH 版本 | `0.2.2-rc.1` |
 | DSH 上游提交 | `66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db` |
 | 交付范围 | 单一 Core 包；不含 Conversation Suite 或 SVG Pet 独立模块 |
 
-通过 DSH 原生插件管理器安装本地 `dsh-bay-0.2.2-alpha.18.1.tgz`，按宿主提示启用或重启。默认封包目录 `releases/alpha18.1-rc1-private/` 被 Git 忽略，需本地构建或取得交付制品。没有公开 npm 发布完成的记录，不把 registry 安装作为本实验版入口。
+通过 DSH 原生插件管理器安装本地 `dsh-bay-0.2.2-alpha.18.2.tgz`，按宿主提示启用或重启。默认封包目录 `releases/alpha18.2-rc1-private/` 被 Git 忽略，需本地构建或取得交付制品。没有公开 npm 发布完成的记录，不把 registry 安装作为本实验版入口。
 
 如同一 Profile 还装有旧包 `@dsh-workbench/core`，先停用旧包，避免重复注册。**包身份更名不等于旧数据兼容**：18.x 不迁移 17.x 工作台数据或旧格式完整包；当前 18.x 文件型数据的项目归属升级另由 Host 处理。
 

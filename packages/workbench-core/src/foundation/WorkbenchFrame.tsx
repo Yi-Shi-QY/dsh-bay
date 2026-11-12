@@ -196,6 +196,7 @@ import { WorkbenchToolGatewayDialog } from './WorkbenchToolGatewayDialog.tsx'
 import type { WorkbenchShareControllerV1, WorkbenchShareSnapshotV1 } from '../client/workbench-share-controller.ts'
 import { DESKTOP_WORKBENCH_SURFACE_V1, type WorkbenchSurfaceContextV1, type WorkbenchSurfaceContextV2 } from '../client/workbench-surface-context.ts'
 import type { WorkbenchCollaborationClientV1 } from '../client/workbench-collaboration-client.ts'
+import { collaborationStatusLabel } from './WorkbenchSharedCanvasViewport.tsx'
 import type { SharedCanvasFocusV1, WorkbenchCollaborationSnapshotV1 } from '../workbench-collaboration-contract.ts'
 import type { BayAgentControllerV1 } from './workbench-bay-agent-work.ts'
 
@@ -995,6 +996,13 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
   const collaborationSnapshot = useSyncExternalStore(
     subscribeCollaboration, getCollaborationSnapshot, getCollaborationSnapshot,
   )
+  const getCollaborationState = useCallback(
+    () => props.collaborationClient?.getState(), [props.collaborationClient],
+  )
+  const collaborationState = useSyncExternalStore(subscribeCollaboration, getCollaborationState, getCollaborationState)
+  // While the Host is unreachable or the collaboration is over, the last
+  // snapshot stays visible and shared writes are refused.
+  const collaborationStatus = collaborationControlled ? collaborationStatusLabel(collaborationState) : undefined
   const subscribeWorkbenchDirectory = useCallback(
     (listener: () => void) => workbenchDirectory.subscribe(listener), [workbenchDirectory],
   )
@@ -1231,8 +1239,10 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
   // may hydrate its real value after first exposing a default snapshot with
   // the same revision, and that same-revision hydration must remain visible.
   const lastSavedRevisionRef = useRef<number>()
-  const sharedLayoutRevisionRef = useRef<number>()
-  const remoteFocusKeyRef = useRef<string>()
+  const sharedLayoutAppliedRef = useRef<string>()
+  const sharedLayoutFlightRef = useRef(false)
+  const sharedLayoutRatioSplitRef = useRef<string>()
+  const publishedFocusRef = useRef<string>()
   const conflictRef = useRef(conflict)
   const invalidLayoutRef = useRef(invalidLayout)
   const deferredOpenRef = useRef<{
@@ -1269,12 +1279,17 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
   conflictRef.current = conflict
   invalidLayoutRef.current = invalidLayout
 
+  const sharedLayout = collaborationControlled ? collaborationSnapshot?.sharedCanvas.layout : undefined
   useEffect(() => {
-    if (!collaborationControlled || collaborationSnapshot === undefined) return
-    const incoming = sharedLayoutOf(collaborationSnapshot.sharedCanvas.layout)
-    if (incoming === undefined || sharedLayoutRevisionRef.current === collaborationSnapshot.canvasRevision) return
-    sharedLayoutRevisionRef.current = collaborationSnapshot.canvasRevision
-    if (JSON.stringify(incoming) === JSON.stringify(documentRef.current)) return
+    const incoming = sharedLayoutOf(sharedLayout)
+    if (incoming === undefined || sharedLayoutFlightRef.current) return
+    // The Host layout is adopted only when the Host changed it. Events that
+    // leave the layout alone must not replace a local edit that is still on
+    // its way to the Host.
+    const serialized = JSON.stringify(incoming)
+    if (serialized === sharedLayoutAppliedRef.current) return
+    sharedLayoutAppliedRef.current = serialized
+    if (serialized === JSON.stringify(documentRef.current)) return
     documentRef.current = incoming
     lastSavedRef.current = incoming
     lastSavedRevisionRef.current = undefined
@@ -1284,41 +1299,23 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
     setFuture([])
     setConflict(undefined)
     setSaveState('saved')
-  }, [collaborationControlled, collaborationSnapshot])
+  }, [sharedLayout])
 
-  // Focus is a shared canvas fact, while the layout tree remains the durable
-  // source for the active Area and tab. Apply a remote focus locally without
-  // issuing a second layout write, then publish local tab changes as focus
-  // commands so every participant follows the same page.
+  // The shared focus is derived from the layout, which already records the
+  // active Area and tab. Publishing it keeps the Host's focus fact current
+  // for presence; nothing is applied back from it.
+  const layoutFocus = collaborationControlled ? focusOfLayout(layout) : undefined
+  const layoutFocusKey = layoutFocus === undefined ? undefined : JSON.stringify(layoutFocus)
   useEffect(() => {
-    if (!collaborationControlled || collaborationSnapshot?.sharedCanvas.focus === undefined) return
-    const incoming = collaborationSnapshot.sharedCanvas.focus
-    const group = groupsOf(documentRef.current.root).find(row => row.id === incoming.areaId)
-    const tab = group?.tabs.find(row => row.editorId === incoming.editorId && (incoming.sessionId === undefined || row.sessionId === incoming.sessionId))
-    if (group === undefined || tab === undefined) return
-    const current = focusOfLayout(documentRef.current)
-    if (current?.areaId === incoming.areaId && current.editorId === incoming.editorId && current.sessionId === incoming.sessionId) return
-    const next = applyLayoutCommand(documentRef.current, { type: 'activate', groupId: group.id, tabId: tab.id })
-    remoteFocusKeyRef.current = JSON.stringify(incoming)
-    documentRef.current = next
-    setLayout(next)
-    setPending([])
-    setSaveState('saved')
-  }, [collaborationControlled, collaborationSnapshot?.canvasRevision, collaborationSnapshot?.sharedCanvas.focus])
+    const client = props.collaborationClient
+    if (layoutFocusKey === undefined || client === undefined || collaborationState !== 'connected') return
+    if (publishedFocusRef.current === layoutFocusKey) return
+    publishedFocusRef.current = layoutFocusKey
+    void client.command({ kind: 'canvas.set-focus', focus: JSON.parse(layoutFocusKey) as SharedCanvasFocusV1 }).catch(() => {})
+  }, [collaborationState, layoutFocusKey, props.collaborationClient])
 
   useEffect(() => {
-    if (!collaborationControlled || props.collaborationClient === undefined || collaborationSnapshot === undefined) return
-    const focus = focusOfLayout(layout)
-    if (focus === undefined) return
-    const key = JSON.stringify(focus)
-    if (remoteFocusKeyRef.current === key) { remoteFocusKeyRef.current = undefined; return }
-    const shared = collaborationSnapshot.sharedCanvas.focus
-    if (shared?.areaId === focus.areaId && shared.editorId === focus.editorId && shared.sessionId === focus.sessionId) return
-    void props.collaborationClient.command({ kind: 'canvas.set-focus', focus }, collaborationSnapshot.workbenchRevision).catch(() => {})
-  }, [collaborationControlled, collaborationSnapshot, layout, props.collaborationClient])
-
-  useEffect(() => {
-    if (surfaceContext.kind !== 'browser-owner' || props.collaborationClient === undefined) return
+    if (surfaceContext.kind === 'lan-participant' || props.collaborationClient === undefined || collaborationState !== 'connected') return
     let timer: number | undefined
     const publishViewport = () => {
       if (timer !== undefined) window.clearTimeout(timer)
@@ -1336,7 +1333,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
     publishViewport()
     window.addEventListener('resize', publishViewport)
     return () => { window.removeEventListener('resize', publishViewport); if (timer !== undefined) window.clearTimeout(timer) }
-  }, [collaborationSnapshot?.sharedCanvas.viewport, collaborationSnapshot?.workbenchRevision, props.collaborationClient, surfaceContext.kind])
+  }, [collaborationSnapshot?.sharedCanvas.viewport, collaborationSnapshot?.workbenchRevision, collaborationState, props.collaborationClient, surfaceContext.kind])
 
   const collapseProjection = useMemo(
     () => deriveCollapseProjection(layout, collapseRuntimeState),
@@ -1366,6 +1363,9 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
   const settingsWritable = !collaborationControlled && settingsSnapshot.status === 'ready'
     && settingsSnapshot.writable && settingsSnapshot.mode === 'host'
     && settingsSnapshot.revision !== undefined
+  // The browser owner keeps its owner-only layout controls while its canvas
+  // is the Host collaboration canvas; those writes go through the session.
+  const ownerCollaborationWritable = collaborationControlled && surfaceContext.kind === 'browser-owner'
   const scheduleAutosaveRetry = useCallback(() => {
     if (saveRetryTimerRef.current !== undefined) return
     const attempt = saveRetryAttemptRef.current
@@ -1761,6 +1761,65 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
 
   const guardedCommands = useRef(new WeakSet<object>())
   const pendingDestructiveCommands = useRef(new Set<string>())
+  /**
+   * Send the current layout to the Host collaboration session. Only one
+   * write is in flight; edits made meanwhile are sent as one more write when
+   * it returns. A refused write restores the layout the Host holds.
+   */
+  const submitSharedLayout = useCallback(() => {
+    const client = props.collaborationClient
+    if (client === undefined || sharedLayoutFlightRef.current) return
+    sharedLayoutFlightRef.current = true
+    setSaveState('saving')
+    void (async () => {
+      let failure: string | undefined
+      try {
+        for (;;) {
+          const submitted = documentRef.current
+          const splitId = sharedLayoutRatioSplitRef.current
+          sharedLayoutRatioSplitRef.current = undefined
+          let leaseId: string | undefined
+          if (splitId !== undefined) {
+            const lease = await client.command({ kind: 'layout.acquire-lease', targetId: `split:${splitId}` })
+            const value = lease.ok && lease.value && typeof lease.value === 'object' ? lease.value as { leaseId?: unknown; ok?: unknown } : undefined
+            if (value?.ok !== true || typeof value.leaseId !== 'string') { failure = '另一位参与者正在调整这条分隔线。'; break }
+            leaseId = value.leaseId
+          }
+          const result = await client.command({ kind: 'canvas.set-layout', layout: submitted, ...(leaseId === undefined ? {} : { leaseId }) })
+          if (leaseId !== undefined && splitId !== undefined) void client.command({ kind: 'layout.release-lease', targetId: `split:${splitId}`, leaseId }).catch(() => {})
+          if (!result.ok) { failure = result.message; break }
+          if (documentRef.current === submitted) break
+        }
+      } catch {
+        failure = collaborationStatusLabel(client.getState()) ?? '协作连接中断。'
+      } finally {
+        sharedLayoutFlightRef.current = false
+      }
+      const host = sharedLayoutOf(client.getSnapshot()?.sharedCanvas.layout)
+      if (host !== undefined) {
+        const serialized = JSON.stringify(host)
+        sharedLayoutAppliedRef.current = serialized
+        if (serialized !== JSON.stringify(documentRef.current)) {
+          documentRef.current = host
+          lastSavedRef.current = host
+          setLayout(host)
+          if (failure !== undefined) { setPast([]); setFuture([]) }
+        }
+      }
+      setSaveState('saved')
+      if (failure !== undefined) setStateDiagnostic(`布局修改没有保存，已恢复到 Host 上的布局：${failure}`)
+    })()
+  }, [props.collaborationClient])
+
+  // Undo, redo and other whole-document replacements queue a pending layout.
+  // On a collaboration canvas that layout goes to the Host session.
+  useEffect(() => {
+    if (!collaborationControlled || pending.length === 0) return
+    pendingRef.current = []
+    setPending([])
+    submitSharedLayout()
+  }, [collaborationControlled, pending, submitSharedLayout])
+
   const commit = useCallback<Commit>((command) => {
     if (!canEditLayout) { setStateDiagnostic('当前分享未授权修改布局。'); return false }
     if (floatingPinPending.current) return false
@@ -1788,29 +1847,10 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
     if (collaborationControlled) {
       const client = props.collaborationClient
       if (client === undefined) return false
-      const rollback = () => {
-        if (documentRef.current !== candidate) return
-        documentRef.current = before
-        setLayout(before)
-        setPast(history => history.slice(0, -1))
-        setFuture([])
-        setPending([])
-        setSaveState('offline')
-        setStateDiagnostic('协作布局提交失败，已恢复到 Host 最后确认的布局。')
+      if (client.getState() !== 'connected') {
+        setStateDiagnostic(collaborationStatusLabel(client.getState()) ?? '协作会话尚未连接，暂时不能修改工作台。')
+        return false
       }
-      const ratioSplitId = command.type === 'set-ratio' ? command.splitId : undefined
-      void (async () => {
-        let leaseId: string | undefined
-        if (ratioSplitId !== undefined) {
-          const lease = await client.command({ kind: 'layout.acquire-lease', targetId: `split:${ratioSplitId}` }, collaborationSnapshot?.workbenchRevision)
-          const value = lease.ok && lease.value && typeof lease.value === 'object' ? lease.value as { leaseId?: unknown; ok?: unknown } : undefined
-          if (!lease.ok || value?.ok !== true || typeof value.leaseId !== 'string') { rollback(); return }
-          leaseId = value.leaseId
-        }
-        const result = await client.command({ kind: 'canvas.set-layout', layout: candidate, ...(leaseId === undefined ? {} : { leaseId }) }, collaborationSnapshot?.workbenchRevision)
-        if (leaseId !== undefined && ratioSplitId !== undefined) void client.command({ kind: 'layout.release-lease', targetId: `split:${ratioSplitId}`, leaseId }).catch(() => {})
-        if (!result.ok) rollback()
-      })().catch(() => { rollback() })
     }
     const nextTabs = tabsOf(candidate.root)
     const displaced = tabsOf(before.root).filter(old => {
@@ -1847,13 +1887,18 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
       })
       return next
     })
-    if (collaborationControlled) setSaveState('saved')
+    if (collaborationControlled) {
+      // The state updater above may run later; the submitter reads this ref.
+      documentRef.current = candidate
+      if (command.type === 'set-ratio') sharedLayoutRatioSplitRef.current = command.splitId
+      submitSharedLayout()
+    }
     for (const tab of displaced) {
       if (props.floatingRuntime?.find(tab.id, currentWorkbenchId)) props.floatingRuntime.forget(tab.id, currentWorkbenchId)
       else closeWorkbenchNative(tab.id)
     }
     return true
-  }, [browserOwnedWorkbench, collaborationControlled, collaborationSnapshot?.workbenchRevision, layoutLockPending, layoutLocked, props.collaborationClient, props.floatingRuntime, canEditLayout])
+  }, [browserOwnedWorkbench, collaborationControlled, layoutLockPending, layoutLocked, props.collaborationClient, props.floatingRuntime, canEditLayout, submitSharedLayout])
 
   const replaceVisibleDocument = useCallback((next: WorkbenchLayoutDocument) => {
     const previous = documentRef.current
@@ -2396,7 +2441,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
   }, [flushCurrentWorkbench])
   const pinFloatingTab = async (tab: TabDocument, areaId: string, edge: DropEdge): Promise<boolean> => {
     const ownerId = selectedWorkbenchId
-    if (!ownerId || floatingPinPending.current || browserOwnedWorkbench || !settingsWritable || !await flushCurrentWorkbench()) return false
+    if (!ownerId || floatingPinPending.current || browserOwnedWorkbench || !(settingsWritable || ownerCollaborationWritable) || !await flushCurrentWorkbench()) return false
     if (floatingPinPending.current || ownerId !== workbenchDirectory.getSnapshot().activeWorkbenchId || props.floatingRuntime?.hasControl?.(ownerId) === false
       || props.floatingRuntime?.canUseEditor?.(ownerId, tab.editorId) === false
       || tab.binding && props.floatingRuntime?.validBinding?.(tab.binding) === false) return false
@@ -2427,6 +2472,26 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
       next = { ...next, root: projectSplit(next.root) }
     }
     if (!validateWorkbenchDocumentV3(migrateDocumentV2ToV3(next))) throw new Error('此内页暂时无法安全写入布局，临时内容仍保留。请先检查来源绑定。')
+    if (ownerCollaborationWritable) {
+      const client = props.collaborationClient
+      if (client === undefined || next === before) return false
+      floatingPinPending.current = true
+      try {
+        const result = await client.command({ kind: 'canvas.set-layout', layout: next }).catch(() => undefined)
+        if (result?.ok !== true) return false
+        const latest = props.floatingRuntime?.find(tab.id, ownerId)?.tab
+        const visible = latest && latest.state !== tab.state
+          ? applyLayoutCommand(next, { type: 'update-tab-state', tabId: tab.id, state: latest.state, bindingGeneration: placed.bindingGeneration ?? 0 }) : next
+        const committedTab = tabsOf(visible.root).find(item => item.id === tab.id)
+        if (committedTab) props.floatingRuntime?.update(tab.id, committedTab, ownerId)
+        documentRef.current = visible; lastSavedRef.current = visible
+        pendingRef.current = []; setPending([]); setLayout(visible); setSaveState('saved')
+        setPast([]); setFuture([])
+        // A controller can finish work while the Host commits the placement.
+        if (visible !== next) void client.command({ kind: 'canvas.set-layout', layout: visible }).catch(() => {})
+        return true
+      } finally { floatingPinPending.current = false }
+    }
     const snapshot = settings.getSnapshot()
     if (snapshot.revision === undefined || next === before) return false
     floatingPinPending.current = true
@@ -2954,6 +3019,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
               </> : null}
               {browserHandoffLabel === undefined ? null : <span className={css.browserWorkspaceStatus} role="status" aria-live="polite">{browserHandoffLabel}</span>}
               <CollaborationParticipantStrip snapshot={collaborationSnapshot} currentParticipantId={props.collaborationClient?.participantId} />
+              {collaborationStatus === undefined ? null : <span className={css.browserWorkspaceStatus} role="status" aria-live="polite" data-workbench-collaboration-state={collaborationState}>{collaborationStatus}</span>}
             </div>
             <div className={`${css.workspaceActions} ${css.browserWorkspaceActions}`} data-workbench-layout-actions>
               <span
@@ -2967,7 +3033,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
                 type="button"
                 className={css.browserWorkspaceIconButton}
                 onClick={toggleLayoutLocked}
-              disabled={surfaceView === 'home' || !settingsWritable || layoutLockPending || browserHandoffRequest?.status === 'reclaiming'
+              disabled={surfaceView === 'home' || !(settingsWritable || ownerCollaborationWritable) || layoutLockPending || browserHandoffRequest?.status === 'reclaiming'
                 || frameTransition !== undefined}
                 aria-label={layoutLocked ? '解锁布局尺寸' : '锁定布局尺寸'}
                 title={layoutLocked ? '布局尺寸已锁定，点击解锁' : '锁定布局尺寸，防止拖动分隔线调整区域'}
@@ -3352,6 +3418,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
             role="status"
             aria-live="polite"
           >{browserHandoffLabel}</div>}
+          <CollaborationParticipantStrip snapshot={collaborationSnapshot} currentParticipantId={props.collaborationClient?.participantId} />
           <div className={css.workspaceActions} data-workbench-layout-actions>
             <span
               className={css.visuallyHidden}

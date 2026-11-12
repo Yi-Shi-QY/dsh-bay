@@ -70,6 +70,28 @@ describe('Workbench collaboration client recovery', () => {
     client.disconnect()
   })
 
+  it('clears the shared draft on every client when the Host clears it', async () => {
+    FakeSocket.reset()
+    const client = createWorkbenchCollaborationClient({
+      url: 'ws://workbench', WebSocket: FakeSocket as never,
+      collaborationId: 'collab-client', workbenchId: 'workbench-a', participantId: 'guest', displayName: 'Guest', role: 'participant',
+    })
+    const connected = client.connect()
+    const socket = FakeSocket.instances[0]!
+    socket.open()
+    socket.receive({ type: 'server.snapshot', payload: { ...snapshot(), drafts: {
+      draft: { draftId: 'draft', areaId: 'area', editorId: 'editor', text: 'unsent', revision: 3, attachments: ['file-1'], selections: {} },
+    } } })
+    await connected
+    socket.receive({ type: 'server.event', payload: {
+      eventId: 'draft-cleared-1', collaborationId: 'collab-client', workbenchId: 'workbench-a',
+      workbenchRevision: 0, canvasRevision: 1, actorId: 'owner', kind: 'draft.cleared',
+      payload: { draftId: 'draft', areaId: 'area', editorId: 'editor', text: '', revision: 4, attachments: [], selections: {} },
+    } })
+    expect(client.getSnapshot()?.drafts.draft).toMatchObject({ text: '', revision: 4, attachments: [] })
+    client.disconnect()
+  })
+
   it('replays an idempotent command after reconnecting and rejects new writes while recovering', async () => {
     FakeSocket.reset()
     const client = createWorkbenchCollaborationClient({

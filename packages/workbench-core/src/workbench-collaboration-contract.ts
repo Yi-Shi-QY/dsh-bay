@@ -122,7 +122,7 @@ export type WorkbenchCommandResultV1 =
   | {
       readonly ok: false
       readonly requestId: string
-      readonly code: 'collaboration-not-found' | 'workbench-mismatch' | 'revision-conflict' | 'permission-denied' | 'control-lease-required' | 'focus-locked' | 'draft-not-found' | 'draft-conflict' | 'invalid-operation' | 'command-failed'
+      readonly code: 'collaboration-not-found' | 'workbench-mismatch' | 'revision-conflict' | 'permission-denied' | 'control-lease-required' | 'focus-locked' | 'draft-not-found' | 'draft-conflict' | 'file-conflict' | 'invalid-operation' | 'command-failed'
       readonly message: string
       readonly workbenchRevision: number
       readonly canvasRevision: number

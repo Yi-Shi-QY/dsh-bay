@@ -9,6 +9,7 @@ import { SHARED_CONTROL_GRANT, WORKBENCH_ACCESS_HEADER } from '../src/workbench-
 import { createFileWorkbenchSettings } from '../src/client/file-workbench-settings.ts'
 import { createProjectNeutralFrameSettings } from '../src/foundation/frame-settings-adapter.ts'
 import { projectDocumentV3ToLayoutV2 } from '../src/foundation/document-v3.ts'
+import { validateLayout } from '../src/foundation/model.ts'
 import { executeWorkbenchCollaborationCommand } from '../src/host-workbench-access.ts'
 
 const cleanup: (() => void | Promise<void>)[] = []
@@ -52,7 +53,22 @@ describe('file workbench / control lease / guest integration', () => {
     expect(await (await import('node:fs/promises')).readFile(projectFile, 'utf8')).toBe('after')
     await expect(executeWorkbenchCollaborationCommand(f.access, {
       workbenchId: 'workbench-a', operation: { kind: 'workbench.command', operation: 'project.write', payload: { relativePath: 'notes.txt', bytes: Buffer.from('lost').toString('base64'), expectedHash: read.hash } },
-    })).rejects.toMatchObject({ code: 'revision-conflict' })
+    })).rejects.toMatchObject({ code: 'file-conflict' })
+  })
+
+  it('rejects a participant path whose real target leaves the Workbench', async () => {
+    const f = await setup()
+    const outside = join(f.root, 'outside-target'); await mkdir(outside)
+    await symlink(outside, join(f.directory.rootPath('workbench-a'), 'escape'), process.platform === 'win32' ? 'junction' : 'dir')
+    const token = f.access.registerGuest('path-guest', 'workbench-a', SHARED_CONTROL_GRANT, () => true)
+    const guest = f.access.resolve(new Headers({ [WORKBENCH_ACCESS_HEADER]: token }))
+    const codeOf = (relativePath: string): unknown => {
+      try { f.access.authorize(guest, 'read-files', { workbenchId: 'workbench-a', relativePath }); return undefined }
+      catch (error) { return (error as { code?: unknown }).code }
+    }
+    expect(codeOf('escape/a.txt')).toBe('path-scope-denied')
+    expect(codeOf('.bay/workbench.json')).toBe('path-scope-denied')
+    expect(() => f.access.authorize(guest, 'read-files', { workbenchId: 'workbench-a', relativePath: 'notes/new.txt' })).not.toThrow()
   })
 
   it('routes shared Workbench memory through the Host command gateway with CAS and idempotency', async () => {
@@ -149,6 +165,29 @@ describe('file workbench / control lease / guest integration', () => {
     const reloaded = JSON.parse(await (await import('node:fs/promises')).readFile(join(f.directory.rootPath('workbench-a'), '.bay', 'workbench.json'), 'utf8')) as { record: typeof persisted }
     expect(reloaded.record.document.root.kind).toBe('split')
     if (reloaded.record.document.root.kind === 'split') expect(reloaded.record.document.root.ratio).toBe(0.7)
+  })
+
+  it('persists a shared layout whose session pages keep state under an earlier session target', async () => {
+    const f = await setup()
+    const current = f.directory.getSnapshot().value.workbenches['workbench-a']!
+    const layout = structuredClone(projectDocumentV3ToLayoutV2(current.document, current.areaProjects))
+    if (layout.root.kind !== 'split' || layout.root.first.kind !== 'group') throw new Error('fixture layout must start with an Area')
+    // Directory-backed Workbenches keep a page's state bank under the session
+    // target it had when the state was written. The legacy v2 layout check
+    // requires a bank entry for the current binding and rejects this.
+    const earlierTarget = JSON.stringify(['workspace-earlier', 'session-earlier'])
+    layout.root.first.tabs = [{
+      id: 'tab-conversation', editorId: 'workbench.conversation', editorScope: 'session',
+      binding: { sessionId: 'user:area-conversation-a' }, sessionId: 'user:area-conversation-a', bindingGeneration: 1,
+      state: {}, sessionStates: { [earlierTarget]: {} }, sessionStateOrder: [earlierTarget], lastKnownTitle: '对话',
+    } as never]
+    layout.root.first.activeTabId = 'tab-conversation'
+    layout.root.ratio = 0.3
+    expect(validateLayout(structuredClone(layout))).toBeUndefined()
+    // The layout passes the shared-layout check and reaches the directory
+    // writer, which applies its own project rules exactly as for the desktop.
+    await expect(f.access.persistCollaborationLayout('workbench-a', layout)).rejects.toThrow('项目目录')
+    await expect(f.access.persistCollaborationLayout('workbench-a', { version: 2, root: null, activeGroupId: 'area-a' })).rejects.toThrow('共享布局无效')
   })
 
   it('opens without legacy Settings, freezes desktop writes and admits browser writes only after ready', async () => {

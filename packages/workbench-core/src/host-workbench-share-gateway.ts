@@ -364,9 +364,19 @@ export async function createWorkbenchShareGateway(options: WorkbenchShareGateway
       try {
         const envelope = JSON.parse((await readResponseBody(request, 16 * 1024)).toString('utf8'))
         const action = url.pathname.slice('/api/workbench-window/'.length)
-        if (!['status', 'ready', 'heartbeat', 'metrics'].includes(action) || envelope.payload?.windowId !== lease.nativeView?.windowId) throw new Error('guest-view-denied')
+        // The browser client registers its page with `attach` before anything
+        // else. A participant's page is bound to its lease by the close token,
+        // so it is identified by that token rather than by a window id.
+        const matches = action === 'attach'
+          ? typeof envelope.payload?.closeToken === 'string' && envelope.payload.closeToken === lease.nativeView?.closeToken
+          : envelope.payload?.windowId === lease.nativeView?.windowId
+        // A participant view is not a handoff from the desktop: there is no
+        // floating workspace to restore, and its lifecycle reports change
+        // nothing on the Host. The lease itself is ended by the share.
+        if (!['attach', 'status', 'ready', 'heartbeat', 'metrics', 'floating-read', 'failed'].includes(action) || !matches) throw new Error('guest-view-denied')
+        const value = action === 'floating-read' ? { snapshot: null } : { status: 'ready' }
         writeSecurityHeaders(response, { 'content-type': 'application/json' }); response.writeHead(200)
-        response.end(JSON.stringify({ type: 'server-response', rpcId: envelope.rpcId, result: { ok: true, value: { status: 'ready' } } })); return
+        response.end(JSON.stringify({ type: 'server-response', rpcId: envelope.rpcId, result: { ok: true, value } })); return
       } catch { writeSecurityHeaders(response); response.writeHead(403); response.end('guest view denied'); return }
     }
     if (url.pathname === '/workbench' && (url.search === '' || url.search === '?')) {
@@ -582,8 +592,12 @@ export async function createWorkbenchShareGateway(options: WorkbenchShareGateway
       collaborationSockets.delete(lease.leaseId)
       if (lease.nativeView !== undefined) await options.closeView(lease.nativeView.closeToken).catch(() => {})
     }
+    // A browser owner may still be working in this session. Only the share
+    // lets go of it, and the share's participants leave the shared state.
+    const live = options.collaboration?.get(workbenchId)
+    for (const lease of session.leases.values()) live?.remove(lease.leaseId)
     sessions.stop(workbenchId)
-    await options.collaboration?.stop(workbenchId)
+    await options.collaboration?.stop(workbenchId, 'lan-share')
     shareUrls.delete(workbenchId)
     metrics.delete(workbenchId)
   }
@@ -597,7 +611,10 @@ export async function createWorkbenchShareGateway(options: WorkbenchShareGateway
       }
       const started = sessions.start(workbenchId, host, gateway.port, '', grant)
       if (!started.ok || started.token === undefined) throw new Error(started.error ?? 'workbench-share-start-failed')
-      if (options.collaboration !== undefined) await options.collaboration.start(workbenchId, 'owner')
+      if (options.collaboration !== undefined) {
+        await options.collaboration.start(workbenchId, 'owner')
+        options.collaboration.hold(workbenchId, 'lan-share')
+      }
       const url = `http://${host}:${String(gateway.port)}/workbench?share=${encodeURIComponent(started.token)}`
       shareUrls.set(workbenchId, url)
       return { status: 'started', url }
@@ -619,7 +636,7 @@ export async function createWorkbenchShareGateway(options: WorkbenchShareGateway
       const lease = sessions.revokeLease(workbenchId, leaseId, 'kicked')
       if (session === undefined || lease === undefined) return false
       options.access?.revoke(lease.leaseId); options.revokeGuest?.(lease.leaseId)
-      options.collaboration?.get(workbenchId)?.disconnect(lease.leaseId)
+      options.collaboration?.get(workbenchId)?.remove(lease.leaseId)
       for (const socket of guestSockets.get(lease.leaseId) ?? []) socket.destroy()
       guestSockets.delete(lease.leaseId)
       for (const socket of collaborationSockets.get(lease.leaseId) ?? []) {

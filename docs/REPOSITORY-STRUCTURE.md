@@ -1,6 +1,6 @@
 # DSH Bay 仓库结构与源码导航
 
-更新日期：2026-11-11。候选版本 `0.2.2-alpha.18.1`；当前制品包含未提交工作树改动。这里记录当前文件结构，不是待实施的目录重构方案。
+更新日期：2026-11-12。候选版本 `0.2.2-alpha.18.2`；当前制品对应已提交源码。这里记录当前文件结构，不是待实施的目录重构方案。
 
 ```text
 dsh-bay/
@@ -44,7 +44,7 @@ dsh-bay/
 
 `node_modules/`、`lib/`、`tmp/`、`output/`、`prototypes/` 和临时日志不是源码提交。`lib/index.js`、`lib/client.js`、声明及构建输入是安装包的必要内容，按 package.json 白名单进入包；“Git 忽略 lib”不等于“不打包 lib”。
 
-`releases/alpha18.1-rc1-private/` 默认被忽略，每次 `pack:core` 更新同名制品和 `candidate.json`。历史 17.5/17.6 的部分记录仍被跟踪，不代表当前版本。本地未跟踪 `dsh-superagent/` 只作独立研究材料，不是 Core 的依赖或交付输入。
+`releases/alpha18.2-rc1-private/` 默认被忽略，每次 `pack:core` 更新同名制品和 `candidate.json`。历史 17.5/17.6 的部分记录仍被跟踪，不代表当前版本。本地未跟踪 `dsh-superagent/` 只作独立研究材料，不是 Core 的依赖或交付输入。
 
 `presets/workbench-creator/` 的历史自定义 preset 不再作为运行时安装；发布白名单保留其中的技能、规范和模板，DSH 的 `cordis` 模式负责实际创造模式执行。
 
