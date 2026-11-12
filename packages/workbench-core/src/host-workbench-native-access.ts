@@ -508,7 +508,7 @@ export function createGuestNativeTransport(ctx: Context, access: HostWorkbenchAc
         if (MUTATIONS.has(endpoint)) {
           const args = obj(obj(envelope.payload).args), mutationRequest = obj(args.request)
           const targetId = mutationRequest.sessionId ?? args.sessionId ?? args.agentId
-          if (typeof targetId !== 'string') throw failure('姝ゆ搷浣滅己灏戞槑纭殑浼氳瘽韬唤銆?')
+          if (typeof targetId !== 'string') throw failure('此操作缺少明确的会话身份。')
           // The browser owner uses DSH's owner principal for the initial
           // client baseline. Keep the Host lease as the source of truth for
           // every mutation, including mutations without a prompt inspect.

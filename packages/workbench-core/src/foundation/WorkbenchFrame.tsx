@@ -1,5 +1,6 @@
 import { WorkbenchProjectOverview } from './WorkbenchProjectOverview.tsx'
-import { WorkbenchReclaimProgress } from './WorkbenchReclaimProgress.tsx'
+import { WorkbenchBrowserFolderButton } from './WorkbenchBrowserFolderButton.tsx'
+import { connectSharedFloatingWorkspace } from '../client/shared-floating-workspace.ts'
 import { WorkbenchImportDirectoryRequests } from './WorkbenchCompletePackagePanel.tsx'
 import { WorkbenchCollaborationApprovals, WorkbenchShareGrantControls } from './WorkbenchSharePermissions.tsx'
 import { workbenchAccess } from '../client/workbench-access.ts'
@@ -36,7 +37,7 @@ import {
   IconEditOutlineMedium,
   IconEllipsisOutlineMedium, IconFlatListOutlineMedium, IconFolderOpenOutlineMedium, IconListPenOutlineMedium,
   IconLinkOutlineMedium, IconPlusOutlineMedium, IconSearchOutlineMedium, IconSettingsOutlineMedium,
-  IconShareOutlineMedium,
+  IconShareOutlineMedium, IconPinOutlineMedium,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { WorkbenchCoreSidebarProps } from './WorkbenchCoreSidebar.tsx'
 import type {
@@ -254,6 +255,9 @@ export type WorkbenchFrameProps =
     createWorkspaceSession?: (workspaceId: string, options: {
       requestId: string
       agentPreset?: string
+      /** Create through the Host so the Session joins this Workbench's catalog. */
+      workbenchId?: string
+      areaId?: string
     }) => Promise<{
       target: SessionBindingV1
       reusedBlank: false
@@ -795,22 +799,36 @@ function focusOfLayout(document: WorkbenchLayoutDocument): SharedCanvasFocusV1 |
   return { areaId: group.id, editorId: tab.editorId, ...(tab.sessionId === undefined ? {} : { sessionId: tab.sessionId }) }
 }
 
-function CollaborationParticipantStrip({ snapshot, currentParticipantId }: {
+/**
+ * Collaboration participants are reported through the Workbench top bar's
+ * status area, the same place as the browser handoff state. A participant who
+ * lost its connection is a notice ("… 已失联"), never an extra row in the
+ * Workbench identity, so the toolbar keeps one notice surface.
+ */
+function CollaborationParticipantNotice({ snapshot, currentParticipantId, className }: {
   readonly snapshot: WorkbenchCollaborationSnapshotV1 | undefined
   readonly currentParticipantId?: string | undefined
+  readonly className: string | undefined
 }) {
   const participants = snapshot?.participants.filter(row => row.participantId !== currentParticipantId) ?? []
   if (participants.length === 0) return null
   const intentLabel = (intent: string) => intent === 'editing' ? '正在编辑' : intent === 'sending' ? '正在发送' : intent === 'running' ? '正在执行任务' : intent === 'recovering' ? '正在恢复' : '正在查看'
-  return <div data-workbench-collaboration-participants role="status" aria-live="polite" style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', marginTop: 4, fontSize: 12, color: 'var(--dsw-alias-label-secondary, #62676d)' }}>
-    {participants.map(participant => {
-      const location = [participant.areaId, participant.editorId, participant.sessionId].filter(Boolean).join(' / ')
-      const stale = participant.connectionState === 'stale'
-      return <span key={participant.participantId} data-workbench-collaboration-participant={participant.participantId} data-connection-state={participant.connectionState}>
-        {participant.displayName || (participant.role === 'owner' ? '房主' : '参与者')} · {stale ? '已失联' : intentLabel(participant.intent)}{location ? ` · ${location}` : ''}
-      </span>
-    })}
-  </div>
+  const nameOf = (participant: typeof participants[number]) => participant.displayName || (participant.role === 'owner' ? '房主' : '参与者')
+  const names = (rows: typeof participants) => rows.length <= 2 ? rows.map(nameOf).join('、') : `${rows.slice(0, 2).map(nameOf).join('、')} 等 ${String(rows.length)} 人`
+  const stale = participants.filter(row => row.connectionState === 'stale')
+  const live = participants.filter(row => row.connectionState !== 'stale')
+  const label = stale.length > 0
+    ? `${names(stale)} 已失联`
+    : live.length === 1 ? `${nameOf(live[0]!)} · ${intentLabel(live[0]!.intent)}` : `${String(live.length)} 位参与者在线`
+  const detail = participants.map(participant => `${nameOf(participant)} · ${participant.connectionState === 'stale' ? '已失联' : intentLabel(participant.intent)}`).join('\n')
+  return <span
+    className={className}
+    role="status"
+    aria-live="polite"
+    title={detail}
+    data-workbench-collaboration-participants
+    data-workbench-collaboration-notice={stale.length > 0 ? 'stale' : 'live'}
+  >{label}</span>
 }
 
 function accountForBinding(
@@ -1052,7 +1070,6 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
   const canEditLayout = accessSnapshot?.capabilities.includes('layout') !== false
   const [shareBusy, setShareBusy] = useState(false)
   const [shareNotice, setShareNotice] = useState<string>()
-  const [showBrowserRootPath, setShowBrowserRootPath] = useState(false)
   useEffect(() => {
     const surfaceShareWorkbenchId = surfaceWorkbenchId
     if (isBrowserSurface !== true || surfaceShareWorkbenchId === undefined || shareController === undefined) return
@@ -1313,6 +1330,13 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
     publishedFocusRef.current = layoutFocusKey
     void client.command({ kind: 'canvas.set-focus', focus: JSON.parse(layoutFocusKey) as SharedCanvasFocusV1 }).catch(() => {})
   }, [collaborationState, layoutFocusKey, props.collaborationClient])
+
+  // The floating workspace is shared state of the collaboration session, on
+  // every surface that joins it, including the desktop owner.
+  useEffect(() => {
+    if (props.floatingRuntime === undefined || props.collaborationClient === undefined) return
+    return connectSharedFloatingWorkspace(props.floatingRuntime, props.collaborationClient)
+  }, [props.floatingRuntime, props.collaborationClient])
 
   useEffect(() => {
     if (surfaceContext.kind === 'lan-participant' || props.collaborationClient === undefined || collaborationState !== 'connected') return
@@ -2336,22 +2360,34 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
       ...current,
       [workspaceId]: { ...current[workspaceId], [sessionId]: marker },
     }))
-    if (isBrowserSurface) return
+    // Browser owners and LAN participants save the marker on the Host as
+    // well; a page-local marker would differ from every other surface.
     const snapshot = settings.getSnapshot()
     if (snapshot.status !== 'ready' || ! snapshot.writable || snapshot.revision === undefined) {
       setStateDiagnostic('对话标记尚未保存；请重新连接后重试。')
       return
     }
-    void (settings as WorkbenchSettingsScope).patch({
-      operation: 'set', path: ['sessionMarkers', workspaceId, sessionId],
-      value: marker, expectedRevision: snapshot.revision,
-    }).then((result) => {
-      if (result.status === 'committed') return
+    const discard = (message: string) => {
       setMarkerOverrides((current) => {
         const workspaceRows = withoutRecordKey(current[workspaceId] ?? {}, sessionId)
         return { ...current, [workspaceId]: workspaceRows }
       })
-      setStateDiagnostic('对话标记保存冲突；已重新载入远端标记。')
+      setStateDiagnostic(message)
+    }
+    void (settings as WorkbenchSettingsScope).patch({
+      operation: 'set', path: ['sessionMarkers', workspaceId, sessionId],
+      value: marker, expectedRevision: snapshot.revision,
+    }).then((result) => {
+      if (result.status === 'committed') {
+        // On a shared surface the Host marker is the fact. The response has
+        // already refreshed the snapshot, and a kept local override would
+        // hide a later change made by another participant.
+        if (isBrowserSurface) setMarkerOverrides((current) => ({ ...current, [workspaceId]: withoutRecordKey(current[workspaceId] ?? {}, sessionId) }))
+        return
+      }
+      discard('对话标记保存冲突；已重新载入远端标记。')
+    }, (error: unknown) => {
+      discard(error instanceof Error && error.message ? `对话标记没有保存：${error.message}` : '对话标记没有保存；请重新连接后重试。')
     })
   }, [markerWorkspaceId, settings, isBrowserSurface])
   const workspaceTitle = activeWorkspace?.title ?? '未分组'
@@ -3011,14 +3047,10 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
             <div className={css.browserWorkspaceIdentity}>
               <span className={css.browserWorkspaceKicker}>工作台</span>
               <strong>{browserWorkbenchName ?? '当前工作台'}</strong>
-              {surfaceWorkbenchId !== undefined && workbenchDirectory.getRootPath?.(surfaceWorkbenchId) !== undefined ? <>
-                <button type="button" onClick={() => setShowBrowserRootPath(value => !value)} aria-label="查看工作台文件夹路径">
-                  查看文件夹路径
-                </button>
-                {showBrowserRootPath ? <span role="status">{workbenchDirectory.getRootPath(surfaceWorkbenchId)}</span> : null}
-              </> : null}
+              {surfaceWorkbenchId !== undefined && workbenchDirectory.getRootPath?.(surfaceWorkbenchId) !== undefined
+                ? <WorkbenchBrowserFolderButton key={surfaceWorkbenchId} rootPath={workbenchDirectory.getRootPath(surfaceWorkbenchId)!} /> : null}
               {browserHandoffLabel === undefined ? null : <span className={css.browserWorkspaceStatus} role="status" aria-live="polite">{browserHandoffLabel}</span>}
-              <CollaborationParticipantStrip snapshot={collaborationSnapshot} currentParticipantId={props.collaborationClient?.participantId} />
+              <CollaborationParticipantNotice className={css.browserWorkspaceStatus} snapshot={collaborationSnapshot} currentParticipantId={props.collaborationClient?.participantId} />
               {collaborationStatus === undefined ? null : <span className={css.browserWorkspaceStatus} role="status" aria-live="polite" data-workbench-collaboration-state={collaborationState}>{collaborationStatus}</span>}
             </div>
             <div className={`${css.workspaceActions} ${css.browserWorkspaceActions}`} data-workbench-layout-actions>
@@ -3049,7 +3081,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
                 title={collaborationSnapshot?.sharedCanvas.fixedByOwner ? '房主已固定共享焦点，点击解锁' : '固定当前共享焦点'}
                 aria-pressed={collaborationSnapshot?.sharedCanvas.fixedByOwner === true}
                 data-workbench-focus-lock={collaborationSnapshot?.sharedCanvas.fixedByOwner ? 'locked' : 'unlocked'}
-              >{collaborationSnapshot?.sharedCanvas.fixedByOwner ? '解锁焦点' : '固定焦点'}</button> : null}
+              ><IconPinOutlineMedium size={17} /></button> : null}
               <div className={css.browserWorkspaceActionGroup} role="group" aria-label="历史布局操作">
                 <button
                   type="button"
@@ -3115,7 +3147,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
                       void props.shareController!.stop(surfaceWorkbenchId!).then(() => setShareNotice('已停止局域网共享')).catch(error => setShareNotice(error instanceof Error ? error.message : '停止共享失败')).finally(() => setShareBusy(false))
                     }}
                   ><IconCloseOutlineMedium size={17} /></button>}
-                  {workbenchShareSnapshot.sessions.filter(session => session.workbenchId === surfaceWorkbenchId).map(session => <WorkbenchShareGrantControls key={session.workbenchId} controller={props.shareController!} session={session} />)}
+                  {workbenchShareSnapshot.sessions.filter(session => session.workbenchId === surfaceWorkbenchId).map(session => <WorkbenchShareGrantControls key={session.workbenchId} controller={props.shareController!} session={session} presentation="toolbar" buttonClassName={css.browserWorkspaceIconButton} />)}
                 </div>
                 <span className={css.browserWorkspaceActionDivider} role="separator" aria-orientation="vertical" />
               </> : null}
@@ -3418,7 +3450,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
             role="status"
             aria-live="polite"
           >{browserHandoffLabel}</div>}
-          <CollaborationParticipantStrip snapshot={collaborationSnapshot} currentParticipantId={props.collaborationClient?.participantId} />
+          <CollaborationParticipantNotice className={css.browserHandoffStatus} snapshot={collaborationSnapshot} currentParticipantId={props.collaborationClient?.participantId} />
           <div className={css.workspaceActions} data-workbench-layout-actions>
             <span
               className={css.visuallyHidden}
@@ -3487,7 +3519,6 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
             </section>
           </div>
         ) : null}
-        {browserHandoffRequest?.status === 'reclaimed' && reclaimProgress && (reclaimProgress.phase !== 'complete' || reclaimProgress.forced || reclaimProgress.recovery) ? <WorkbenchReclaimProgress value={reclaimProgress} /> : null}
         <div
           ref={resizeCanvasRef}
           className={css.canvas}

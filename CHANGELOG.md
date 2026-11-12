@@ -15,6 +15,47 @@
   versions or builds are never silently replaced; missing template page state
   stays available for restoration after exact dependencies are ready.
 
+- Fixed a LAN guest's Workbench page turning into garbled text on reload. The
+  share gateway forwarded the browser's `accept-encoding` when it re-fetched
+  the Workbench document, so DSH returned gzip that the gateway then decoded as
+  UTF-8. The document is now always requested uncompressed and decoded
+  defensively.
+- Kept LAN guests from silently going stale. A guest that had not yet
+  published detailed presence sent no heartbeat, so the Host presence TTL
+  marked it lost and refused its next commands. The collaboration client now
+  always heartbeats, recovers after its caller reconnects it, and the gateway
+  terminates a collaboration socket that stops answering pings.
+- Collaboration participants, including "… 已失联", are reported only in the
+  Workbench top bar status area instead of an extra participant row; the
+  conversation presence bar shows only participants who are present.
+- Fixed a garbled Chinese error message for a session-less guest mutation.
+- Fixed a LAN guest's new conversation showing as unavailable until reload.
+  DSH announces a new Session before the Host records it in the shared
+  Workbench, so the guest missed it; the Workbench now refreshes the Session
+  catalog once and retains the Session from the refreshed list.
+- Session markers (label and colour) are the same on every surface. The
+  browser owner and LAN participants receive this Workbench's markers from the
+  Host, missing markers are completed by the Host against the whole Workspace,
+  a Session created through the Host gets its marker immediately, and marker
+  edits from browser surfaces are saved on the Host.
+- The floating workspace is shared through the collaboration session: its
+  pages, the selected page and whether it is expanded. Window position and size
+  stay on each screen. A refreshed page restores the shared floating workspace.
+  Conversations started from the floating workspace are created through the
+  Host so the Session belongs to the Workbench and LAN participants can use it.
+
+- Localized the LAN sharing and permission dialogs into Chinese, clarified the
+  shared scope and owner-only actions, and added selected and unavailable
+  permission states. Narrow and short windows keep the action buttons visible
+  while the permission list scrolls.
+- Aligned the browser Workbench folder, shared-focus lock and share-permission
+  controls with the existing 30px icon toolbar. Folder paths now open in an
+  accessible popover without expanding the toolbar; active controls remain
+  visible at narrow widths.
+- Fixed the desktop Workbench canvas being squeezed into a thin strip after
+  reclaiming a closed or disconnected browser page. The return status uses the
+  existing Workbench toolbar only; no recovery panel is inserted above the canvas.
+
 ## 0.2.2-alpha.18.2 — private staging
 
 - Joined the browser owner and the DSH desktop owner to the same Host

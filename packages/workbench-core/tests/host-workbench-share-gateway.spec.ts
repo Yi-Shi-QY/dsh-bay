@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { connect } from 'node:net'
 import { createHash } from 'node:crypto'
+import { gzipSync } from 'node:zlib'
 import { WebSocket } from 'ws'
 import { describe, expect, it } from 'vitest'
 import { createWorkbenchShareGateway, selectPrivateIPv4 } from '../src/host-workbench-share-gateway.ts'
@@ -114,6 +115,52 @@ describe('Workbench LAN share gateway', () => {
       const redirect = await fetch(`http://${gateway.host}:${String(gateway.port)}/api/redirect`, { redirect: 'manual', headers: { cookie: shareCookie! } })
       expect(redirect.status).toBe(403)
       expect(redirect.headers.get('location')).toBeNull()
+    } finally {
+      await gateway.close()
+      await upstream.close()
+    }
+  })
+
+  it('serves a readable document on reload when the upstream compresses responses', async () => {
+    const gatewayHost = selectPrivateIPv4()
+    if (gatewayHost === undefined) return
+    const page = '<!doctype html><html data-workbench-document="v1"><head><title>湾域工作台</title></head><body>协作者可以继续对话</body></html>'
+    const encodings: string[] = []
+    // DSH's web server runs the `compression` middleware: it gzips whenever
+    // the request accepts gzip, exactly like a browser reload does.
+    const upstreamServer = createServer((request, response) => {
+      const accepts = String(request.headers['accept-encoding'] ?? '')
+      encodings.push(accepts)
+      const headers: Record<string, string | string[]> = { 'content-type': 'text/html; charset=utf-8', 'set-cookie': ['dsh-owner=owner-value; HttpOnly'] }
+      if (/gzip/u.test(accepts)) { response.writeHead(200, { ...headers, 'content-encoding': 'gzip' }); response.end(gzipSync(page)); return }
+      response.writeHead(200, headers); response.end(page)
+    })
+    const upstream = await listen(upstreamServer)
+    const manager = createWorkbenchShareSessionManager({ randomToken: () => `s-${'g'.repeat(42)}` })
+    const gateway = await createWorkbenchShareGateway({
+      upstreamOrigin: `http://127.0.0.1:${String(upstream.port)}`,
+      manager,
+      networkInterfaces: { WLAN: [{ address: gatewayHost, family: 'IPv4', internal: false }] },
+      prepareView: async () => ({ windowId: 'window-gzip', url: `http://127.0.0.1:${String(upstream.port)}/workbench?workbench=${'t'.repeat(43)}&token=launch`, expiresAt: Date.now() + 10_000 }),
+      redeemView: async () => ({ schemaVersion: 1, windowId: 'window-gzip', workbenchId: 'workbench-a', mode: 'browser-workbench', closeToken: `close-${'g'.repeat(40)}` }),
+      closeView: async () => {},
+    })
+    try {
+      const started = await gateway.startShare('workbench-a')
+      const link = await fetch(started.url, { redirect: 'manual' })
+      const shareCookie = link.headers.get('set-cookie')?.split(';', 1)[0]
+      const load = () => fetch(`http://${gateway.host}:${String(gateway.port)}/workbench`, { headers: { cookie: shareCookie!, 'accept-encoding': 'gzip, deflate, br' } })
+      const first = await load()
+      expect(await first.text()).toContain('协作者可以继续对话')
+      // The second load reuses the lease and proxies the guest request headers.
+      const reload = await load()
+      expect(reload.status).toBe(200)
+      expect(reload.headers.get('content-encoding')).toBeNull()
+      const html = await reload.text()
+      expect(html).toContain('<title>湾域工作台</title>')
+      expect(html).toContain('协作者可以继续对话')
+      expect(html).toContain('__WORKBENCH_WINDOW_VIEW__')
+      expect(encodings.every(value => !/gzip/u.test(value))).toBe(true)
     } finally {
       await gateway.close()
       await upstream.close()

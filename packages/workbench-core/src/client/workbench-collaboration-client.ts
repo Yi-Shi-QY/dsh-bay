@@ -93,12 +93,27 @@ export function createWorkbenchCollaborationClient(options: WorkbenchCollaborati
       } catch { return }
     }
   }
-  const presenceHeartbeat = typeof globalThis.setInterval === 'function'
-    ? globalThis.setInterval(() => {
-      if (lastPresence === undefined || state !== 'connected') return
-      try { send({ type: 'client.presence', payload: { ...lastPresence, connectionState: 'connected', updatedAt: Date.now() } }) } catch { /* reconnect state is visible through the client */ }
+  // The Host expires a participant whose presence is older than its TTL. A
+  // participant that has not focused a conversation yet has no detailed
+  // presence, so the heartbeat falls back to a plain "viewing" presence;
+  // otherwise an idle guest silently went stale and every later command,
+  // including the draft of its next message, was refused.
+  let presenceHeartbeat: ReturnType<typeof setInterval> | undefined
+  const startHeartbeat = (): void => {
+    if (presenceHeartbeat !== undefined || typeof globalThis.setInterval !== 'function') return
+    presenceHeartbeat = globalThis.setInterval(() => {
+      if (state !== 'connected') return
+      const base: ParticipantPresenceV1 = lastPresence ?? {
+        participantId: options.participantId, displayName: options.displayName, role: options.role,
+        intent: 'viewing', connectionState: 'connected', updatedAt: Date.now(),
+      }
+      try { send({ type: 'client.presence', payload: { ...base, connectionState: 'connected', updatedAt: Date.now() } }) } catch { /* reconnect state is visible through the client */ }
     }, 15_000)
-    : undefined
+  }
+  const stopHeartbeat = (): void => {
+    if (presenceHeartbeat !== undefined) clearInterval(presenceHeartbeat)
+    presenceHeartbeat = undefined
+  }
   const scheduleReconnect = () => {
     if (closedByCaller || options.reconnect === false || reconnectTimer !== undefined) return
     state = 'recovering'
@@ -222,11 +237,17 @@ export function createWorkbenchCollaborationClient(options: WorkbenchCollaborati
 
   return {
     participantId: options.participantId,
-    connect: open,
+    connect() {
+      // A caller may reconnect a client it disconnected earlier, for example
+      // when its plugin effect restarts. It must recover like a fresh client.
+      closedByCaller = false
+      startHeartbeat()
+      return open()
+    },
     disconnect() {
       closedByCaller = true
-      if (reconnectTimer !== undefined) clearTimeout(reconnectTimer)
-      if (presenceHeartbeat !== undefined) clearInterval(presenceHeartbeat)
+      if (reconnectTimer !== undefined) { clearTimeout(reconnectTimer); reconnectTimer = undefined }
+      stopHeartbeat()
       state = 'closed'
       socket?.close()
       socket = undefined

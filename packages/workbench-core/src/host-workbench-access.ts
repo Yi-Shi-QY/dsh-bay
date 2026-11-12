@@ -19,6 +19,7 @@ import type { WorkbenchCollaborationSeedV1, WorkbenchCommandV1 } from './workben
 import type { DirectoryPatch } from './workbench-directory-contract.ts'
 import type { WorkbenchMemoryWrite } from './workbench-memory-contract.ts'
 import type { WorkbenchMemoryEntry } from './workbench-memory-contract.ts'
+import { workbenchSessionMarkers } from './host-workbench-session-markers.ts'
 
 const hash = (token: string) => createHash('sha256').update(token).digest('hex')
 const contentHash = (value: Uint8Array) => createHash('sha256').update(value).digest('hex')
@@ -596,7 +597,10 @@ export class HostWorkbenchAccess {
       ...(source.value.extensionConsents === undefined ? {} : { extensionConsents: structuredClone(source.value.extensionConsents) }),
     } : {}
     return { ...source, writable: context.actor !== 'lan-guest' || this.capabilities(context).some(c => ['layout', 'context', 'tasks'].includes(c)), value: {
-      version: 4, activeWorkbenchId: context.workbenchId, openWorkbenchIds: [context.workbenchId], workbenches: { [context.workbenchId]: record }, invalidWorkbenches: {}, layoutTemplates: {}, sessionMarkers: {},
+      version: 4, activeWorkbenchId: context.workbenchId, openWorkbenchIds: [context.workbenchId], workbenches: { [context.workbenchId]: record }, invalidWorkbenches: {}, layoutTemplates: {},
+      // Only this Workbench's Session markers, completed by the Host so every
+      // surface shows the same label and colour for the same Session.
+      sessionMarkers: workbenchSessionMarkers(record, source.value.sessionMarkers ?? {}),
       ...ownerGlobals,
       ...(context.actor === 'browser-owner' && source.value.backgroundAi ? { backgroundAi: source.value.backgroundAi } : {}),
     } }

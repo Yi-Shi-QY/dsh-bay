@@ -11,11 +11,19 @@ import { migrateDocumentV2ToV3 } from '../src/foundation/document-v3.ts'
 import type { WorkbenchLayoutDocument } from '../src/foundation/model.ts'
 import { createWorkbenchRuntimeMetrics } from '../src/foundation/workbench-runtime-metrics.ts'
 import type { WorkbenchWindowControllerV1 } from '../src/client/workbench-window-controller.ts'
+import type { WorkbenchCollaborationClientV1 } from '../src/client/workbench-collaboration-client.ts'
 import type { WorkbenchSurfaceContextV1 } from '../src/client/workbench-surface-context.ts'
 import type { WorkbenchShareControllerV1 } from '../src/client/workbench-share-controller.ts'
 import type { ConversationTabStatusSource, ConversationTabStatus } from '../src/client/conversation-tab-status.ts'
 
-afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals() })
+afterEach(() => {
+  cleanup()
+  // Some resize tests stub RAF while fake timers are active. Restore the stub
+  // first so switching back to real timers cannot leave a frozen RAF behind.
+  vi.unstubAllGlobals()
+  vi.useRealTimers()
+  vi.restoreAllMocks()
+})
 
 function setup(
   patch: (operation: unknown) => Promise<SettingsScopePatchResult>,
@@ -28,6 +36,7 @@ function setup(
     surfaceContext?: WorkbenchSurfaceContextV1
     requestBrowserReclaim?: (workbenchId: string) => Promise<boolean>
     shareController?: WorkbenchShareControllerV1
+    collaborationClient?: WorkbenchCollaborationClientV1
   },
   projectNeutralOverride?: boolean,
   nestedSplit?: boolean,
@@ -752,6 +761,11 @@ describe('Frame layout persistence', () => {
     expect(h.view.getByText('布局已保存')).toBeTruthy()
     fireEvent.click(h.view.getByRole('button', { name: '查看工作台文件夹路径' }))
     expect(h.view.getByText('C:\\Users\\Test\\Workbenches\\Workbench A')).toBeTruthy()
+    const pathDetails = h.view.getByRole('dialog', { name: '工作台文件夹路径' })
+    expect(pathDetails.closest('[data-workbench-browser-toolbar]')).toBeNull()
+    fireEvent.keyDown(pathDetails, { key: 'Escape' })
+    expect(h.view.queryByRole('dialog', { name: '工作台文件夹路径' })).toBeNull()
+    expect(document.activeElement).toBe(h.view.getByRole('button', { name: '查看工作台文件夹路径' }))
     h.rename('one', '复核工作台')
     expect(document.title).toBe('复核工作台')
     h.view.unmount()
@@ -765,6 +779,45 @@ describe('Frame layout persistence', () => {
     expect(h.view.container.querySelector('[data-workbench-surface="lan-participant"]')).not.toBeNull()
     expect(h.view.container.querySelector('[data-workbench-browser-toolbar]')).not.toBeNull()
     expect(h.view.container.querySelector('[data-workbench-canvas]')).not.toBeNull()
+    h.view.unmount()
+  })
+
+  it('reports collaboration participants, including a lost one, in the top bar status area', () => {
+    const presence = (participantId: string, displayName: string, connectionState: 'connected' | 'stale', intent: 'editing' | 'recovering') => ({
+      participantId, displayName, role: 'participant' as const, intent, connectionState, updatedAt: 1,
+    })
+    let participants = [presence('guest-a', '小王', 'connected', 'editing')]
+    const snapshotOf = () => ({ participants, drafts: {}, sharedCanvas: { viewport: { width: 1280, height: 800, scaleMode: 'contain' }, floatingPanels: [], fixedByOwner: false } })
+    let snapshot = snapshotOf()
+    const listeners = new Set<() => void>()
+    const client = {
+      participantId: 'owner',
+      connect: async () => { throw new Error('unused') },
+      disconnect: () => {},
+      command: async () => { throw new Error('unused') },
+      publishPresence: () => {},
+      getSnapshot: () => snapshot as never,
+      subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener) } },
+      getState: () => 'connected' as const,
+    } satisfies WorkbenchCollaborationClientV1
+    const h = setup(async () => ({ status: 'committed', revision: 2 }), undefined, undefined, undefined, undefined, {
+      surfaceContext: { kind: 'browser-owner', workbenchId: 'one' },
+      collaborationClient: client,
+    })
+    const toolbar = h.view.container.querySelector('[data-workbench-browser-toolbar]')!
+    const notice = () => toolbar.querySelector('[data-workbench-collaboration-participants]')
+    expect(notice()?.textContent).toBe('小王 · 正在编辑')
+    expect(notice()?.getAttribute('role')).toBe('status')
+    act(() => {
+      participants = [presence('guest-a', '小王', 'stale', 'recovering'), presence('guest-b', '小李', 'connected', 'editing')]
+      snapshot = snapshotOf()
+      for (const listener of listeners) listener()
+    })
+    expect(notice()?.textContent).toBe('小王 已失联')
+    expect(notice()?.getAttribute('data-workbench-collaboration-notice')).toBe('stale')
+    expect(notice()?.getAttribute('title')).toBe('小王 · 已失联\n小李 · 正在编辑')
+    // One notice surface: no separate participant rows in the Workbench identity.
+    expect(h.view.container.querySelectorAll('[data-workbench-collaboration-participant]')).toHaveLength(0)
     h.view.unmount()
   })
 
@@ -1057,6 +1110,67 @@ describe('Frame layout persistence', () => {
     expect(h.view.container.querySelector('[data-workbench-browser-handoff="closed"]')?.textContent)
       .toBe('浏览器已关闭。浏览器页面关闭后，工作台已恢复到 DSH 客户端。')
     expect(h.settings.patch).not.toHaveBeenCalled()
+  })
+
+  it.each(['normal', 'page-closed', 'forced'] as const)('shows %s recovery only in the existing toolbar without adding a canvas notice', async recovery => {
+    const recoveryInfo = recovery === 'page-closed' ? { recovery: 'page-closed' as const } : recovery === 'forced' ? { forced: true } : {}
+    const windowId = '00000000-0000-4000-8000-000000000001'
+    type Snapshot = ReturnType<WorkbenchWindowControllerV1['getSnapshot']>
+    let snapshot: Snapshot = { supported: true, windows: [], requests: [{
+      workbenchId: 'one', windowId, status: recovery === 'forced' ? 'failed' : 'ready',
+      ...(recovery === 'forced' ? { code: 'browser-view-heartbeat-timeout' } : {}),
+    }] }
+    const listeners = new Set<() => void>()
+    const publish = (request: NonNullable<Snapshot['request']>) => {
+      snapshot = { supported: true, windows: [], requests: [request] }
+      for (const listener of listeners) listener()
+    }
+    const controller: WorkbenchWindowControllerV1 = {
+      getSnapshot: () => snapshot,
+      subscribe: listener => { listeners.add(listener); return () => listeners.delete(listener) },
+      open: async () => ({ status: 'failed', code: 'unused' }),
+      focus: async () => ({ status: 'failed', code: 'unused' }),
+      close: async () => ({ status: 'failed', code: 'unused' }),
+      reclaim: vi.fn(async () => {
+        publish({ workbenchId: 'one', windowId, status: 'reclaimed', reclaimProgress: { phase: 'checking', ...recoveryInfo } })
+        return { status: 'reclaimed' }
+      }),
+      desktopRestored: vi.fn((workbenchId, restoredWindowId, error) => {
+        publish({ workbenchId, windowId: restoredWindowId, status: 'reclaimed',
+          reclaimProgress: { phase: error ? 'checking' : 'complete', ...recoveryInfo, ...(error ? { error } : {}) } })
+      }),
+    }
+    const h = setup(async () => ({ status: 'committed', revision: 2 }), undefined, ['测试内页'], controller)
+    fireEvent.click(h.view.getByRole('button', { name: '收回到 DSH 客户端', exact: true }))
+    await waitFor(() => expect(controller.desktopRestored).toHaveBeenCalledWith('one', windowId, undefined))
+    const toolbarStatus = h.view.container.querySelector('[data-workbench-browser-handoff="reclaimed"]')!
+    expect(toolbarStatus.textContent).toBe('已收回。工作台控制权已交还给 DSH 客户端。')
+    expect(toolbarStatus.closest('header')).not.toBeNull()
+    const expectNoCanvasNotice = () => {
+      expect(h.view.container.querySelector('[data-workbench-reclaim-progress], [data-workbench-reclaim-notice]')).toBeNull()
+      expect(h.view.queryByRole('button', { name: '关闭收回提示' })).toBeNull()
+    }
+    expectNoCanvasNotice()
+    expect(h.view.queryByRole('progressbar')).toBeNull()
+    expect(h.view.getByText('测试内容')).toBeTruthy()
+    const canvas = h.view.container.querySelector('[data-workbench-canvas]')
+    const editor = h.view.getByText('测试内容')
+    expect(h.settings.patch).not.toHaveBeenCalled()
+    // Late status responses must not add a notice or remount the restored editor.
+    act(() => publish({ ...snapshot.requests![0]! }))
+    expectNoCanvasNotice()
+    expect(h.view.container.querySelector('[data-workbench-canvas]')).toBe(canvas)
+    expect(h.view.getByText('测试内容')).toBe(editor)
+    // Another handoff also reports its result exclusively in the toolbar.
+    act(() => publish({ workbenchId: 'one', windowId: '00000000-0000-4000-8000-000000000002', status: 'reclaimed',
+      reclaimProgress: { phase: 'complete', ...recoveryInfo } }))
+    expectNoCanvasNotice()
+    fireEvent.click(h.view.getByRole('tab', { name: '工作台总览' }))
+    await h.view.findByText('工作台总览内容')
+    expectNoCanvasNotice()
+    fireEvent.click(h.view.getByRole('tab', { name: 'Workbench B' }))
+    await waitFor(() => expect(h.view.getByRole('tab', { name: 'Workbench B' }).getAttribute('aria-selected')).toBe('true'))
+    expectNoCanvasNotice()
   })
 
   it('opens the active Workbench through the host controller and only manages sibling windows', async () => {

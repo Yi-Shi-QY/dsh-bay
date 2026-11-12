@@ -135,6 +135,41 @@ describe('file workbench / control lease / guest integration', () => {
     } })).resolves.toMatchObject({ status: 'committed', areaId: expect.any(String) })
   })
 
+  it('shares one Workbench Session marker set with browser owners and LAN participants', async () => {
+    const f = await setup()
+    await f.directory.bindArea({ workbenchId: 'workbench-a', areaId: 'area-a', relativePath: 'app', createDirectory: true, expectedRevision: f.directory.getSnapshot().revision })
+    const workspaceId = f.directory.getSnapshot().value.workbenches['workbench-a']!.areaProjects?.['area-a']?.workspaceId
+    if (!workspaceId) throw new Error('workspace fixture missing')
+    for (const [key, sessionId, createdAt] of [['session-a', 'runtime-a', 1], ['session-b', 'runtime-b', 2]] as const) {
+      await f.directory.registerSession('workbench-a', sessionId, { sessionKey: key, sessionId, role: 'user', areaId: 'area-a', relativePath: 'app', title: key, agentPreset: 'standard', createdAt })
+    }
+    // The desktop stored a marker for one Session and for a Session of
+    // another Workbench in the same DSH Workspace.
+    await f.directory.patch({ operation: 'set', path: ['sessionMarkers', workspaceId], value: {
+      'runtime-a': { label: 'A', accentToken: 'accent-1', customized: false },
+      'foreign-session': { label: 'B', accentToken: 'accent-2', customized: false },
+    } })
+    const token = f.access.registerGuest('marker-guest', 'workbench-a', SHARED_CONTROL_GRANT, () => true)
+    const read = async () => ((await (await f.call({ action: 'snapshot' }, token)).json()) as { snapshot: { value: { sessionMarkers: Record<string, Record<string, { label: string; accentToken: string }>> } } }).snapshot.value.sessionMarkers
+    const markers = await read()
+    expect(markers[workspaceId]?.['runtime-a']).toMatchObject({ label: 'A', accentToken: 'accent-1' })
+    // A missing marker is completed against the whole Workspace, so it does
+    // not reuse the hidden Session's label, and the hidden Session stays hidden.
+    expect(markers[workspaceId]?.['runtime-b']?.label).toBe('C')
+    expect(markers[workspaceId]?.['foreign-session']).toBeUndefined()
+
+    const patch = (path: string[], value: unknown, requestId: string) => f.call({ action: 'patch', requestId, operation: { operation: 'set', path, value, expectedRevision: f.directory.getSnapshot().revision } }, token)
+    expect((await patch(['sessionMarkers', workspaceId, 'runtime-b'], { label: 'API', accentToken: 'accent-5', customized: true }, 'marker-1')).status).toBe(200)
+    expect(f.directory.getSnapshot().value.sessionMarkers[workspaceId]?.['runtime-b']).toEqual({ label: 'API', accentToken: 'accent-5', customized: true })
+    expect((await read())[workspaceId]?.['runtime-b']?.label).toBe('API')
+    // Another Workbench's Session, a duplicate label and other preferences stay out of reach.
+    expect((await patch(['sessionMarkers', workspaceId, 'foreign-session'], { label: 'X', accentToken: 'accent-1', customized: true }, 'marker-2')).status).toBe(403)
+    expect((await patch(['sessionMarkers', workspaceId, 'runtime-a'], { label: 'B', accentToken: 'accent-1', customized: true }, 'marker-3')).status).toBe(400)
+    expect((await patch(['sessionMarkers', workspaceId, 'runtime-a'], { label: 'Z', accentToken: '#ff0000', customized: true }, 'marker-4')).status).toBe(400)
+    expect((await patch(['sessionMarkers', workspaceId], {}, 'marker-5')).status).toBe(403)
+    expect(f.directory.getSnapshot().value.sessionMarkers[workspaceId]?.['foreign-session']?.label).toBe('B')
+  })
+
   it('routes shared task reads and actions through the Host Bay Agent runtime', async () => {
     const f = await setup(), calls: Record<string, unknown>[] = []
     f.access.setTaskRuntime({

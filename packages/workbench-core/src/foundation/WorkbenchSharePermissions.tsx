@@ -7,48 +7,50 @@ import type { WorkbenchShareControllerV1, WorkbenchShareSessionSnapshotV1 } from
 import css from './WorkbenchHome.module.css'
 
 const extras: readonly [WorkbenchCapability, string, string][] = [
-  ['main-message', 'Bay Agent messages', 'Allow sending messages to the Workbench main session.'],
-  ['read-files', 'Read project files', 'Allow reading files inside the Workbench root.'],
-  ['write-files', 'Write project files', 'Allow writing files inside the Workbench root.'],
-  ['layout', 'Edit Areas and layout', 'Allow changing Areas, editors, sessions, and layout.'],
-  ['context', 'Edit context', 'Allow changing Workbench and Area context.'],
-  ['tasks', 'Manage tasks', 'Allow viewing, starting, pausing, and cancelling Workbench tasks.'],
-  ['memory', 'Edit memory', 'Allow changing Workbench and Area memory.'],
-  ['package', 'Import and export packages', 'Allow Workbench package operations.'],
+  ['layout', '编辑区域与布局', '调整区域、内页、会话和画布布局。'],
+  ['main-message', '向主会话发送消息', '在工作台主会话中发送消息。'],
+  ['read-files', '读取工作台文件', '查看当前工作台目录内的文件。'],
+  ['write-files', '修改工作台文件', '写入当前工作台目录内的文件。'],
+  ['context', '编辑上下文', '修改工作台和区域的上下文。'],
+  ['memory', '编辑记忆', '修改工作台和区域的记忆。'],
+  ['tasks', '管理任务', '查看、启动、暂停和取消工作台任务。'],
+  ['package', '导入与导出工作台包', '导入或导出当前工作台的内容。'],
 ]
 
 function SharePermissions({ complete, initial }: { complete: (grant?: WorkbenchGrant) => void; initial?: WorkbenchGrant | undefined }) {
-  const [grant, setGrant] = useState<WorkbenchGrant>(structuredClone(initial ?? SHARED_CONTROL_GRANT))
+  const [grant, setGrant] = useState<WorkbenchGrant>(() => structuredClone(initial ?? SHARED_CONTROL_GRANT))
+  const title = initial ? '调整分享权限' : '分享工作台到局域网'
+  const selectedCount = extras.filter(([key]) => grant.capabilities.includes(key)).length
   const submit = () => complete({ template: 'shared-control', capabilities: [...new Set(['view', ...grant.capabilities])] as WorkbenchCapability[] })
-  return <Modal open onClose={() => complete()} title={initial ? 'Adjust shared-control permissions' : 'Start shared-control'} headless className={`${css.wizardModal ?? ''} ${css.shareModal ?? ''}`}>
+  return <Modal open onClose={() => complete()} title={title} headless className={`${css.wizardModal ?? ''} ${css.shareModal ?? ''}`}>
     <form className={`${css.wizard ?? ''} ${css.shareWizard ?? ''}`} onSubmit={event => { event.preventDefault(); submit() }}>
       <header className={css.wizardHeader}>
         <div className={css.shareHeaderCopy}>
-          <div className={css.shareEyebrow}><span className={css.shareBadge}><IconShareOutlineMedium size={14} /> Shared control</span><span>Current Workbench</span></div>
-          <h2>{initial ? 'Adjust shared-control permissions' : 'Start shared-control'}</h2>
-          <p className={css.formHint}>Everyone uses the same Host Workbench fact, Areas, editors, sessions, canvas, drafts, and tasks.</p>
+          <div className={css.shareEyebrow}><span className={css.shareBadge}><IconShareOutlineMedium size={14} />局域网分享</span><span>实时协作</span></div>
+          <h2>{title}</h2>
+          <p className={css.formHint}>{initial ? '设置当前分享中，参与者可以执行的操作。' : '让同一局域网中的参与者加入，一起使用当前工作台。'}</p>
         </div>
-        <Button type="button" aria-label="Close shared-control permissions" title="Close" onClick={() => complete()}><IconCloseOutlineMedium size={18} /></Button>
+        <Button type="button" aria-label="关闭分享权限设置" title="关闭" onClick={() => complete()}><IconCloseOutlineMedium size={18} /></Button>
       </header>
       <div className={css.wizardBody}>
-        <section className={css.shareSummary} aria-label="Shared-control description">
+        <section className={css.shareSummary} aria-label="共享范围">
           <div className={css.shareSummaryIcon}><IconShareOutlineMedium size={18} /></div>
-          <div><strong>Shared-control Workbench</strong><p>The Host authorizes each command and broadcasts the committed Workbench state to every participant.</p></div>
+          <div><strong>共享当前整个工作台</strong><p>区域、内页、布局和未发送草稿会实时同步给参与者。</p></div>
         </section>
         <fieldset className={css.shareFieldset}>
-          <legend>Capabilities</legend>
-          <p className={css.formHint}>Capabilities can be reduced during an active share. A later expansion requires creating a new share.</p>
+          <legend>参与者权限</legend>
+          <p className={css.formHint}>{initial ? '取消勾选可收回权限。如需开放新的权限，请停止分享后重新创建。' : '勾选允许参与者执行的操作。分享后可随时收紧权限。'}</p>
           <div className={css.permissionGrid}>{extras.map(([key, label, description]) => {
             const disabled = !!initial && !initial.capabilities.includes(key)
-            return <label className={css.permissionOption} data-disabled={disabled} key={key}>
-              <input type="checkbox" checked={grant.capabilities.includes(key)} disabled={disabled} onChange={event => setGrant(current => ({ ...current, capabilities: event.target.checked ? [...current.capabilities, key] : current.capabilities.filter(value => value !== key) }))} />
-              <span><strong>{label}</strong><small>{description}</small></span>
+            return <label className={css.permissionOption} data-disabled={disabled} data-checked={grant.capabilities.includes(key)} key={key}>
+              <input type="checkbox" aria-label={label} checked={grant.capabilities.includes(key)} disabled={disabled} onChange={event => setGrant(current => ({ ...current, capabilities: event.target.checked ? [...current.capabilities, key] : current.capabilities.filter(value => value !== key) }))} />
+              <span><strong>{label}</strong><small>{description}</small>{disabled ? <small className={css.permissionUnavailable}>本次分享未开放</small> : null}</span>
             </label>
           })}</div>
         </fieldset>
-        <div className={css.shareNotice}><span className={css.shareNoticeMark}>i</span><p>Accounts, plugins, native folder selection, Host management, and other Workbench roots remain Host-only.</p></div>
+        <div className={css.shareNotice}><IconShieldOutlineMedium size={16} /><div><strong>仅房主可操作</strong><p>账号、插件安装、系统目录选择、主机和分享管理。其他工作台不在本次分享范围内。</p></div></div>
       </div>
-      <footer className={css.wizardActions}><span className={css.shareFooterHint}>{initial ? 'Only the current share permissions will be reduced.' : 'The full Workbench is shared through the Host collaboration session.'}</span><div><Button type="button" variant="outline" onClick={() => complete()}>Cancel</Button><Button type="submit" variant="primary">{initial ? 'Apply reduction' : 'Start sharing'}</Button></div></footer>
+      <footer className={css.wizardActions}><span className={css.shareFooterHint}>已勾选 {selectedCount} 项权限</span><div><Button type="button" variant="outline" onClick={() => complete()}>取消</Button><Button type="submit" variant="primary">{initial ? '保存权限' : '开始分享'}</Button></div></footer>
     </form>
   </Modal>
 }
@@ -63,17 +65,27 @@ export function requestWorkbenchShareGrant(initial?: WorkbenchGrant, _areas: rea
   })
 }
 
-export function WorkbenchShareGrantControls({ controller, session }: { controller: WorkbenchShareControllerV1; session: WorkbenchShareSessionSnapshotV1 }) {
+export function WorkbenchShareGrantControls({ controller, session, presentation, buttonClassName }: {
+  controller: WorkbenchShareControllerV1; session: WorkbenchShareSessionSnapshotV1
+  presentation?: 'toolbar'; buttonClassName?: string | undefined
+}) {
   const [error, setError] = useState<string>(), [busy, setBusy] = useState(false)
   if (!controller.reduce || !session.grant) return null
-  return <div><Button variant="outline" disabled={busy} onClick={() => {
+  const openPermissions = () => {
     void (async () => {
       const grant = await requestWorkbenchShareGrant(session.grant)
       if (!grant) return
       setBusy(true); setError(undefined)
       try { await controller.reduce!(session.workbenchId, grant) } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
     })()
-  }}><IconShieldOutlineMedium size={16} />收紧分享权限</Button>{error ? <p role="alert">{error}</p> : null}</div>
+  }
+  return <div className={presentation === 'toolbar' ? css.shareGrantToolbar : undefined}>
+    {presentation === 'toolbar'
+      ? <button type="button" className={buttonClassName} disabled={busy} onClick={openPermissions}
+        title={error ?? '收紧分享权限'} aria-label="收紧分享权限" aria-haspopup="dialog"><IconShieldOutlineMedium size={17} /></button>
+      : <Button variant="outline" disabled={busy} onClick={openPermissions}><IconShieldOutlineMedium size={16} />收紧分享权限</Button>}
+    {error ? <p role="alert">{error}</p> : null}
+  </div>
 }
 
 type Approval = { id: string; sessionId: string; tool: string; arguments: unknown }

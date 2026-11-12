@@ -83,31 +83,12 @@
   flex: 0 0 auto;
 }
 
-.browserWorkspacePath button {
-  display: grid;
-  width: 28px;
-  height: 28px;
-  place-items: center;
-  padding: 0;
-  border: 1px solid var(--dsw-alias-border-l2);
-  border-radius: 6px;
-  color: var(--dsw-alias-label-secondary);
-  background: transparent;
-  cursor: pointer;
-}
-
-.browserWorkspacePath button:hover, .browserWorkspacePath button:focus-visible {
-  color: var(--dsw-alias-label-primary);
-  background: var(--dsw-alias-interactive-bg-hover);
-}
-
 .browserWorkspacePathPopover {
-  position: absolute;
+  box-sizing: border-box;
+  position: fixed;
   z-index: 120;
-  top: calc(100% + 8px);
-  left: 0;
   display: grid;
-  width: min(420px, calc(100vw - 32px));
+  width: min(420px, calc(100vw - 24px));
   gap: 6px;
   padding: 10px 12px;
   border: 1px solid var(--dsw-alias-border-l2);
@@ -154,6 +135,7 @@
 
 .browserWorkspaceActionGroup {
   display: inline-flex;
+  flex: 0 0 auto;
   align-items: center;
   justify-content: center;
   gap: 2px;
@@ -168,6 +150,7 @@
 
 .browserWorkspaceBar .browserWorkspaceIconButton {
   display: grid;
+  flex: 0 0 30px;
   width: 30px;
   min-width: 30px;
   height: 30px;
@@ -178,6 +161,7 @@
   color: var(--dsw-alias-label-secondary);
   background: transparent;
   cursor: pointer;
+  white-space: nowrap;
 }
 
 .browserWorkspaceBar .browserWorkspaceIconButton svg {
@@ -194,6 +178,12 @@
 .browserWorkspaceBar .browserWorkspaceIconButton:focus-visible {
   color: var(--dsw-alias-label-primary);
   background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.browserWorkspaceBar .browserWorkspaceIconButton[aria-pressed='true'],
+.browserWorkspaceBar .browserWorkspaceIconButton[aria-expanded='true'] {
+  color: var(--dsw-alias-label-link);
+  background: color-mix(in srgb, var(--dsw-alias-label-link) 12%, transparent);
 }
 
 .browserWorkspaceReclaim {
@@ -824,6 +814,12 @@
 .browserHandoffStatus[data-workbench-browser-handoff='closed'] {
   border-color: color-mix(in srgb, var(--dsw-alias-state-success-primary) 42%, var(--dsw-alias-border-l2));
   color: var(--dsw-alias-state-success-primary);
+}
+
+.browserHandoffStatus[data-workbench-collaboration-notice='stale'],
+.browserWorkspaceStatus[data-workbench-collaboration-notice='stale'] {
+  border-color: color-mix(in srgb, var(--dsw-alias-state-warning-primary, #c88719) 42%, var(--dsw-alias-border-l2));
+  color: var(--dsw-alias-state-warning-primary, #c88719);
 }
 
 .transitionWait {

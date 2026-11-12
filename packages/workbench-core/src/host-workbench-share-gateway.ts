@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto'
 import { randomUUID } from 'node:crypto'
 import { Readable } from 'node:stream'
 import { once } from 'node:events'
+import { brotliDecompressSync, gunzipSync, inflateSync } from 'node:zlib'
 import type { HostWorkbenchAccess } from './host-workbench-access.ts'
 import { WORKBENCH_ACCESS_HEADER, SHARED_CONTROL_GRANT, type WorkbenchGrant, type WorkbenchAccessContext } from './workbench-access-contract.ts'
 import { URL } from 'node:url'
@@ -132,16 +133,31 @@ function validNickname(value: unknown): value is string {
     && !/[\u0000-\u001f\u007f]/u.test(value)
 }
 
-function cleanHeaders(headers: IncomingMessage['headers'], upstream: URL, cookie: string): Record<string, string | undefined> {
+function cleanHeaders(headers: IncomingMessage['headers'], upstream: URL, cookie: string, identity = false): Record<string, string | undefined> {
   const output: Record<string, string | undefined> = {}
   for (const [name, value] of Object.entries(headers)) {
     if (value === undefined || ['host', 'origin', 'cookie', 'connection', 'content-length'].includes(name)) continue
+    if (identity && name === 'accept-encoding') continue
     output[name] = Array.isArray(value) ? value.join(', ') : value
   }
   output.host = upstream.host
   output.origin = upstream.origin
   output.cookie = cookie
+  // The gateway rewrites the Workbench document as text, so it must receive
+  // the plain bytes. Forwarding the guest's `accept-encoding` let DSH's
+  // compression middleware return gzip, which was then decoded as UTF-8.
+  if (identity) output['accept-encoding'] = 'identity'
   return output
+}
+
+/** Decode a document body the gateway must rewrite, whatever encoding upstream chose. */
+function documentText(response: IncomingMessage, body: Buffer): string {
+  const encoding = String(response.headers['content-encoding'] ?? 'identity').trim().toLowerCase()
+  const bytes = encoding === 'gzip' || encoding === 'x-gzip' ? gunzipSync(body)
+    : encoding === 'br' ? brotliDecompressSync(body)
+      : encoding === 'deflate' ? inflateSync(body)
+        : body
+  return bytes.toString('utf8')
 }
 
 function writeSecurityHeaders(response: ServerResponse, extra: Record<string, string> = {}): void {
@@ -161,9 +177,9 @@ async function readResponseBody(response: IncomingMessage, limit = MAX_PROXY_BOD
   return Buffer.concat(chunks, size)
 }
 
-function requestUpstream(upstream: URL, request: IncomingMessage, cookie: string, body?: Buffer): Promise<{ response: IncomingMessage; body: Buffer }> {
+function requestUpstream(upstream: URL, request: IncomingMessage, cookie: string, body?: Buffer, identity = false): Promise<{ response: IncomingMessage; body: Buffer }> {
   return new Promise((resolve, reject) => {
-    const target = httpRequest({ hostname: upstream.hostname, port: upstream.port, path: `${upstream.pathname}${upstream.search}`, method: request.method, headers: cleanHeaders(request.headers, upstream, cookie) }, response => {
+    const target = httpRequest({ hostname: upstream.hostname, port: upstream.port, path: `${upstream.pathname}${upstream.search}`, method: request.method, headers: cleanHeaders(request.headers, upstream, cookie, identity) }, response => {
       void readResponseBody(response).then(bytes => resolve({ response, body: bytes }), reject)
     })
     target.once('error', reject)
@@ -276,7 +292,7 @@ export async function createWorkbenchShareGateway(options: WorkbenchShareGateway
     try {
       const prepared = await options.prepareView(session.workbenchId)
       const preparedUrl = new URL(prepared.url)
-      const document = await requestUpstream(preparedUrl, { method: 'GET', headers: {} } as IncomingMessage, '', Buffer.alloc(0))
+      const document = await requestUpstream(preparedUrl, { method: 'GET', headers: {} } as IncomingMessage, '', Buffer.alloc(0), true)
       const setCookie = document.response.headers['set-cookie']
       const ownerCookie = Array.isArray(setCookie) ? setCookie.map(value => value.split(';', 1)[0]).join('; ') : ''
       if (ownerCookie === '') throw new Error('workbench-share-upstream-auth-cookie-missing')
@@ -300,7 +316,7 @@ export async function createWorkbenchShareGateway(options: WorkbenchShareGateway
         created.lease.nativeView = { windowId: randomUUID(), closeToken: token }
       }
       created.lease.ownerCookie = ownerCookie
-      return { lease: created.lease, view: leaseNativeView(created.lease)!, ownerCookie, documentHtml: document.body.toString('utf8') }
+      return { lease: created.lease, view: leaseNativeView(created.lease)!, ownerCookie, documentHtml: documentText(document.response, document.body) }
     } catch (error) {
       if (ownsLease) sessions.removeLease(created.lease)
       throw error
@@ -395,8 +411,8 @@ export async function createWorkbenchShareGateway(options: WorkbenchShareGateway
         documentHtml = prepared.documentHtml
       }
       if (documentHtml === undefined) {
-        const upstreamResponse = await requestUpstream(new URL('/workbench', upstream), request, ownerCookie ?? '')
-        documentHtml = upstreamResponse.body.toString('utf8')
+        const upstreamResponse = await requestUpstream(new URL('/workbench', upstream), request, ownerCookie ?? '', undefined, true)
+        documentHtml = documentText(upstreamResponse.response, upstreamResponse.body)
       }
       const collaborationId = options.collaboration?.get(lease.workbenchId)?.snapshot().collaborationId
       const html = injectView(documentHtml, native!, collaborationId === undefined ? undefined : { collaborationId, participantId: lease.leaseId })
@@ -516,6 +532,11 @@ export async function createWorkbenchShareGateway(options: WorkbenchShareGateway
     // Keep the collaboration carrier alive independently from the legacy
     // remote.mux heartbeat. A stale lease is closed before it can submit a
     // command, even if the browser keeps the TCP connection half-open.
+    // The socket itself is the participant's liveness signal: a participant
+    // stays connected while pongs arrive, and a half-open carrier that stops
+    // answering is terminated so the participant goes stale exactly once.
+    let alive = true
+    socket.on('pong', () => { alive = true })
     const heartbeat = setInterval(() => {
       if (disposed) return
       if (!found.session.leases.has(found.lease.leaseId)) {
@@ -523,6 +544,8 @@ export async function createWorkbenchShareGateway(options: WorkbenchShareGateway
         socket.close(1008, 'Share access revoked')
         return
       }
+      if (!alive) { socket.terminate(); return }
+      alive = false
       if (socket.readyState === 1) socket.ping()
     }, 15_000)
     heartbeat.unref?.()

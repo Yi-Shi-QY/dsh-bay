@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createWorkbenchCollaborationClient } from '../src/client/workbench-collaboration-client.ts'
 
 class FakeSocket {
@@ -120,5 +120,60 @@ describe('Workbench collaboration client recovery', () => {
     second.receive({ type: 'server.command-result', payload: { ok: true, requestId: request.payload.requestId, workbenchRevision: 1, canvasRevision: 0, value: { committed: true } } })
     await expect(command).resolves.toMatchObject({ ok: true, requestId: request.payload.requestId })
     client.disconnect()
+  })
+  it('keeps an idle participant alive before it has published any presence', async () => {
+    vi.useFakeTimers()
+    try {
+      FakeSocket.reset()
+      const client = createWorkbenchCollaborationClient({
+        url: 'ws://workbench', WebSocket: FakeSocket as never,
+        collaborationId: 'collab-client', workbenchId: 'workbench-a', participantId: 'guest', displayName: 'Guest', role: 'participant',
+      })
+      const connected = client.connect()
+      const socket = FakeSocket.instances[0]!
+      socket.open()
+      socket.receive({ type: 'server.snapshot', payload: snapshot() })
+      await connected
+      vi.advanceTimersByTime(15_000)
+      // Without a heartbeat the Host presence TTL marks this guest stale and
+      // refuses its next command, which is the draft of its next message.
+      expect(socket.sent.filter(frame => frame.type === 'client.presence')).toEqual([
+        expect.objectContaining({ payload: expect.objectContaining({ participantId: 'guest', role: 'participant', intent: 'viewing', connectionState: 'connected' }) }),
+      ])
+      client.disconnect()
+    } finally { vi.useRealTimers() }
+  })
+
+  it('recovers and keeps its heartbeat after the caller reconnects a disconnected client', async () => {
+    vi.useFakeTimers()
+    try {
+      FakeSocket.reset()
+      const client = createWorkbenchCollaborationClient({
+        url: 'ws://workbench', WebSocket: FakeSocket as never, reconnectDelayMs: 10,
+        collaborationId: 'collab-client', workbenchId: 'workbench-a', participantId: 'guest', displayName: 'Guest', role: 'participant',
+      })
+      const first = client.connect()
+      FakeSocket.instances[0]!.open()
+      FakeSocket.instances[0]!.receive({ type: 'server.snapshot', payload: snapshot() })
+      await first
+      client.disconnect()
+      const again = client.connect()
+      const socket = FakeSocket.instances[1]!
+      socket.open()
+      socket.receive({ type: 'server.snapshot', payload: snapshot() })
+      await again
+      expect(client.getState()).toBe('connected')
+      // A dropped carrier reconnects on its own again.
+      socket.close()
+      expect(client.getState()).toBe('recovering')
+      vi.advanceTimersByTime(10)
+      const recovered = FakeSocket.instances[2]!
+      recovered.open()
+      recovered.receive({ type: 'server.snapshot', payload: snapshot() })
+      expect(client.getState()).toBe('connected')
+      vi.advanceTimersByTime(15_000)
+      expect(recovered.sent.some(frame => frame.type === 'client.presence')).toBe(true)
+      client.disconnect()
+    } finally { vi.useRealTimers() }
   })
 })

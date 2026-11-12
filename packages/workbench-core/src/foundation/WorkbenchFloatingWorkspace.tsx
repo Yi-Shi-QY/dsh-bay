@@ -406,7 +406,12 @@ export function WorkbenchFloatingWorkspace(props: Props) {
         const create = frame.createWorkspaceSession
         if (!create) throw new Error('当前无法准备新对话。')
         return runtime.prepareConversation(tab.id, workbenchId, async () => {
-          const created = await create(input.workspaceId, { requestId: uid(), ...(input.agentPreset ? { agentPreset: input.agentPreset } : {}) })
+          // Create through an Area of the same project when the Workbench has
+          // one: the Host then records the Session in this Workbench, which a
+          // LAN participant needs to use it at all, and which every surface
+          // needs to see the same conversation.
+          const areaId = Object.entries(frame.workbenchDirectory?.getAreaProjects?.(workbenchId) ?? {}).find(([, project]) => project?.workspaceId === input.workspaceId)?.[0]
+          const created = await create(input.workspaceId, { requestId: uid(), ...(input.agentPreset ? { agentPreset: input.agentPreset } : {}), ...(areaId ? { workbenchId, areaId } : {}) })
           return created.target
         })
       },

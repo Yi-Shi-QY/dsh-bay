@@ -9,6 +9,8 @@ import { HostWorkbenchAccess, WorkbenchAccessError } from './host-workbench-acce
 import type { WorkbenchAccessTarget, WorkbenchCapability } from './workbench-access-contract.ts'
 import { isDeepStrictEqual } from 'node:util'
 import { areasOf } from './foundation/document-v3.ts'
+import { allocateSessionMarker, validateSessionLabel } from './foundation/session-markers.ts'
+import { validSessionMarker, workbenchSessionLocation } from './host-workbench-session-markers.ts'
 
 export function installWorkbenchDirectoryRoute(connection: HostConnectionHandle, directory: HostWorkbenchDirectory, ensureMain: (id: string) => Promise<unknown>, memory?: HostWorkbenchMemory,
   createSession?: (input: { workbenchId: string; areaId: string; requestId: string; agentPreset: string; workspaceId: string }) => Promise<string>, access?: HostWorkbenchAccess,
@@ -63,7 +65,17 @@ export function installWorkbenchDirectoryRoute(connection: HostConnectionHandle,
             const after = (patch.path.length === 0 ? value?.workbenches : value) as Record<string, unknown> | undefined
             if (after) for (const id of new Set([...Object.keys(before), ...Object.keys(after)])) if (before[id] && !isDeepStrictEqual(before[id], after[id])) writeTargets.add(id)
           }
-          if (actor.workbenchId && (patch.path[0] !== 'workbenches' || patch.path[1] !== actor.workbenchId)) throw new WorkbenchAccessError('patch-scope-denied', '只能修改当前工作台。')
+          // A browser owner or LAN participant may set the marker of a Session
+          // of its own Workbench; every other preference stays Host-only.
+          const markerPatch = actor.workbenchId !== undefined && patch.path[0] === 'sessionMarkers' && patch.path.length === 3
+          if (markerPatch) {
+            const [, workspaceId, sessionId] = patch.path as [string, string, string]
+            const location = workbenchSessionLocation(access.getRecord(actor.workbenchId!), sessionId)
+            if (location?.workspaceId !== workspaceId) throw new WorkbenchAccessError('patch-scope-denied', '只能修改当前工作台的对话标记。')
+            if (patch.operation !== 'set' || !validSessionMarker(patch.value)) throw new WorkbenchAccessError('invalid-operation', '对话标记无效。', 400)
+            const label = validateSessionLabel(patch.value.label, directory.getSnapshot().value.sessionMarkers?.[workspaceId] ?? {}, sessionId)
+            if (!label.ok) throw new WorkbenchAccessError('invalid-operation', label.code === 'conflict' ? '同一项目中已有相同的对话标记。' : '对话标记无效。', 400)
+          } else if (actor.workbenchId && (patch.path[0] !== 'workbenches' || patch.path[1] !== actor.workbenchId)) throw new WorkbenchAccessError('patch-scope-denied', '只能修改当前工作台。')
         }
         if (workbenchId) {
           if (mutation && typeof body.areaId === 'string') addWriteArea(workbenchId, body.areaId)
@@ -88,7 +100,15 @@ export function installWorkbenchDirectoryRoute(connection: HostConnectionHandle,
         case 'snapshot': break
         case 'extension-inventory': if (!readExtensionInventory) throw new Error('插件清单服务不可用。'); value = await readExtensionInventory(); break
         case 'prepare-creator-repair': value = await directory.prepareCreatorRepair({ workbenchId: text('workbenchId'), moduleId: text('moduleId'), ...(body.packageName === undefined ? {} : { packageName: text('packageName') }) }); break
-        case 'create-session': if (!createSession) throw new Error('会话服务不可用。'); value = await createSession({ workbenchId: text('workbenchId'), areaId: text('areaId'), requestId: text('requestId'), agentPreset: typeof body.agentPreset === 'string' ? body.agentPreset : 'standard', workspaceId: text('workspaceId') }); break
+        case 'create-session': if (!createSession) throw new Error('会话服务不可用。'); value = await createSession({ workbenchId: text('workbenchId'), areaId: text('areaId'), requestId: text('requestId'), agentPreset: typeof body.agentPreset === 'string' ? body.agentPreset : 'standard', workspaceId: text('workspaceId') });
+          {
+            // Allocate the new Session's marker once, on the Host, so every
+            // surface shows the same one instead of allocating its own.
+            const workspaceId = text('workspaceId'), sessionId = String(value)
+            const markers = directory.getSnapshot().value.sessionMarkers?.[workspaceId] ?? {}
+            if (markers[sessionId] === undefined) await directory.patch({ operation: 'set', path: ['sessionMarkers', workspaceId, sessionId], value: allocateSessionMarker(markers) }).catch(() => undefined)
+          }
+          break
         case 'open-project': value = await directory.openProject({ workbenchId: text('workbenchId'), projectId: text('projectId'), requestId: text('requestId'), expectedRevision: Number(body.expectedRevision) }); break
         case 'show-area': value = await directory.showArea(text('workbenchId'), text('areaId'), Number(body.expectedRevision)); break
         case 'memory-list': if (!memory) throw new Error('记忆服务不可用。'); value = memory.list(text('workbenchId'), typeof body.query === 'string' ? body.query : '', typeof body.projectId === 'string' ? body.projectId : undefined); break

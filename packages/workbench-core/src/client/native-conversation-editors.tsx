@@ -297,13 +297,15 @@ function CollaborationPresenceBar({ ctx, owner, binding, scopeRef, client, sessi
     }, 120)
     return () => window.clearTimeout(timer)
   }, [client, conversation?.activeTargets.size, draft?.draftId, draftText.length, identityKey, owner.areaId, owner.editorId, owner.sessionId, owner.workbenchId, focused, role, runtime?.promptAttempted, runtime?.running, selection])
-  const remote = snapshot?.participants.filter(value => value.participantId !== client.participantId) ?? []
+  // A participant who lost its connection is reported once, in the Workbench
+  // top bar notice; this bar shows only participants who are present.
+  const remote = snapshot?.participants.filter(value => value.participantId !== client.participantId && value.connectionState !== 'stale') ?? []
   if (remote.length === 0) return null
   return <div data-workbench-collaboration-presence role="status" aria-live="polite" style={{ flex: '0 0 auto', display: 'flex', flexDirection: 'column', gap: 4, padding: '6px 12px', borderBottom: '1px solid var(--dsw-alias-border-tertiary, rgba(127,127,127,.2))', color: 'var(--dsw-alias-label-secondary, currentColor)', fontSize: 12 }}>
     {remote.map(presence => {
       const location = [presence.areaId, presence.editorId, presence.sessionId].filter(Boolean).join(' / ')
        return <div key={presence.participantId} data-workbench-collaboration-participant={presence.participantId}>
-         <strong>{presence.displayName || (presence.role === 'owner' ? '房主' : '协作者')} · {presence.connectionState === 'stale' ? '已失联' : presence.intent === 'editing' ? '正在编辑' : presence.intent === 'sending' ? '正在发送' : presence.intent === 'running' ? '正在执行任务' : presence.intent === 'recovering' ? '正在恢复' : '正在查看'}</strong>
+         <strong>{presence.displayName || (presence.role === 'owner' ? '房主' : '协作者')} · {presence.intent === 'editing' ? '正在编辑' : presence.intent === 'sending' ? '正在发送' : presence.intent === 'running' ? '正在执行任务' : presence.intent === 'recovering' ? '正在恢复' : '正在查看'}</strong>
         {location ? <span> · {location}</span> : null}
       </div>
     })}
