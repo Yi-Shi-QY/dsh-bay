@@ -436,6 +436,21 @@ export class HostWorkbenchDirectory {
     registry.revision++
     this.commit(registry, [...writes, { file: filename(registration.rootPath), value: envelope }]); this.records.set(id, envelope); this.publish()
   }) }
+  /** Rename a registered session through the Host-owned session catalog. */
+  async renameSession(id: string, sessionId: string, title: string, expectedRevision?: number) {
+    return this.serial(async () => {
+      if (expectedRevision !== undefined && expectedRevision !== this.registry.revision) return { status: 'conflict' as const, actualRevision: this.registry.revision }
+      const record = clone(this.snapshot.value.workbenches[id]); if (!record) throw new Error('workbench-not-found')
+      const key = Object.keys(record.sessionCatalog ?? {}).find(candidate => candidate === sessionId || record.sessionCatalog?.[candidate]?.sessionId === sessionId || record.sessionCatalog?.[candidate]?.sessionKey === sessionId)
+      if (key === undefined || record.sessionCatalog?.[key] === undefined) throw new Error('session-not-found')
+      const registration = this.registry.registrations[id]!
+      const changed = { ...record, sessionCatalog: { ...(record.sessionCatalog ?? {}), [key]: { ...record.sessionCatalog[key]!, title } } }
+      const envelope: FileWorkbenchV1 = { schemaVersion: 2, revision: this.records.get(id)!.revision + 1, record: this.portable(this.reconcileAreas(changed, record), registration) }
+      const registry = clone(this.registry); registry.revision++
+      this.commit(registry, [{ file: filename(registration.rootPath), value: envelope }]); this.records.set(id, envelope); this.publish()
+      return { status: 'committed' as const, revision: registry.revision }
+    })
+  }
   async reserveSession(id: string, requestId: string, areaId: string, agentPreset: string, sessionId: string) { return this.serial(async () => {
     const record = this.snapshot.value.workbenches[id], project = record?.areaProjects?.[areaId]
     if (!record || record.archivedAt || !workbenchAreas(record).some(area => area.areaId === areaId) || !project?.workspaceId) throw new Error('请先为此区域设置项目文件夹。')

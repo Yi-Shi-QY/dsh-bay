@@ -1,5 +1,5 @@
 import { validateWorkbenchModuleManifestV1, workbenchModuleKindFor, type WorkbenchModuleManifestV1, type WorkbenchModuleStaticManifestV1 } from './module-contract.ts'
-import { validateWorkbenchModuleSource, validateWorkbenchModuleSourceRequest, workbenchVersionSatisfies, type WorkbenchModuleSourceRequestV1, type WorkbenchModuleSourceV1, type WorkbenchModuleTrustV1 } from './module-source.ts'
+import { validateWorkbenchModuleSource, validateWorkbenchModuleSourceRequest, workbenchCoreCompatibilitySatisfies, type WorkbenchModuleSourceRequestV1, type WorkbenchModuleSourceV1, type WorkbenchModuleTrustV1 } from './module-source.ts'
 import { WORKBENCH_CORE_VERSION, WORKBENCH_DSH_GENERATION, WORKBENCH_UPSTREAM_COMMIT } from './release-compatibility.ts'
 
 export interface WorkbenchDirectPackageDescriptorV1 {
@@ -54,7 +54,7 @@ export async function resolveWorkbenchDirectPackageV1(
   if (!validateWorkbenchModuleSourceRequest({ kind: 'npm', packageName: descriptor.packageName }) || descriptor.artifactBytes.byteLength === 0 || descriptor.artifactBytes.byteLength > 64 * 1024 * 1024) throw new Error('package-manifest-invalid')
   try { validateWorkbenchModuleManifestV1(descriptor.manifest) } catch { throw new Error('package-manifest-invalid') }
   if (descriptor.dshGeneration !== WORKBENCH_DSH_GENERATION) throw new Error('module-incompatible')
-  if (!workbenchVersionSatisfies(WORKBENCH_CORE_VERSION, descriptor.manifest.coreCompatibility)) throw new Error('module-incompatible')
+  if (!workbenchCoreCompatibilitySatisfies(WORKBENCH_CORE_VERSION, descriptor.manifest.coreCompatibility)) throw new Error('module-incompatible')
   if (!Array.isArray(descriptor.permissions) || descriptor.permissions.some(permission => typeof permission !== 'string' || permission.trim() === '')) throw new Error('package-manifest-invalid')
   if (!descriptor.provenance || !/^[a-f0-9]{40}$/iu.test(descriptor.provenance.upstreamCommit) || !/^[a-f0-9]{64}$/iu.test(descriptor.provenance.sourceDigest) || !/^[a-f0-9]{64}$/iu.test(descriptor.provenance.patchDigest)) throw new Error('package-manifest-invalid')
   if (descriptor.provenance.upstreamCommit !== WORKBENCH_UPSTREAM_COMMIT) throw new Error('module-incompatible')

@@ -34,6 +34,7 @@ export interface NativeSessionRemap {
   sessionIds: Readonly<Record<string, string>>
   sourceRoot: string
   targetRoot: string
+  sourceCwd?: string
 }
 export type NativeEventRemapper = (event: SessionEvent, context: NativeSessionRemap) => SessionEvent
 
@@ -59,8 +60,19 @@ function mappedSession(id: unknown, context: NativeSessionRemap): string {
   return context.sessionIds[id]!
 }
 
+function remapSessionFilePath(value: unknown, context: NativeSessionRemap): string {
+  if (typeof value !== 'string' || value.trim() === '') throw new Error('交付文件路径无效。')
+  const sourcePath = /^[A-Za-z]:[\\/]|^\\\\/u.test(context.sourceRoot) ? path.win32 : path.posix
+  const absolute = sourcePath.isAbsolute(value)
+    ? value
+    : context.sourceCwd === undefined ? undefined : sourcePath.resolve(context.sourceCwd, value)
+  if (!absolute) throw new Error('相对交付文件缺少原会话工作目录。')
+  return resolvePortablePath(context.targetRoot, portableRelativePath(context.sourceRoot, absolute))
+}
+
 /** Only schema-owned fields are changed; natural-language history stays verbatim. */
 export function remapNativeEvent(event: SessionEvent, context: NativeSessionRemap): SessionEvent {
+  if (!KNOWN_SESSION_EVENT_TYPES.has(String(event.type)) && event.ignorable !== true) throw new Error('未知必要会话事件缺少迁移器：' + String(event.type))
   const copy = structuredClone(event)
   const row = copy as unknown as { type: string; data: Record<string, unknown> }
   if (row.type === 'subagent/catalog') {
@@ -71,7 +83,13 @@ export function remapNativeEvent(event: SessionEvent, context: NativeSessionRema
     row.data.cwd = resolvePortablePath(context.targetRoot, portableRelativePath(context.sourceRoot, row.data.cwd))
   } else if (row.type === 'session-log-deepseek/delivery-accepted') {
     row.data.sessionId = mappedSession(row.data.sessionId, context)
-  } else if (row.type.startsWith('team/') || row.type.startsWith('tool-workflow/') || row.type === 'deliverables/presented' || row.type === 'workspace/changes') {
+  } else if (row.type === 'deliverables/presented') {
+    if (!Array.isArray(row.data.files)) throw new Error('交付文件清单无效。')
+    row.data.files = row.data.files.map(file => {
+      if (!object(file)) throw new Error('交付文件记录无效。')
+      return { ...file, path: remapSessionFilePath(file.path, context) }
+    })
+  } else if (row.type.startsWith('team/') || row.type.startsWith('tool-workflow/') || row.type === 'workspace/changes') {
     throw new Error('该会话资源需要已注册的迁移适配器：' + row.type)
   }
   return copy
@@ -110,6 +128,7 @@ export class NativeSessionPortability {
     await mkdir(path.join(directory, 'attachments'), { recursive: true })
     await this.persistence.flush()
     const snapshots = await this.persistence.list(), byId = new Map(snapshots.map(row => [String(row.header.id), row.header]))
+    const sourceSessionIds = Object.fromEntries([...byId.keys()].map(id => [id, id]))
     const queue = [...new Set(sessionIds)], seen = new Set<string>()
     const refs = new Map<string, Omit<PortableAttachment, 'file' | 'sha256'>>()
     const result: NativeSessionSnapshot = { version: 1, sourceRoot, sessions: [], attachments: [] }
@@ -126,20 +145,25 @@ export class NativeSessionPortability {
         const row: PortableNativeSession = { key: id, header: structuredClone(header), inheritedEventCount: handle.inheritedEventCount, eventCount: 0, log, sha256: '',
           ...(header.cwd === undefined ? {} : { relativeCwd: portableRelativePath(sourceRoot, header.cwd) }) }
         const output = await open(resolvePortablePath(directory, log), 'w')
+        const sourceContext: NativeSessionRemap = {
+          sourceRoot, targetRoot: sourceRoot, sessionIds: sourceSessionIds,
+          ...(header.cwd === undefined ? {} : { sourceCwd: header.cwd }),
+        }
         try {
           for (let offset = 0;;) {
             signal?.throwIfAborted()
             const { events } = await handle.read(offset, 256, signal ? { signal } : {})
             if (!events.length) break
+            const portableEvents = events.map(event => (this.adapters.get(String(event.type)) ?? remapNativeEvent)(event, sourceContext))
             for (const event of events) {
-              attachmentRefs(event.data, refs)
               const data = event.data as unknown
               if (String(event.type) === 'subagent/catalog' && object(data) && typeof data.childId === 'string') {
                 if (data.mode === 'external') throw new Error('外部子任务尚未提供会话迁移能力。')
                 queue.push(data.childId)
               }
+              attachmentRefs(event.data, refs)
             }
-            await output.writeFile(events.map(event => JSON.stringify(event) + '\n').join(''))
+            await output.writeFile(portableEvents.map(event => JSON.stringify(event) + '\n').join(''))
             offset += events.length; row.eventCount = offset
           }
           await output.sync()
@@ -172,13 +196,14 @@ export class NativeSessionPortability {
     if (row.header.id !== row.key || (row.header.cwd !== undefined && row.relativeCwd !== portableRelativePath(snapshot.sourceRoot, row.header.cwd))) throw new Error('会话路径或身份清单不一致。')
     const events: SessionEvent[] = []
     for await (const event of readEvents(resolvePortablePath(directory, row.log))) {
+      const sessionContext = { ...context, ...(row.header.cwd === undefined ? {} : { sourceCwd: row.header.cwd }) }
       const remap = this.adapters.get(String(event.type)) ?? remapNativeEvent
-      events.push(remap(event, context))
+      events.push(remap(event, sessionContext))
     }
     if (events.length !== row.eventCount) throw new Error('会话事件清单不完整。')
     assertContiguous(header.id, events, 0)
     validateStoredEvents(header, events)
-    restoreReleasedV4Artifact({ header, events, inheritedEventCount: row.inheritedEventCount } as unknown as SessionFormatArtifact, KNOWN_SESSION_EVENT_TYPES)
+    restoreReleasedV4Artifact({ header, events, inheritedEventCount: row.inheritedEventCount } as unknown as SessionFormatArtifact, new Set([...KNOWN_SESSION_EVENT_TYPES, ...this.adapters.keys()]))
     const refs = new Map<string, Omit<PortableAttachment, 'file' | 'sha256'>>()
     for (const event of events) attachmentRefs(event.data, refs)
     for (const expected of refs.values()) {

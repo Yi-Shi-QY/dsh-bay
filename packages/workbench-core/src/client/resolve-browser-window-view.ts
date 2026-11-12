@@ -3,7 +3,6 @@ import type { ClientConnectionRpc, ConnectionRpcResult } from '@deepseek-ai/dsh-
 import type { WorkbenchWindowViewV1 } from './workbench-window-view.ts'
 import { WORKBENCH_WINDOW_RPC_CHANNEL, workbenchWindowRpcEndpoint } from '../workbench-window-rpc.ts'
 import type { FloatingHandoffV1 } from '../floating-handoff.ts'
-import { isWorkbenchShareGuestPage } from './workbench-share-guest.ts'
 import { browserSafeUuid } from '../browser-safe-id.ts'
 
 const STORAGE_KEY = 'dsh-workbench.browser-view.v1'
@@ -81,7 +80,7 @@ async function verifyStoredView(rpc: ClientConnectionRpc | undefined, view: Work
   try {
     const result = await call(rpc, 'status', { windowId: view.windowId }) as { status?: unknown }
     if (result.status === 'ready' || result.status === 'redeemed' || result.status === 'reclaim-requested') {
-      if (!isWorkbenchShareGuestPage()) await call(rpc, 'attach', { closeToken: view.closeToken, pageId: PAGE_ID })
+      await call(rpc, 'attach', { closeToken: view.closeToken, pageId: PAGE_ID })
       return view
     }
   } catch { /* a stale browser page must not regain control without Host confirmation */ }

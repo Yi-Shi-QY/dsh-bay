@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   classifyWorkbenchSourceUpdate,
+  workbenchCoreCompatibilitySatisfies,
   sameWorkbenchModuleSource,
   validateWorkbenchModuleSource,
   validateWorkbenchModuleSourceRequest,
@@ -10,6 +11,13 @@ const npm = (version = '1.2.3') => ({ kind: 'npm' as const, packageName: '@dsh-w
 const git = (commit = 'a'.repeat(40)) => ({ kind: 'git' as const, repository: 'https://github.com/example/workbench.git', resolvedCommit: commit, artifactDigest: 'b'.repeat(64) })
 
 describe('Workbench module source identity', () => {
+  it('accepts compatible ranges and previous exact 18.x Core declarations', () => {
+    expect(workbenchCoreCompatibilitySatisfies('0.2.2-alpha.18.1', '0.2.2-alpha.18.0')).toBe(true)
+    expect(workbenchCoreCompatibilitySatisfies('0.2.2-alpha.18.1', '>=0.2.2-alpha.18.0 <0.2.2-alpha.19.0')).toBe(true)
+    expect(workbenchCoreCompatibilitySatisfies('0.2.2-alpha.18.1', '0.2.2-alpha.17.6')).toBe(false)
+    expect(workbenchCoreCompatibilitySatisfies('0.2.2-alpha.18.1', '0.2.2-alpha.18.2')).toBe(false)
+  })
+
   it('accepts explicit npm and git requests but rejects locators that can execute commands', () => {
     expect(validateWorkbenchModuleSourceRequest({ kind: 'npm', packageName: '@dsh-workbench/example', requestedRange: '^1.2.0' })).toBe(true)
     expect(validateWorkbenchModuleSourceRequest({ kind: 'git', repository: 'https://github.com/example/workbench.git', ref: 'refs/tags/v1.2.3', subpath: 'packages/module' })).toBe(true)
@@ -36,4 +44,5 @@ describe('Workbench module source identity', () => {
     expect(classifyWorkbenchSourceUpdate(git('a'.repeat(40)), git('b'.repeat(40)))).toBe('update-available')
     expect(classifyWorkbenchSourceUpdate(git(), npm())).toBe('source-change')
   })
+
 })

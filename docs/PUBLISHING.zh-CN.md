@@ -1,6 +1,6 @@
 # DSH Bay 封包与发布
 
-更新日期：2026-11-11。当前私有候选为 `dsh-bay@0.2.2-alpha.18.0`，目标 DSH `0.2.2-rc.1`。最新已交付包身份与验证范围见 [VALIDATION.md](VALIDATION.md)。
+更新日期：2026-11-11。当前私有候选为 `dsh-bay@0.2.2-alpha.18.1`，目标 DSH `0.2.2-rc.1`。最新已交付包身份与验证范围见 [VALIDATION.md](VALIDATION.md)。
 
 ## 私有实验包流程
 
@@ -22,15 +22,15 @@ pnpm pack:core
 默认输出：
 
 ```text
-releases/alpha18.0-rc1-private/
-├─ dsh-bay-0.2.2-alpha.18.0.tgz
+releases/alpha18.1-rc1-private/
+├─ dsh-bay-0.2.2-alpha.18.1.tgz
 └─ candidate.json
 ```
 
 需要保留同版本不同候选时，可使用现有入口指定新的仓库 releases 子目录，例如：
 
 ```sh
-pnpm pack:core --output=releases/alpha18.0-review-private
+pnpm pack:core --output=releases/alpha18.1-review-private
 ```
 
 保持路径简单且不含空格。默认文件名和 candidateId 不因重打包自动唯一化；交付记录须同时保存提交与摘要。
@@ -54,4 +54,4 @@ pnpm pack:core --output=releases/alpha18.0-review-private
 
 公开 npm、GitHub Release、tag 和网站是独立发布动作，按用户明确要求执行。发布前需绑定同一源码/制品，完成干净 DSH Profile 反向安装、许可与来源检查、版本说明和已知限制。
 
-当前 CI 只在 Ubuntu 运行 `pnpm verify`，公开发布不能把独立类型检查、封包与跨平台验收当成既有 CI 保证。保留此前可用制品及其数据兼容说明；18.0 项目数据不应直接交给不支持它的旧版本读取。
+当前 CI 只在 Ubuntu 运行 `pnpm verify`，公开发布不能把独立类型检查、封包与跨平台验收当成既有 CI 保证。保留此前可用制品及其数据兼容说明；18.x 项目数据不应直接交给不支持它的旧版本读取。

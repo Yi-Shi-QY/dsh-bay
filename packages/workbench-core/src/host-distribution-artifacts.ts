@@ -11,6 +11,7 @@ import { canonicalJson } from './foundation/workbench-sharing.ts'
 import { safeRuntimePath, type WorkbenchPackageDependencyV4 } from './foundation/workbench-package-v4.ts'
 import { WORKBENCH_CORE_VERSION, WORKBENCH_DSH_GENERATION } from './release-compatibility.ts'
 import { workbenchEditorDeclarationFailureV1 } from './module-contract.ts'
+import { workbenchCoreCompatibilitySatisfies } from './module-source.ts'
 import { portableStateSafe } from './foundation/workbench-layout-package.ts'
 
 export const artifactHash = (bytes: Uint8Array | string) => createHash('sha256').update(bytes).digest('hex')
@@ -41,7 +42,7 @@ export function inspectDistributionManifest(value: unknown): DistributionPackage
   const p = value as DistributionPackageManifest
   const w = p?.dsh?.workbench, d = w?.distribution
   if (!p || !/^(?:@[a-z0-9._-]+[/])?[a-z0-9][a-z0-9._-]*$/u.test(p.name) || !/^[0-9]+[.][0-9]+[.][0-9]+(?:-[A-Za-z0-9_.-]+)?$/u.test(p.version)
-    || !p.dsh?.bundle?.patch || !w || w.coreCompatibility !== WORKBENCH_CORE_VERSION || w.dshGeneration !== WORKBENCH_DSH_GENERATION
+    || !p.dsh?.bundle?.patch || !w || !workbenchCoreCompatibilitySatisfies(WORKBENCH_CORE_VERSION, w.coreCompatibility) || w.dshGeneration !== WORKBENCH_DSH_GENERATION
     || !/^[A-Za-z0-9_.:-]{1,128}$/u.test(w.moduleId) || !d || d.version !== 1 || !['embed','reference','forbid'].includes(d.exportPolicy)
     || !Array.isArray(d.runtimeFiles) || d.runtimeFiles.length < 1 || d.runtimeFiles.length > 256 || !d.runtimeFiles.every(f => typeof f === 'string' && safeRuntimePath(f))
     || new Set(d.runtimeFiles).size !== d.runtimeFiles.length || !d.runtimeFiles.includes('package.json')
@@ -78,7 +79,7 @@ export async function readRuntimeFiles(root: string, paths: readonly string[]): 
 export function runtimeDigest(files: ReadonlyMap<string, Uint8Array>): string {
   return artifactHash(canonicalJson([...files].sort(([a],[b]) => a.localeCompare(b, 'en')).map(([path, bytes]) => ({ path, sha256: artifactHash(bytes) }))))
 }
-export async function inspectDistributionArtifact(bytes: Uint8Array, peerAvailable: (name: string, range: string) => boolean): Promise<{ dependency: WorkbenchPackageDependencyV4; files: ReadonlyMap<string, Buffer> }> {
+export async function inspectDistributionArtifact(bytes: Uint8Array, peerAvailable: (name: string, range: string) => boolean, options: { allowForbiddenIdentity?: boolean } = {}): Promise<{ dependency: WorkbenchPackageDependencyV4; files: ReadonlyMap<string, Buffer> }> {
   const files = await readWorkbenchArtifactFiles(bytes, { requireLegacyClient: false })
   const manifest = inspectDistributionManifest(JSON.parse(files.get('package.json')!.toString('utf8')))
   verifyDistributionClosure(manifest,files,peerAvailable)
@@ -102,21 +103,21 @@ export async function inspectDistributionArtifact(bytes: Uint8Array, peerAvailab
     if (DSH_RC1_CLIENT_SEEDS.has(name)) continue
     if (!peerAvailable(name, range)) throw new Error(`宿主未提供已验证的依赖：${name}`)
   }
-  if (d.exportPolicy === 'forbid') throw new Error('扩展禁止完整分发。')
+  if (d.exportPolicy === 'forbid' && !options.allowForbiddenIdentity) throw new Error('扩展禁止完整分发。')
   return { files, dependency: { packageName: manifest.name, version: manifest.version, moduleId: manifest.dsh.workbench.moduleId,
     digest: runtimeDigest(files), archiveSha256: artifactHash(bytes), integrity: `sha512-${createHash('sha512').update(bytes).digest('base64')}`, bundleEntries,
     editorScopes: manifest.dsh.workbench.editors!.map(({editorId,scope})=>({editorId,scope})), permissions: [...new Set(manifest.dsh.workbench.permissions ?? [])].sort(),
     exportPolicy: d.exportPolicy, runtimeFiles: [...d.runtimeFiles], requires: [...d.requires], host: d.runtimeKind!=='client-only' && (!!manifest.main || !!manifest.exports?.['.']),
     ...(d.registryUrl ? { registryUrl: d.registryUrl } : {}) } }
 }
-export async function prepareDistributionArtifact(root: string, peerAvailable: (name: string, range: string) => boolean): Promise<{ bytes: Uint8Array; dependency: WorkbenchPackageDependencyV4 }> {
+export async function prepareDistributionArtifact(root: string, peerAvailable: (name: string, range: string) => boolean, options: { allowForbiddenIdentity?: boolean } = {}): Promise<{ bytes: Uint8Array; dependency: WorkbenchPackageDependencyV4 }> {
   const manifest = inspectDistributionManifest(JSON.parse(await readFile(join(root, 'package.json'), 'utf8')))
   const paths = manifest.dsh.workbench.distribution!.runtimeFiles
   const before = await readRuntimeFiles(root, paths)
   const chunks: Buffer[] = []
   for await (const chunk of c({ cwd: root, prefix: 'package/', gzip: true, portable: true, noMtime: true, follow: false }, paths)) chunks.push(Buffer.from(chunk))
   const bytes = new Uint8Array(Buffer.concat(chunks))
-  const checked = await inspectDistributionArtifact(bytes, peerAvailable)
+  const checked = await inspectDistributionArtifact(bytes, peerAvailable, options)
   if (runtimeDigest(before) !== checked.dependency.digest || runtimeDigest(await readRuntimeFiles(root, paths)) !== checked.dependency.digest) throw new Error('扩展文件在准备过程中发生变化，请重试。')
   return { bytes, dependency: checked.dependency }
 }

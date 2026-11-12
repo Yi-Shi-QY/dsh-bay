@@ -143,6 +143,17 @@ describe('layout sharing manifest v3 / portable layout v2', () => {
     expect(JSON.stringify(preview.layout)).not.toContain('私密对话')
     expect(preview.layout.warnings).toHaveLength(1)
   })
+  it('accepts layout packages from the previous 18.x candidate', async () => {
+    const bytes = await buildLayoutPackage(fixture())
+    const files = decodeDeterministicZip(bytes).map(file => {
+      if (file.path !== 'manifest.json') return file
+      const manifest = JSON.parse(new TextDecoder().decode(file.content))
+      manifest.compatibility.core = '0.2.2-alpha.18.0'
+      return { ...file, content: encode(manifest) }
+    })
+    const preview = await inspectLayoutPackage(encodeDeterministicZip(files))
+    expect(preview.layout.name).toBe(fixture().name)
+  })
   it('allocates fresh local identities and leaves session pages pending without fake sessions', () => {
     const a = restoreLayoutPackage(fixture(), [descriptor]); const b = restoreLayoutPackage(fixture(), [descriptor])
     expect(a.document.activeAreaId).not.toBe(b.document.activeAreaId)

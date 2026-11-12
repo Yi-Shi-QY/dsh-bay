@@ -117,6 +117,26 @@ export type {
   WorkbenchWindowOpenResultV1,
   WorkbenchWindowSnapshotV1,
 } from './workbench-window-controller.ts'
+export {
+  isWorkbenchCollaborationSurface,
+  type WorkbenchSurfaceContextV1,
+  type WorkbenchSurfaceContextV2,
+} from './workbench-surface-context.ts'
+export {
+  createWorkbenchCollaborationClient,
+  type WorkbenchCollaborationClientV1,
+} from './workbench-collaboration-client.ts'
+export {
+  isWorkbenchCollaborationPage,
+  readWorkbenchCollaborationPageMarker,
+  type WorkbenchCollaborationPageMarkerV1,
+} from './workbench-collaboration-page.ts'
+export { projectWorkbenchBrowserLifecycleV1 } from './workbench-browser-lifecycle.ts'
+export type {
+  WorkbenchBrowserLifecyclePhaseV1,
+  WorkbenchBrowserLifecycleProjectionV1,
+  WorkbenchBrowserLocalPhaseV1,
+} from './workbench-browser-lifecycle.ts'
 export type { WorkbenchCopyInviteV1, WorkbenchCopyInviteStateV1 } from '../online-copy-contract.ts'
 export { applyWorkbenchCopyInviteActionV1, classifyWorkbenchCopyInviteV1, createWorkbenchCopyInviteV1, validateWorkbenchCopyCode, validateWorkbenchCopyInviteV1, verifyWorkbenchCopyInviteCodeV1 } from '../online-copy-contract.ts'
 export { WORKBENCH_OFFICIAL_AREA_EDITOR_IDS } from './official-area-editors.tsx'
@@ -135,8 +155,6 @@ import { createWorkbenchManagerRestartBridge } from './workbench-manager-restart
 import { readWorkbenchWindowView } from './workbench-window-view.ts'
 import { hasBrowserWorkbenchIntent, reportBrowserWorkbenchClosed, reportBrowserWorkbenchReady, reportBrowserWorkbenchFailed, resolveBrowserWorkbenchView, startBrowserWorkbenchHeartbeat } from './resolve-browser-window-view.ts'
 import { mountBrowserWorkbenchShell, mountBrowserWorkbenchStatusShell, unmountBrowserWorkbenchShell } from './browser-workbench-shell.ts'
-import { mountBrowserWorkbenchShareStatusShell } from './browser-workbench-shell.ts'
-import { isWorkbenchShareGuestPage, startWorkbenchShareGuestHeartbeat, startWorkbenchShareLifecycleMonitor } from './workbench-share-guest.ts'
 import { WORKBENCH_WINDOW_RPC_CHANNEL, workbenchWindowRpcEndpoint } from '../workbench-window-rpc.ts'
 
 export { WorkspacePicker } from '../foundation/workbench-sidebar/generated/upstream/ui-workspace/WorkspacePicker.tsx'
@@ -245,27 +263,21 @@ export async function apply(ctx: WorkbenchCoreClientContextV1): Promise<void> {
     let stopped = false
     let reclaimed = false
     let stopHeartbeat = () => {}
-    let stopShareLifecycle = () => {}
-    let stopShareGuestHeartbeat = () => {}
     let stopRuntimeMetrics = () => {}
     if (typeof window !== 'undefined') {
       const closeView = (event: PageTransitionEvent) => {
         if (!event.persisted) {
           stopped = true
           stopHeartbeat()
-          stopShareLifecycle()
-          stopShareGuestHeartbeat()
           stopRuntimeMetrics()
           if (!reclaimed) reportBrowserWorkbenchClosed(ctx as never, windowView,
-            isWorkbenchShareGuestPage() ? undefined : () => foundation.floatingRuntime.snapshotHandoff(windowView.workbenchId))
+            () => foundation.floatingRuntime.snapshotHandoff(windowView.workbenchId))
         }
       }
       window.addEventListener('pagehide', closeView)
       ctx.effect?.(() => () => {
         stopped = true
         stopHeartbeat()
-        stopShareLifecycle()
-        stopShareGuestHeartbeat()
         stopRuntimeMetrics()
         window.removeEventListener('pagehide', closeView)
       }, 'workbench: browser view lifecycle')
@@ -275,7 +287,7 @@ export async function apply(ctx: WorkbenchCoreClientContextV1): Promise<void> {
       // Restore before mounting the floating workspace. Its persistent Main
       // placeholder can otherwise race the incoming Main binding and reject
       // a valid handoff as a stale rebind.
-      if (!isWorkbenchShareGuestPage() && ctx.connection?.rpc) {
+      if (ctx.connection?.rpc) {
         const result = await ctx.connection.rpc.call(WORKBENCH_WINDOW_RPC_CHANNEL, workbenchWindowRpcEndpoint('floating-read'), {
           windowId: windowView.windowId, closeToken: windowView.closeToken,
         }, AbortSignal.timeout(8_000))
@@ -299,7 +311,7 @@ export async function apply(ctx: WorkbenchCoreClientContextV1): Promise<void> {
         if (!stopped) stopHeartbeat = startBrowserWorkbenchHeartbeat(ctx as never, windowView, state => {
           if (state === 'reclaimed') reclaimed = true
           window.dispatchEvent(new CustomEvent('workbench-browser-reclaim', { detail: { state } }))
-        }, isWorkbenchShareGuestPage() ? undefined : () => foundation.floatingRuntime.snapshotHandoff(windowView.workbenchId))
+        }, () => foundation.floatingRuntime.snapshotHandoff(windowView.workbenchId))
         if (!stopped && ctx.connection?.rpc !== undefined) {
           let pendingMetrics = false
           const reportMetrics = async () => {
@@ -317,15 +329,6 @@ export async function apply(ctx: WorkbenchCoreClientContextV1): Promise<void> {
           void reportMetrics()
           const timer = window.setInterval(() => { void reportMetrics() }, 1_000)
           stopRuntimeMetrics = () => { window.clearInterval(timer) }
-        }
-        if (!stopped && isWorkbenchShareGuestPage()) {
-          stopShareGuestHeartbeat = startWorkbenchShareGuestHeartbeat()
-          stopShareLifecycle = startWorkbenchShareLifecycleMonitor(state => {
-            stopped = true
-            stopHeartbeat()
-            mountBrowserWorkbenchShareStatusShell(state)
-            window.dispatchEvent(new CustomEvent('workbench-share-ended', { detail: { state } }))
-          })
         }
       }
       else {

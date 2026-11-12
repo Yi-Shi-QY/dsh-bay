@@ -3,6 +3,7 @@ import { validatePortableLayout, type PortableLayoutV2 } from './workbench-layou
 import { renderPortableAreaContextMarkdown, renderPortableWorkbenchContextMarkdown, validatePortableWorkbenchContext } from './workbench-context-portability.ts'
 import { WORKBENCH_CORE_VERSION, WORKBENCH_DSH_GENERATION, isWorkbenchCorePackageName } from '../release-compatibility.ts'
 import { CORE_PORTABLE_EDITORS } from '../distribution-contract.ts'
+import { workbenchCoreCompatibilitySatisfies } from '../module-source.ts'
 import { areasOf, type WorkbenchDocumentV3, type WorkbenchNodeV3 } from './document-v3.ts'
 
 /** Compare signed geometry, retained order and selection independently of recipient IDs. */
@@ -34,7 +35,7 @@ export function orderedDistributionDependencies(rows:WorkbenchPackageDependencyV
 export interface WorkbenchPackageDependencyV4 {
   packageName: string; version: string; moduleId: string; digest: string; archiveSha256: string; integrity: string
   editorScopes: { editorId: string; scope: 'root' | 'session' }[]
-  permissions: string[]; exportPolicy: 'embed' | 'reference'; runtimeFiles: string[]
+  permissions: string[]; exportPolicy: 'embed' | 'reference' | 'forbid'; runtimeFiles: string[]
   requires: string[]; host: boolean; archivePath?: string; registryUrl?: string
   bundleEntries: { entryId: string; moduleName: string }[]
 }
@@ -106,8 +107,8 @@ export async function inspectWorkbenchPackageV4(bytes: Uint8Array): Promise<Work
   if (!obj(raw) || raw.schemaVersion !== 4 || raw.format !== 'dsh-workbench-package' || !['layout-only', 'online-reference', 'offline-embedded'].includes(String(raw.mode))
     || Object.keys(raw).some(k => !['schemaVersion','format','mode','packageId','version','name','createdAt','compatibility','dependencies','permissions','files','publisher','derivedFrom'].includes(k))
     || typeof raw.packageId !== 'string' || !hex.test(raw.packageId) || typeof raw.name !== 'string' || !raw.name || raw.name.length > 160
-    || typeof raw.createdAt !== 'string' || !Number.isFinite(Date.parse(raw.createdAt)) || raw.version !== WORKBENCH_CORE_VERSION
-    || !obj(raw.compatibility) || raw.compatibility.core !== WORKBENCH_CORE_VERSION || raw.compatibility.dsh !== WORKBENCH_DSH_GENERATION || ![2, 3].includes(raw.compatibility.portableLayout as number)
+    || typeof raw.createdAt !== 'string' || !Number.isFinite(Date.parse(raw.createdAt)) || typeof raw.version !== 'string' || !workbenchCoreCompatibilitySatisfies(WORKBENCH_CORE_VERSION, raw.version)
+    || !obj(raw.compatibility) || !workbenchCoreCompatibilitySatisfies(WORKBENCH_CORE_VERSION, String(raw.compatibility.core ?? '')) || raw.compatibility.dsh !== WORKBENCH_DSH_GENERATION || ![2, 3].includes(raw.compatibility.portableLayout as number)
     || !Array.isArray(raw.dependencies) || raw.dependencies.length > 32 || !strings(raw.permissions) || !Array.isArray(raw.files) || raw.files.length > 64) throw new Error('工作台 V4 包格式或版本不兼容。')
   const manifest = raw as unknown as WorkbenchPackageManifestV4
   if (!only(manifest.compatibility, ['core','dsh','portableLayout'])
@@ -186,7 +187,7 @@ export async function inspectWorkbenchPackageV4(bytes: Uint8Array): Promise<Work
     if (!await crypto.subtle.verify('Ed25519', key, Uint8Array.from(atob(signature.signature), c => c.charCodeAt(0)), new Uint8Array(signingBytesV4(manifest)))) throw new Error('发布者签名校验失败。')
     for (const m of layout.modules) {
       if (isWorkbenchCorePackageName(m.packageName)) {
-        if (!(CORE_PORTABLE_EDITORS as readonly string[]).includes(m.editorId) || m.version !== WORKBENCH_CORE_VERSION) throw new Error('内页伪装为宿主提供的扩展。')
+        if (!(CORE_PORTABLE_EDITORS as readonly string[]).includes(m.editorId) || !workbenchCoreCompatibilitySatisfies(WORKBENCH_CORE_VERSION, m.version ?? '')) throw new Error('内页伪装为宿主提供的扩展。')
       } else if (!manifest.dependencies.some(d => d.packageName === m.packageName && d.version === m.version && d.digest === m.digest && d.editorScopes.some(e => e.editorId === m.editorId && e.scope === m.scope))) throw new Error('内页引用没有匹配的锁定扩展。')
     }
   }

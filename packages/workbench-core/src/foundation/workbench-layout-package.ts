@@ -7,6 +7,7 @@ import { canonicalJson, decodeDeterministicZip, encodeDeterministicZip, sha256He
 import { WORKBENCH_CORE_VERSION, WORKBENCH_DSH_GENERATION, isWorkbenchCorePackageName } from '../release-compatibility.ts'
 import { CORE_PORTABLE_EDITORS } from '../distribution-contract.ts'
 import { workbenchEditorStateFailureV1 } from '../workbench-editor-state.ts'
+import { workbenchCoreCompatibilitySatisfies } from '../module-source.ts'
 import { areaContextOf } from './workbench-context.ts'
 import { projectPortableWorkbenchContext, renderPortableAreaContextMarkdown, renderPortableWorkbenchContextMarkdown, restorePortableWorkbenchContext, validatePortableWorkbenchContext, type PortableWorkbenchContextV1, type WorkbenchContextExportPolicyV1 } from './workbench-context-portability.ts'
 import { validatePortableBayAgentOrchestration, type PortableBayAgentOrchestrationV1 } from './workbench-bay-agent-work.ts'
@@ -189,7 +190,7 @@ export async function inspectLayoutPackage(bytes: Uint8Array): Promise<LayoutPac
   if (manifest.schemaVersion === 3) {
     if (!keys(manifest, ['schemaVersion', 'format', 'mode', 'compatibility', 'files', 'contextPath', 'contextPolicy', 'contextDigest']) || manifest.format !== 'dsh-workbench-package' || manifest.mode !== 'layout-only'
       || !record(manifest.compatibility) || !keys(manifest.compatibility, ['dsh', 'core', 'portableLayout']) || manifest.compatibility.dsh !== WORKBENCH_DSH_GENERATION
-      || manifest.compatibility.core !== WORKBENCH_CORE_VERSION || ![2, 3].includes(manifest.compatibility.portableLayout as number)
+      || !workbenchCoreCompatibilitySatisfies(WORKBENCH_CORE_VERSION, String(manifest.compatibility.core ?? '')) || ![2, 3].includes(manifest.compatibility.portableLayout as number)
       || (manifest.contextPath !== undefined && manifest.contextPath !== 'context.json')
       || (manifest.contextPolicy !== undefined && !['human', 'handoff'].includes(String(manifest.contextPolicy)))
       || (manifest.contextDigest !== undefined && (typeof manifest.contextDigest !== 'string' || !/^[A-Fa-f0-9]{64}$/u.test(manifest.contextDigest)))) throw new Error('Layout package manifest is invalid')
@@ -278,7 +279,8 @@ export function restoreLayoutPackage(layout: PortableLayoutV2, editors: readonly
       if (oldId === current) node.activeModuleInstanceId = page.moduleInstanceId
       const identity = layout.modules.find(m => m.editorId === page.editorId && m.scope === page.editorScope)
       const coreIdentity = isWorkbenchCorePackageName(identity?.packageName)
-        && identity.version === WORKBENCH_CORE_VERSION && (CORE_PORTABLE_EDITORS as readonly string[]).includes(page.editorId)
+        && identity.version !== undefined && workbenchCoreCompatibilitySatisfies(WORKBENCH_CORE_VERSION, identity.version)
+        && (CORE_PORTABLE_EDITORS as readonly string[]).includes(page.editorId)
       const editor = editors.find(row => row.id === page.editorId && row.scope === page.editorScope
         && (!verifiedOnly || coreIdentity || !!identity?.digest)
         && (identity?.packageName === undefined || ((row.provenance?.packageName === identity.packageName

@@ -2,7 +2,7 @@
 
 更新时间：2026-11-11（文档与引用复核；未改变接口版本）
 规范版本：1.1
-适用基线：Workbench Core `0.2.2-alpha.18.0`、DSH `0.2.2-rc.1`（commit `66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db`）
+适用基线：Workbench Core `0.2.2-alpha.18.1`、DSH `0.2.2-rc.1`（commit `66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db`）
 状态：**Core 接口与自动化合同说明；正式桌面扩展生命周期验收仍未完成**
 
 本文是开发新的 Workbench 容器内页扩展时的主规范。可安装的主模板位于 `packages/workbench-core/presets/workbench-creator/skills/workbench-extension-development/templates/workbench-editor/`，Session 变体位于相邻的 `templates/workbench-editor-variants/session-client.js`。若模板与本文不一致，以对应目标 Core/DSH 版本的公开导出、类型、测试和锁定文件为准；不要复制本文以外版本的 Slot 参数或 API。
@@ -119,7 +119,7 @@ my-workbench-extension/
       "kind": "extension",
       "delivery": "direct-source",
       "version": "1.0.0",
-      "coreCompatibility": "0.2.2-alpha.18.0",
+      "coreCompatibility": ">=0.2.2-alpha.18.0 <0.2.2-alpha.19.0",
       "dshGeneration": "0.2.2-rc.1",
       "activation": "restart-only",
       "scope": "root",
@@ -158,7 +158,7 @@ const extension = {
   moduleId: 'example.my-extension',
   apiVersion: 1,
   editorIds: ['example.my-extension.main'],
-  coreCompatibility: '0.2.2-alpha.18.0',
+  coreCompatibility: '>=0.2.2-alpha.18.0 <0.2.2-alpha.19.0',
   dshGeneration: '0.2.2-rc.1',
 }
 
@@ -214,7 +214,7 @@ presentation: { iconSvg: { version: 1, paths: [
 | `moduleId` | 稳定且唯一的扩展 ID，格式受 Core validator 限制；升级时不随显示名称变化。 |
 | `apiVersion` | 当前固定为 `1`。 |
 | `editorIds` | 1 至 32 个合法、唯一 ID；必须等于该插件实际注册的 Workbench editor ID 集合。 |
-| `coreCompatibility` | 非空、最长 128 字符的 Core 兼容身份。当前实现按本机 Core 版本精确匹配；不要把范围语法当成已实现。 |
+| `coreCompatibility` | 非空、最长 128 字符的 Core 兼容范围；当前实现支持精确版本和比较范围。同一 18.x 兼容线也会接纳此前的精确版本声明。 |
 | `dshGeneration` | 非空、最长 64 字符的 DSH 代际；当前实现按目标 DSH generation 精确匹配。 |
 
 ### Editor `declaration`
@@ -288,15 +288,25 @@ Portability descriptor 是运行时函数，不会序列化进包。descriptor �
 
 扩展状态分享和完整工作台迁移是两个层次：
 
-| 内容 | 扩展分发制品 | 完整工作台包 V5 |
+| 内容 | 扩展分发制品 | 完整工作台包 V6（读取器继续支持当前 18.0 V5） |
 |---|---|---|
-| 扩展 `package.json`、Client/Host 入口、Bundle patch、许可证 | 必须由 `distribution.runtimeFiles` 精确列出 | 作为可验证扩展依赖制品随 V5 恢复；制品沿用离线嵌入收集规则 |
+| 扩展 `package.json`、Client/Host 入口、Bundle patch、许可证 | 必须由 `distribution.runtimeFiles` 精确列出 | 按 `embed`、`reference`、`forbid` 策略记录制品锁；仅 `embed` 随 V6 离线携带 |
 | 内页的受限 JSON 状态 | 由 `portability.exportState/importState` 转换 | 随布局和内页引用恢复 |
 | 工作台根目录、区域项目文件和空目录 | 不包含 | 包含全部工作文件，按导出排除项报告处理 |
-| 原生 Session、附件和子会话 | 不包含 | 由 Host 的原生 Session 迁移适配器收集和恢复 |
-| 背景、记忆、Work Item、Assignment、Attention 和编排审计投影 | 不包含 | 随工作台定义和完整包作业恢复 |
+| 原生 Session、附件和子会话 | 不包含 | 由 Host 的原生 Session 迁移适配器收集和恢复，未知必要事件阻断 |
+| 背景、记忆、Work Item、Assignment、Attention 和编排审计投影 | 不包含 | 随工作台定义和完整包作业恢复；导入任务保持待继续 |
 
 因此，扩展的 `state.share: 'portable'` 只表示它的内页状态可以跨机器传递，不表示它可以读取或携带整个项目目录。接收方没有对应扩展、Core/DSH 版本不匹配或依赖没有嵌入时，完整包必须保留内页引用并显示待恢复原因，不能把扩展替换为空白页面后报告完整恢复。
+
+#### 现有扩展升级与 V6 预检
+
+发布更新包时递增 DSH `package.json` 版本并重算 artifact digest/integrity；包版本与内页状态 `schemaVersion` 独立。
+
+V6 导出会先从当前运行时目录读取每个保留内页的声明和 portability descriptor，再创建 Host 导出作业。出现“缺少内页配置导出处理器”时，优先检查目标 `editorId`/`scope` 对应的**运行时 Slot 注册结果**：可迁移内页必须声明 `state.share: 'portable'` 并提供 `portability.exportState`；导入恢复还必须提供 `portability.importState`。仅在源码、静态 manifest 或未加载的更新包中实现处理器，不会通过当前运行时的检查。
+
+升级已有扩展时应保留原 `packageName`、`moduleId` 和 `editorId`，除非明确进行破坏性替换。Creator 应从扩展实际的 `owner.setState()` 写入和既有布局状态中建立旧状态 fixture，确认字段用途后再实现转换：`exportState` 只输出接收方可用的白名单 JSON；`importState` 校验并迁移已支持的旧 schema，返回扩展当前页面可读取的状态。凭据、Profile/Session/Workspace 身份、本机绝对路径和活动句柄不得导出；需要本机服务的字段应在接收方保持未配置，并要求用户重新连接。
+
+测试需覆盖旧状态和当前状态的往返、未知/损坏 schema、`maxBytes`、私密字段剔除以及真实运行目录可见处理器。候选扩展应在隔离 DSH Profile 安装并允许后，再通过 V6 页状态预检、Host 导出作业和干净接收 Profile 的恢复流程。无法安全投影的状态不得为了通过检查而强行声明 `portable`；应明确报告该页阻断完整包迁移的限制。
 
 ## 9. 生命周期和资源释放
 
@@ -439,7 +449,7 @@ DSH Plugin Manager 安装标准插件包
 | 显示 `identity-unverified` | Slot `registrant`、runtime `entryId/moduleName`、bundle row 的 `entryId/moduleName` | 必须一一精确匹配；修复 bundle patch 或 Client 插件 `name` 后按 DSH 方式更新/重启 |
 | 显示 `inventory-unavailable` | DSH remote 是否注入、连接是否就绪、`pluginInventory.list()` / `pluginManager.listBundles()` 是否失败 | 读 UI 诊断中的 operation/code，恢复连接后刷新；不要把暂时读不到说成插件未安装 |
 | 显示 `invalid-contract` | Slot inject metadata、声明字段、editor ID 是否重复/遗漏 | 将 validator 错误、实际 Slot ID 和包清单逐项对照 |
-| 显示 `incompatible` | `coreCompatibility` 和 `dshGeneration` 与实际运行版本 | 针对锁定版本构建兼容声明；不要把范围字符串当成当前已支持的范围表达式 |
+| 显示 `incompatible` | `coreCompatibility` 范围和 `dshGeneration` 与实际运行版本 | 确认 Core 兼容范围覆盖当前版本，且 DSH 代际完全一致 |
 | 显示未允许或需重新确认 | Workbench consent 是否存在、合同 fingerprint 是否变化 | 在 Workbench 设置中明确允许/重新确认；这不会替代 DSH 启用 |
 | 扩展已允许但添加菜单没有内页 | 每个实际 Slot 是否注册、runtime extension ID 集是否完整、Slot `scope` 是否对应 | 查 editor catalog、DSH Slot ledger 与声明集；不要仅检查 package.json |
 | 内页显示 pending | 声明要求的精确 Workspace/Session 是否由该内页 owner 提供 | 由 Core 的绑定动作完成；不要通过全局 Session 或同区域第一张标签猜测 |
@@ -450,11 +460,11 @@ Core 目前会在身份映射失败时显示结构化诊断 code、registrant、
 
 ## 18. 当前实现与待验收状态
 
-Workbench Core `0.2.2-alpha.18.0` / DSH `0.2.2-rc.1` 提供 Slot inject metadata 读取、DSH runtime/bundle inventory 注入与唯一映射、声明校验、Profile-local Workbench consent、扩展状态过滤、撤销/缺失时布局引用保留、刷新竞争保护和身份诊断 UI，并由 Core Host 全局 Skill registry 提供 `workbench-extension-development`，供 DSH 原版 Cordis Creator 通过原生 Skill 工具发现。18.0 同时提供 Area 项目目录、多 Session 内页来源、浏览器/桌面共享的工作台状态，以及 `offline-embedded` 扩展制品收集。扩展发现、状态策略和模板离线制品校验已有自动化覆盖；原版 Creator 真实会话生成扩展、桌面安装/重启和跨机器完整包恢复仍需实测。
+Workbench Core `0.2.2-alpha.18.1` / DSH `0.2.2-rc.1` 提供 Slot inject metadata 读取、DSH runtime/bundle inventory 注入与唯一映射、声明校验、Profile-local Workbench consent、扩展状态过滤、撤销/缺失时布局引用保留、刷新竞争保护和身份诊断 UI，并由 Core Host 全局 Skill registry 提供 `workbench-extension-development`，供 DSH 原版 Cordis Creator 通过原生 Skill 工具发现。18.0 同时提供 Area 项目目录、多 Session 内页来源、浏览器/桌面共享的工作台状态，以及 `offline-embedded` 扩展制品收集。扩展发现、状态策略和模板离线制品校验已有自动化覆盖；原版 Creator 真实会话生成扩展、桌面安装/重启和跨机器完整包恢复仍需实测。
 
 本规范本身不表示任何第三方测试插件已经成功安装或激活。`packages/workbench-svgdeepseek-pet` 是历史测试扩展，**不是本规范或当前 Core 验收的前置条件**；相关源码、制品和证据仅用于历史追溯。
 
-仍需独立完成的验收包括：干净桌面 Profile 下扩展发现设置 UI；DSH 原生安装、启停、升级、卸载和重装恢复全流程；实际布局 stale reference 恢复；Creator 产物端到端安装；各扩展真实功能及资源路由；不同宿主能力表现；包含扩展制品的完整工作台 V5 跨平台导入。离线制品检查和 Profile 发布身份签名只能证明清单、摘要和发布者内容一致，不等于扩展作者认证、代码安全保证或运行时安全沙箱。自动化通过只表示代码合同测试通过。
+仍需独立完成的验收包括：干净桌面 Profile 下扩展发现设置 UI；DSH 原生安装、启停、升级、卸载和重装恢复全流程；实际布局 stale reference 恢复；Creator 产物端到端安装；各扩展真实功能及资源路由；不同宿主能力表现；包含扩展制品的完整工作台 V6 跨平台导入（并验证 18.0 V5 向后导入）。离线制品检查和 Profile 发布身份签名只能证明清单、摘要和发布者内容一致，不等于扩展作者认证、代码安全保证或运行时安全沙箱。自动化通过只表示代码合同测试通过。
 
 ## 19. 最小发布信息
 
@@ -482,11 +492,11 @@ Known unsupported/unverified behavior:
 
 ## 20. 18.0 分发要求
 
-扩展包支持普通持久 Bundle 的 client-only 和 client-host。声明 distribution.version=1、exportPolicy、runtimeKind、精确 runtimeFiles、requires；包含所有入口、必要静态资源、Bundle 配置和 LICENSE。Bundle row ID 必须全局唯一。依赖打入产物，或使用本代宿主提供的精确 peer；禁止安装构建脚本。client-only 只能有模板中的空 Host shim。扩展必须使用 `exportPolicy: 'embed'` 并通过静态闭包检查，才能作为离线制品进入分享包。`offline-embedded` 是扩展/布局分发的模式；完整工作台迁移格式是 V5 `workbench-complete`，两者不能混称。
+扩展包支持普通持久 Bundle 的 client-only 和 client-host。声明 distribution.version=1、exportPolicy、runtimeKind、精确 runtimeFiles、requires；包含所有入口、必要静态资源、Bundle 配置和 LICENSE。Bundle row ID 必须全局唯一。依赖打入产物，或使用本代宿主提供的精确 peer；禁止安装构建脚本。client-only 只能有模板中的空 Host shim。扩展必须使用 `exportPolicy: 'embed'` 并通过静态闭包检查，才能作为离线制品进入分享包。`offline-embedded` 是扩展/布局分发的模式；完整工作台迁移格式为 V6（导入器继续支持当前 18.0 V5），其格式标识为 workbench-complete，两者不能混称。
 
 inject 返回的 workbenchEditor 同时提供 portability.exportState/importState 与 distribution；Host 根据原生清单和文件校验补充 provenance。仅处理器输出的受限 JSON 可迁移，无状态内页使用明确空投影。配置恢复须精确匹配包名、版本、运行摘要、editor ID、scope 和授权，缺失项保留 Host 待恢复数据。
 
-新安装和启用后必须重启；实际注册通过才恢复配置并提交工作台。扩展 artifact 不迁移 Session、模型、工作目录、凭据或整个 Profile；完整工作台 V5 另行负责根目录文件、Area 项目、Session、附件、记忆和任务关系。签名不是沙箱，静态闭包检查不是任意代码安全证明。
+新安装和启用后必须重启；实际注册通过才恢复配置并提交工作台。扩展 artifact 不迁移 Session、模型、工作目录、凭据或整个 Profile；完整工作台 V6 另行负责根目录文件、Area 项目、Session、附件、记忆和任务关系。签名不是沙箱，静态闭包检查不是任意代码安全证明。
 ## 21. 18.0 浮动展示补充契约
 
 浮动内页沿用既有 owner 绑定/权限/状态校验。当前提供可选 `presentation.floating`（false 禁止浮窗）、`owner.presentation`、稳定 `owner.runtimeIdentity`、`registerCloseGuard`。位置不是实例身份；浮窗固定到 Area 不能重建任务或原生 occurrence。Settings 投影、工作台文件信封和完整包是独立版本层，不能从 Settings V4 推断文件或包格式。
@@ -497,6 +507,6 @@ inject 返回的 workbenchEditor 同时提供 portability.exportState/importStat
 
 ## 项目归属修订（2026-11-10）
 
-工作台文件信封 schemaVersion 为 2，projectModelVersion 为 1；项目元数据 schemaVersion 为 1，完整包外层仍为 V5。旧读取器须拒绝未知信封版本。扩展自己的 state.version 与上述版本独立，仅在扩展状态结构变化时升级。
+工作台文件信封 schemaVersion 为 2，projectModelVersion 为 1；项目元数据 schemaVersion 为 1，完整包外层为 V6，导入器继续支持当前 18.0 V5。旧读取器须拒绝未知信封版本。扩展自己的 state.version 与上述版本独立，仅在扩展状态结构变化时升级。
 
 必须回归：关闭所有区域 → 重新关联原项目 → 手动打开内页；同项目两个区域；区域换绑后原会话仍读原项目；浮动与区域转移；零区域完整包导入。关闭视图只能释放本视图资源，不能删除项目文件或会话、取消其他视图的任务。

@@ -4,6 +4,8 @@ import { installWorkbenchNativeAccess } from './host-workbench-native-service.ts
 import { installLayoutImportJournalRoute } from './host-layout-import-journal.ts'
 import { installFloatingUiSettings } from './host-floating-ui-settings.ts'
 import { installDistributionRoutes } from './host-distribution-route.ts'
+import { CompleteMigrationRegistry, WORKBENCH_COMPLETE_MIGRATIONS } from './host-complete-migrations.ts'
+export { CompleteMigrationRegistry, WORKBENCH_COMPLETE_MIGRATIONS, type CompleteMigrationProvider } from './host-complete-migrations.ts'
 export * from './module-contract.ts'
 export {
   isWorkbenchExtensionDeclarationV1,
@@ -63,6 +65,8 @@ export * from './foundation/workbench-bay-agent-work.ts'
 export * from './foundation/workbench-superagent-adapter.ts'
 export * from './workbench-complete-contract.ts'
 export * from './workbench-memory-contract.ts'
+export * from './workbench-collaboration-contract.ts'
+export * from './host-workbench-collaboration.ts'
 
 import { WORKBENCH_CORE_MANIFEST } from './core-manifest.ts'
 import { WORKBENCH_CORE_RUNTIME_SERVICE_NAME, createWorkbenchCoreRuntime } from './core-runtime.ts'
@@ -113,6 +117,7 @@ export function apply(ctx: WorkbenchCoreHostContextV1): void {
   const disposeCreatorSkill = installWorkbenchCreatorSkillProvider(context.get?.('skills') as never)
   installWorkbenchCoreProfileServices(context as WorkbenchCoreHostContextV1 & { get<T = unknown>(name: string): T | undefined; provide(name: string, value: unknown): unknown })
   const disposeDirectoryHost = installWorkbenchDirectoryHost(context as never)
+  if (!context.get?.(WORKBENCH_COMPLETE_MIGRATIONS, false)) context.provide(WORKBENCH_COMPLETE_MIGRATIONS, new CompleteMigrationRegistry())
   const disposeBayAgent = installBayAgentHost(context as never)
   const disposeNativeAccess = installWorkbenchNativeAccess(context as never)
   const runtime = createWorkbenchCoreRuntime({ core: WORKBENCH_CORE_MANIFEST })

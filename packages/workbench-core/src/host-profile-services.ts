@@ -11,6 +11,7 @@ import { readFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { WORKBENCH_CORE_VERSION, WORKBENCH_DSH_GENERATION, WORKBENCH_UPSTREAM_COMMIT } from './release-compatibility.ts'
+import { workbenchCoreCompatibilitySatisfies } from './module-source.ts'
 import { inspectWorkbenchHostInstallCapabilities } from './host-install-capabilities.ts'
 import { createWorkbenchHostSignedCatalogInstallService, type WorkbenchHostCatalogArtifactStagerV1 } from './host-module-install-route.ts'
 import { createWorkbenchModuleInstallCoordinator, type WorkbenchModuleInstallAdapterV1, type WorkbenchModuleVerificationInputV1 } from './install-coordinator.ts'
@@ -267,7 +268,7 @@ export function installWorkbenchCoreProfileServices(ctx: WorkbenchCoreHostProfil
         const pkg = JSON.parse(files.get('package.json')!.toString('utf8'))
         const declaration = pkg.dsh?.workbench
         if (pkg.name !== PACKAGE_NAME || pkg.version !== identity.version || declaration?.moduleId !== identity.moduleId
-          || declaration?.dshGeneration !== WORKBENCH_DSH_GENERATION || declaration?.coreCompatibility !== WORKBENCH_CORE_VERSION
+          || declaration?.dshGeneration !== WORKBENCH_DSH_GENERATION || !workbenchCoreCompatibilitySatisfies(WORKBENCH_CORE_VERSION, declaration?.coreCompatibility ?? '')
           || !files.has('dsh.bundle.patch.yml')) throw new Error('package-manifest-invalid')
       },
       verify: input => verifyInstalled(ctx, input, artifacts),

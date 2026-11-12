@@ -5,7 +5,9 @@ import type { HostConnectionHandle } from '@deepseek-ai/dsh-client-connection'
 import type { ProfileContext } from '@deepseek-ai/dsh-app-boot'
 import type SettingsProvider from '@deepseek-ai/dsh-settings'
 import type { CredentialProvider } from '@deepseek-ai/dsh-credentials'
-import { createHostDistributionService } from './host-distribution-service.ts'
+import { createHostDistributionService, type HostDistributionOptions } from './host-distribution-service.ts'
+import { createCompleteExtensions, WORKBENCH_COMPLETE_EXTENSIONS } from './host-complete-extensions.ts'
+import { CompleteMigrationRegistry, WORKBENCH_COMPLETE_MIGRATIONS } from './host-complete-migrations.ts'
 import type { DistributionNativeManager } from './host-distribution-installer.ts'
 import { DISTRIBUTION_ROUTE, createHostDistributionRuntimeV4 } from './distribution-contract.ts'
 import { WORKBENCH_CORE_VERSION } from './release-compatibility.ts'
@@ -38,14 +40,17 @@ export function installDistributionRoutes(ctx:{get<T>(name:string,strict?:boolea
   const connection=ctx.get<HostConnectionHandle>('connection',false),profile=ctx.get<ProfileContext>('profileContext',false),native=ctx.get<DistributionNativeManager>('pluginManager',false),settings=ctx.get<SettingsProvider>('settings',false),resolver=ctx.get<PackageResolver>('pluginPackages',false)
   if(!connection?.fetch||!profile||!native||!settings||!resolver)return undefined
   const resolve=(name:string)=>{try{const p=resolver.packageOf(name,import.meta.url);return p?.name===name?p.dir:undefined}catch{return undefined}}
-  const service=createHostDistributionService({profile,native,settings,credentials:ctx.get<CredentialProvider>('credentials',false),resolve,
+  const distributionOptions: HostDistributionOptions = {profile,native,settings,credentials:ctx.get<CredentialProvider>('credentials',false),resolve,
     peerAvailable:(name,range)=>{
       if(!name.startsWith('@deepseek-ai/')&&!['react','react-dom'].includes(name))return false
       try { const p=resolver.packageOf(name,import.meta.url);if(!p?.version)return false
         // The first release accepts exact host peers. No implicit semver expansion or download.
         return p.version===range
       }catch{return false}
-    },fetchArtifact:d=>fetchLockedDistributionArtifact(d,profile.dir)})
+    },fetchArtifact:d=>fetchLockedDistributionArtifact(d,profile.dir)}
+  const service=createHostDistributionService(distributionOptions)
+  const migrations = ctx.get<CompleteMigrationRegistry>(WORKBENCH_COMPLETE_MIGRATIONS, false) ?? new CompleteMigrationRegistry()
+  ctx.provide?.(WORKBENCH_COMPLETE_EXTENSIONS, createCompleteExtensions(distributionOptions, migrations))
   ctx.provide?.('workbenchDistributionPackagesV4',service)
   ctx.provide?.('workbenchDistributionRuntime',createHostDistributionRuntimeV4(service,WORKBENCH_CORE_VERSION))
   const actions=['export','inspect','consent','resume','complete','restore-pending','prepare-pending','cancel','history','identities'] as const

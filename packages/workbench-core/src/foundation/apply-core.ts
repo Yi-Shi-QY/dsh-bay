@@ -1,7 +1,6 @@
 import { browserSafeUuid } from '../browser-safe-id.ts'
 import { installWorkbenchSidebarShortcuts } from '../client/workbench-sidebar-shortcuts.tsx'
 import { workbenchFetch } from '../client/workbench-access.ts'
-import { WORKBENCH_GUEST_EDITORS } from '../workbench-access-contract.ts'
 import { requestWorkbenchShareGrant } from './WorkbenchSharePermissions.tsx'
 import { installFloatingExitGuard } from '../client/floating-exit-guard.ts'
 import { areasOf } from './document-v3.ts'
@@ -72,13 +71,15 @@ import {
 import { createBrowserWindowController } from '../client/browser-window-controller.ts'
 import { requestBrowserWorkbenchReclaim } from '../client/resolve-browser-window-view.ts'
 import { readWorkbenchWindowView } from '../client/workbench-window-view.ts'
+import type { WorkbenchSurfaceContextV1, WorkbenchSurfaceContextV2 } from '../client/workbench-surface-context.ts'
 import { WorkbenchWindowRoot } from './WorkbenchWindowRoot.tsx'
 import { workbenchEditorCatalogRowFromSlotEntry } from '../client/workbench-editor-slot-catalog.ts'
 import { createWorkbenchToolGatewayManager, type WorkbenchToolGatewayManagerV1 } from '../tool-gateway.ts'
 import type { WorkbenchToolUsageServiceV1 } from '../tool-usage.ts'
 import { createWorkbenchShareController } from '../client/workbench-share-controller.ts'
 import { createConversationTabStatusSource } from '../client/conversation-tab-status.ts'
-import { isWorkbenchShareGuestPage } from '../client/workbench-share-guest.ts'
+import { createWorkbenchCollaborationClient } from '../client/workbench-collaboration-client.ts'
+import { isWorkbenchCollaborationPage, readWorkbenchCollaborationPageMarker } from '../client/workbench-collaboration-page.ts'
 import { createRemoteBayAgentController } from '../client/bay-agent-controller.ts'
 import { decodeBackgroundAiPreferences, type BackgroundAiPreferencesV1 } from './background-ai-preferences.ts'
 import type { BayAgentControllerV1 } from './workbench-bay-agent-work.ts'
@@ -109,7 +110,6 @@ function editorCatalogFor(ctx: ClientContext): WorkbenchEditorCatalog {
         const entries = (scope: 'root' | 'session') => ctx.slots.entriesOfSlot(`workbench.editor.${scope}`)
           .map(entry => workbenchEditorCatalogRowFromSlotEntry(entry, scope))
         rows = [...entries('session'), ...entries('root')]
-          .filter(row => !isWorkbenchShareGuestPage() || WORKBENCH_GUEST_EDITORS.includes(row.id))
           .sort((left, right) => left.order - right.order || left.id.localeCompare(right.id))
           .map(({ order: _order, ...row }) => row)
       }
@@ -164,7 +164,7 @@ export function applyWorkbenchCoreFoundation(
   const floatingRuntime = createFloatingWorkspaceRuntime()
   const floatingSessionReferences = new Map<string, SessionReference>()
   const suppliedToolUsageService = (ctx as unknown as { get?: (name: string, strict?: boolean) => unknown }).get?.('workbenchToolUsageService') as WorkbenchToolUsageServiceV1 | undefined
-  if (!isWorkbenchShareGuestPage()) ctx.effect(() => installNativeAutomaticIsolation(ctx, modeController), 'workbench: automatic review isolation')
+  ctx.effect(() => installNativeAutomaticIsolation(ctx, modeController), 'workbench: automatic review isolation')
   floatingRuntime.setCleanup(id => {
     closeWorkbenchNative(id)
     floatingSessionReferences.get(id)?.release()
@@ -207,8 +207,18 @@ export function applyWorkbenchCoreFoundation(
   }
   const resolveConnectionRpc = () => resolveClientConnection()?.rpc
   const connectionRpc = resolveConnectionRpc()
-  const shareGuest = isWorkbenchShareGuestPage()
-  const shareController = shareGuest ? undefined
+  const windowView = readWorkbenchWindowView()
+  const collaborationMarker = readWorkbenchCollaborationPageMarker()
+  const collaborationPage = collaborationMarker?.role !== 'owner' && isWorkbenchCollaborationPage()
+  const collaborationClient = collaborationMarker === undefined || typeof window === 'undefined' ? undefined : createWorkbenchCollaborationClient({
+    url: `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/api/workbench-collaboration`,
+    collaborationId: collaborationMarker.collaborationId,
+    workbenchId: windowView?.workbenchId ?? '',
+    participantId: collaborationMarker.participantId,
+    displayName: collaborationMarker.role === 'owner' ? '房主' : `协作者-${collaborationMarker.participantId.slice(0, 4)}`,
+    role: collaborationMarker.role === 'owner' ? 'owner' : 'participant',
+  })
+  const shareController = collaborationPage ? undefined
     : createWorkbenchShareController({ ...(connectionRpc === undefined ? {} : { rpc: connectionRpc }), chooseGrant: id => {
       const record = settings.getSnapshot().value?.workbenches[id]
       return requestWorkbenchShareGrant(undefined, record ? areasOf(record.document.root).map((area, index) => ({ id: area.areaId, label: record.areaMetadata?.[area.areaId]?.label || `区域 ${index + 1}` })) : [])
@@ -220,6 +230,12 @@ export function applyWorkbenchCoreFoundation(
       refreshConnection()
       return () => { offReset?.(); shareController.dispose() }
     }, 'workbench: LAN share controller')
+  }
+  if (collaborationClient !== undefined) {
+    ctx.effect(() => {
+      void collaborationClient.connect().catch(() => {})
+      return () => collaborationClient.disconnect()
+    }, 'workbench: shared-control collaboration')
   }
   const browserController = suppliedWindowController === undefined
     ? createBrowserWindowController({
@@ -240,7 +256,13 @@ export function applyWorkbenchCoreFoundation(
     }, 'workbench: browser window controller')
   }
   const windowController = resolveWorkbenchWindowController(suppliedWindowController ?? browserController)
-  const windowView = readWorkbenchWindowView()
+  const surfaceContext: WorkbenchSurfaceContextV1 | WorkbenchSurfaceContextV2 = collaborationMarker !== undefined && collaborationMarker.role !== 'owner'
+    ? { kind: 'lan-participant', workbenchId: windowView?.workbenchId ?? '', collaborationId: collaborationMarker.collaborationId, participantId: collaborationMarker.participantId }
+    : collaborationMarker?.role === 'owner'
+      ? { kind: 'browser-owner', workbenchId: windowView?.workbenchId ?? '', collaborationId: collaborationMarker.collaborationId, participantId: collaborationMarker.participantId }
+    : windowView === undefined
+      ? { kind: 'desktop' }
+      : { kind: 'browser-owner', workbenchId: windowView.workbenchId }
   let companionControl = true
   if (windowView) ctx.effect(() => {
     const revoke = (event: Event) => {
@@ -257,7 +279,7 @@ export function applyWorkbenchCoreFoundation(
     return !!sessions[binding.sessionId as keyof typeof sessions] && !workspaces.archivedSessionIds.includes(binding.sessionId as never)
       && (!binding.workspaceId || workspaces.items.some(row => row.workspaceId === binding.workspaceId && row.sessionIds.includes(binding.sessionId as never)))
   }
-  if (!shareGuest) ctx.effect(() => connectFloatingUiPreferences(floatingRuntime, windowView !== undefined), 'workbench: floating UI preferences')
+  ctx.effect(() => connectFloatingUiPreferences(floatingRuntime, windowView !== undefined), 'workbench: floating UI preferences')
   let contextPatch: WorkbenchDirectoryContextPatch | undefined
   const { settings: frameSettings, directory } = createProjectNeutralFrameSettings(settings,
     windowView === undefined
@@ -419,7 +441,7 @@ export function applyWorkbenchCoreFoundation(
   ctx.effect(() => {
     const sync = () => {
       const workbenchId = windowView?.workbenchId ?? settings.getSnapshot().value?.activeWorkbenchId
-      if (workbenchId === undefined || !settings.getSnapshot().value?.workbenches[workbenchId] || isWorkbenchShareGuestPage()) return
+      if (workbenchId === undefined || !settings.getSnapshot().value?.workbenches[workbenchId]) return
       bayAgent.setWorkbenchId(workbenchId)
     }
     const off = settings.subscribe(sync)
@@ -616,9 +638,8 @@ export function applyWorkbenchCoreFoundation(
       toolGateway,
       ...(suppliedToolUsageService === undefined ? {} : { toolUsageService: suppliedToolUsageService }),
       extensionRegistry,
-      browserView: windowView !== undefined,
-      ...(windowView === undefined ? {} : { browserWorkbenchId: windowView.workbenchId }),
-      ...(windowView === undefined || shareGuest ? {} : {
+      surfaceContext,
+      ...(windowView === undefined ? {} : {
         requestBrowserReclaim: (workbenchId: string) => workbenchId === windowView.workbenchId
           ? requestBrowserWorkbenchReclaim(ctx as never, windowView)
           : Promise.resolve(false),
@@ -633,6 +654,7 @@ export function applyWorkbenchCoreFoundation(
       workbenchDirectory: directory,
       windowController,
       ...(shareController === undefined ? {} : { shareController }),
+      ...(collaborationClient === undefined ? {} : { collaborationClient }),
       runtimeMetrics,
       connectWorkspace: async (workspaceId, options) => {
         const previous = new Set(ctx.sessions.list.getSnapshot().ids)

@@ -65,7 +65,7 @@ function unwrap<T>(result: ConnectionRpcResult<unknown>): T {
 }
 
 /** Browser-side adapter for Host share-session management. It has no page or
- * Workbench rendering knowledge; guest pages never receive this adapter. */
+ * Workbench rendering knowledge; shared-control participants never receive this adapter. */
 export function createWorkbenchShareController(options: { readonly rpc?: ClientConnectionRpc; readonly chooseGrant?: (workbenchId: string) => Promise<WorkbenchGrant | undefined> } = {}): WorkbenchShareControllerV1 {
   const listeners = new Set<() => void>()
   let rpc = options.rpc

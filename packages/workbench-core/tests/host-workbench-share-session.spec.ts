@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import { createWorkbenchShareSessionManager } from '../src/host-workbench-share-session.ts'
+import { parseWorkbenchGrant } from '../src/workbench-access-contract.ts'
 
 describe('Workbench LAN share session manager', () => {
+  it('rejects legacy projection grants and area/path scopes', () => {
+    expect(() => parseWorkbenchGrant({ template: 'review', capabilities: ['view'] })).toThrow('legacy-workbench-grant-unsupported')
+    expect(() => parseWorkbenchGrant({ template: 'collaborate', capabilities: ['view', 'message'] })).toThrow('legacy-workbench-grant-unsupported')
+    expect(() => parseWorkbenchGrant({ template: 'shared-control', capabilities: ['view'], areaIds: ['area-a'] })).toThrow('legacy-workbench-scope-unsupported')
+    expect(() => parseWorkbenchGrant({ template: 'shared-control', capabilities: ['view'], paths: ['project'] })).toThrow('legacy-workbench-scope-unsupported')
+  })
+
   it('keeps one bearer link per Workbench and never stores raw tokens in snapshots', () => {
     let sequence = 0
     const manager = createWorkbenchShareSessionManager({ randomToken: () => `token-${String(++sequence).padStart(2, '0')}-${'x'.repeat(36)}` })
@@ -13,7 +21,7 @@ describe('Workbench LAN share session manager', () => {
     expect(manager.findByToken(first.token)).toBeDefined()
     const second = manager.start('workbench-a', '192.168.1.5', 4321, 'http://example/workbench')
     expect(second).toMatchObject({ ok: true, status: 'already-active' })
-    expect(manager.getSnapshot()).toEqual([{ workbenchId: 'workbench-a', bindHost: '192.168.1.5', port: 4321, createdAt: expect.any(Number), guestCount: 0, grant: { template: 'collaborate', capabilities: ['view', 'message'] }, grantRevision: 1 }])
+    expect(manager.getSnapshot()).toEqual([{ workbenchId: 'workbench-a', bindHost: '192.168.1.5', port: 4321, createdAt: expect.any(Number), guestCount: 0, grant: { template: 'shared-control', capabilities: ['view', 'message', 'main-message', 'read-files', 'write-files', 'layout', 'context', 'tasks', 'memory', 'package'] }, grantRevision: 1 }])
     expect(JSON.stringify(manager.getSnapshot())).not.toContain(first.token)
     manager.dispose()
     expect(manager.findByToken(first.token)).toBeUndefined()

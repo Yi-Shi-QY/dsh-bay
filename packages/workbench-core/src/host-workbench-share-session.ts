@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto'
-import { COLLABORATION_GRANT, parseWorkbenchGrant, isGrantReduction, type WorkbenchGrant } from './workbench-access-contract.ts'
+import { SHARED_CONTROL_GRANT, parseWorkbenchGrant, isGrantReduction, type WorkbenchGrant } from './workbench-access-contract.ts'
 
 const SHARE_TOKEN_BYTES = 32
 const LEASE_TOKEN_BYTES = 32
@@ -162,7 +162,7 @@ export function createWorkbenchShareSessionManager(options: WorkbenchShareSessio
     return lease
   }
 
-  const start = (workbenchId: string, bindHost: string, port: number, url: string, grant: WorkbenchGrant = COLLABORATION_GRANT) => {
+  const start = (workbenchId: string, bindHost: string, port: number, url: string, grant: WorkbenchGrant = SHARED_CONTROL_GRANT) => {
     if (disposed) return { ok: false as const, error: 'workbench-share-manager-disposed' }
     if (!validId(workbenchId)) return { ok: false as const, error: 'invalid-workbench-id' }
     const existing = byWorkbench.get(workbenchId)

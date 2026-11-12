@@ -78,6 +78,20 @@ it('shows a per-workbench reclaim action when its browser view is ready', async 
   expect(onTransition.mock.calls.map(call => call[1])).toEqual(['reclaiming', 'idle'])
 })
 
+it('offers reclaim after the Host reports a lost browser heartbeat', async () => {
+  const reclaim = vi.fn(async () => {})
+  const { view } = mount({
+    windowSnapshot: { supported: true, windows: [], requests: [
+      { workbenchId: 'one', status: 'failed', code: 'browser-view-heartbeat-timeout', windowId: '00000000-0000-4000-8000-000000000001' },
+    ] },
+    onReclaim: reclaim,
+  })
+  const action = view.getByRole('button', { name: /收回/u }) as HTMLButtonElement
+  expect(action.disabled).toBe(false)
+  fireEvent.click(action)
+  await waitFor(() => expect(reclaim).toHaveBeenCalledWith('one'))
+})
+
 it('does not invoke opening while this workbench is already being handed off', () => {
   const open = vi.fn(async () => {})
   const { view } = mount({

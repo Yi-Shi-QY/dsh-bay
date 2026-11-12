@@ -3,12 +3,15 @@ import { randomUUID } from 'node:crypto'
 import { WebSocket, WebSocketServer } from 'ws'
 import { afterEach, expect, it, vi } from 'vitest'
 import { createWorkbenchOwnerGateway } from '../src/host-workbench-owner-gateway.ts'
+import { createWorkbenchShareGateway, selectPrivateIPv4 } from '../src/host-workbench-share-gateway.ts'
+import { createWorkbenchShareSessionManager } from '../src/host-workbench-share-session.ts'
 import { createHostBrowserWindowController } from '../src/host-browser-window-controller.ts'
+import { createWorkbenchCollaborationManager } from '../src/host-workbench-collaboration.ts'
 import { fileAccessFixture } from './helpers/file-access.ts'
 
 const cleanups: (() => unknown)[] = []
 afterEach(async () => { for (const dispose of cleanups.splice(0).reverse()) await dispose() })
-async function setup() {
+async function setup(withCollaboration = true) {
   const file = await fileAccessFixture(); cleanups.push(() => file.dispose())
   const received: { path: string; cookie: string; access: string }[] = []
   let receivedChunk!: () => void
@@ -43,8 +46,16 @@ async function setup() {
     })),
   }
   const share = vi.fn(async () => ({ ok: true as const, value: {} }))
-  const gateway = await createWorkbenchOwnerGateway({ access: file.access, native: native as never, upstreamOrigin, handleView: controller.handle, handleShare: share })
+  const collaboration = createWorkbenchCollaborationManager({
+    loadSeed: () => ({
+      areas: [{ areaId: 'area-a' }],
+      editors: [{ areaId: 'area-a', editorId: 'workbench.conversation' }],
+    }),
+  })
+  const gateway = await createWorkbenchOwnerGateway({ access: file.access, native: native as never, upstreamOrigin, handleView: controller.handle, handleShare: share,
+    ...(withCollaboration ? { collaboration } : {}) })
   cleanups.push(() => gateway.close())
+  cleanups.push(() => collaboration.dispose())
   const opened = await gateway.prepare({ ...prepared, workbenchId: 'workbench-a' })
   const origin = new URL(opened.url).origin
   const exchange = await fetch(opened.url, { redirect: 'manual' })
@@ -61,7 +72,7 @@ async function setup() {
     body: JSON.stringify({ type: 'client-request', rpcId: 'rpc', method: 'workbench-window/' + action, payload }),
   })
   const prompt = (proof: string) => fetch(origin + '/api/session/prompt', { method: 'POST', headers: { cookie, 'x-bay-page': proof, authorization: 'forged-owner', 'x-bay-access': 'forged-access' }, body: '{}' })
-  return { ...file, native, upstream, gateway, controller, prepared, opened, origin, cookie, exchange, page, rpc, prompt, received, firstChunk, share }
+  return { ...file, native, upstream, gateway, controller, collaboration, prepared, opened, origin, cookie, exchange, page, rpc, prompt, received, firstChunk, share }
 }
 
 it('exchanges a real file Workbench lease for a scoped origin without exposing upstream credentials or owner bootstrap', async () => {
@@ -72,7 +83,6 @@ it('exchanges a real file Workbench lease for a scoped origin without exposing u
   expect(page.html).toContain('scoped native document')
   expect(page.html.indexOf('__WORKBENCH_GATEWAY_PAGE__')).toBeLessThan(page.html.indexOf('nativeBoot()'))
   expect(page.html).not.toContain('OWNER PRIVATE SNAPSHOT')
-  expect(page.html).not.toContain('__WORKBENCH_SHARE_GUEST__')
   expect(page.html).not.toContain('private-launch-token')
   expect((await fetch(f.opened.url, { redirect: 'manual' })).status).toBe(410)
   expect((await f.prompt(page.proof)).status).toBe(409)
@@ -86,6 +96,17 @@ it('exchanges a real file Workbench lease for a scoped origin without exposing u
   const frame = await new Promise<string>((resolve, reject) => { ws.once('message', bytes => resolve(bytes.toString())); ws.once('error', reject) })
   expect(JSON.parse(frame)).toEqual({ actor: 'browser-owner', workbenchId: 'workbench-a', path: '/api/remote.mux' })
   ws.close()
+})
+
+it('keeps a normal browser-owner page on the native single-Workbench surface', async () => {
+  const f = await setup(false)
+  const page = await f.page()
+  expect(page.html).not.toContain('__WORKBENCH_COLLABORATION__')
+  expect((await f.prompt(page.proof)).status).toBe(409)
+  const pageId = randomUUID()
+  await f.rpc('attach', { closeToken: page.view.closeToken, pageId }, page.proof)
+  await f.rpc('ready', { windowId: page.view.windowId, closeToken: page.view.closeToken, pageId }, page.proof)
+  expect((await f.prompt(page.proof)).status).toBe(200)
 })
 
 it('binds writes to one attached page, resumes refresh and rejects the previous page proof', async () => {
@@ -132,4 +153,117 @@ it('streams package upload before the whole body arrives and sets only the Host-
   expect(await response.json()).toEqual({ length: 3072 })
   expect(response.headers.get('set-cookie')).toBeNull()
   expect(f.received).toEqual([{ path: '/api/workbench/complete/v5/upload', cookie: 'dsh-owner=private-owner-cookie', access: page.view.closeToken }])
+})
+
+it('connects the browser owner to the same shared-control session as LAN participants', async () => {
+  const f = await setup()
+  const page = await f.page()
+  expect(page.html).toContain('__WORKBENCH_COLLABORATION__')
+  const marker = JSON.parse(page.html.match(/__WORKBENCH_COLLABORATION__=(\{[^;]+\});/u)![1]!) as { collaborationId: string; participantId: string; role: string }
+  expect(marker).toMatchObject({ participantId: 'owner', role: 'owner' })
+  const ws = new WebSocket(f.origin.replace('http:', 'ws:') + '/api/workbench-collaboration?bay-page=' + page.proof, { headers: { cookie: f.cookie, origin: f.origin } })
+  const frames: any[] = [], waiters: ((frame: any) => void)[] = []
+  ws.on('message', bytes => {
+    const frame = JSON.parse(bytes.toString())
+    frames.push(frame)
+    waiters.shift()?.(frame)
+  })
+  const nextFrame = () => frames.length > 0
+    ? Promise.resolve(frames.shift())
+    : new Promise<any>(resolve => waiters.push(resolve))
+  const nextFrameOfType = async (type: string) => {
+    for (;;) {
+      const frame = await nextFrame()
+      if (frame.type === type) return frame
+    }
+  }
+  await new Promise<void>((resolve, reject) => { ws.once('open', () => resolve()); ws.once('error', reject) })
+  try {
+    ws.send(JSON.stringify({ type: 'client.hello', payload: { schemaVersion: 1, collaborationId: marker.collaborationId, workbenchId: 'workbench-a', participantId: 'owner' } }))
+    const snapshot = await nextFrameOfType('server.snapshot')
+    expect(snapshot.payload.participants.some((participant: any) => participant.participantId === 'owner')).toBe(true)
+    ws.send(JSON.stringify({ type: 'client.command', payload: {
+      requestId: randomUUID(), collaborationId: marker.collaborationId, workbenchId: 'workbench-a', participantId: 'owner', baseRevision: snapshot.payload.workbenchRevision,
+      operation: { kind: 'canvas.set-viewport', viewport: { width: 1440, height: 900, scaleMode: 'contain' } },
+    } }))
+    const result = await nextFrameOfType('server.command-result')
+    expect(result.payload.ok).toBe(true)
+    expect(f.collaboration.get('workbench-a')?.snapshot().sharedCanvas.viewport.width).toBe(1440)
+  } finally {
+    ws.close()
+  }
+})
+
+it('keeps owner and LAN participant on one live collaboration session', async () => {
+  const gatewayHost = selectPrivateIPv4()
+  if (gatewayHost === undefined) return
+  const f = await setup()
+  const ownerPage = await f.page()
+  const marker = JSON.parse(ownerPage.html.match(/__WORKBENCH_COLLABORATION__=(\{[^;]+\});/u)![1]!) as { collaborationId: string }
+  const upstreamOrigin = `http://127.0.0.1:${String((f.upstream.address() as { port: number }).port)}`
+  const shareManager = createWorkbenchShareSessionManager({ randomToken: () => `dual-${'x'.repeat(42)}` })
+  const share = await createWorkbenchShareGateway({
+    access: f.access,
+    collaboration: f.collaboration,
+    upstreamOrigin,
+    manager: shareManager,
+    networkInterfaces: { WLAN: [{ address: gatewayHost, family: 'IPv4', internal: false }] },
+    prepareView: async () => ({ windowId: 'window-lan-dual', url: `${upstreamOrigin}/workbench?workbench=${'l'.repeat(43)}&token=launch`, expiresAt: Date.now() + 60_000 }),
+    redeemView: async () => ({ schemaVersion: 1, windowId: 'window-lan-dual', workbenchId: 'workbench-a', mode: 'browser-workbench', closeToken: `close-${'d'.repeat(40)}` }),
+    closeView: async () => {},
+  })
+  try {
+    const started = await share.startShare('workbench-a')
+    const link = await fetch(started.url, { redirect: 'manual' })
+    const shareCookie = link.headers.get('set-cookie')?.split(';', 1)[0]
+    expect(shareCookie).toMatch(/^dsh-workbench-share=/u)
+    const document = await fetch(`http://${share.host}:${String(share.port)}/workbench`, { headers: { cookie: shareCookie! } })
+    expect(document.status, await document.clone().text()).toBe(200)
+    const participantLease = shareManager.getSnapshot()[0]?.guests?.[0]?.leaseId
+    if (!participantLease) throw new Error('participant lease missing')
+
+    const ownerWs = new WebSocket(f.origin.replace('http:', 'ws:') + '/api/workbench-collaboration?bay-page=' + ownerPage.proof, { headers: { cookie: f.cookie, origin: f.origin } })
+    const participantWs = new WebSocket(`ws://${share.host}:${String(share.port)}/api/workbench-collaboration`, { headers: { cookie: shareCookie! } })
+    const collect = (socket: WebSocket) => {
+      const frames: any[] = [], waiters: ((frame: any) => void)[] = []
+      socket.on('message', bytes => { const frame = JSON.parse(bytes.toString()); frames.push(frame); waiters.shift()?.(frame) })
+      const next = () => frames.length > 0 ? Promise.resolve(frames.shift()) : new Promise<any>(resolve => waiters.push(resolve))
+      return { next, nextOfType: async (type: string) => { for (;;) { const frame = await next(); if (frame.type === type) return frame } } }
+    }
+    const ownerFrames = collect(ownerWs), participantFrames = collect(participantWs)
+    await Promise.all([
+      new Promise<void>((resolve, reject) => { ownerWs.once('open', () => resolve()); ownerWs.once('error', reject) }),
+      new Promise<void>((resolve, reject) => { participantWs.once('open', () => resolve()); participantWs.once('error', reject) }),
+    ])
+    try {
+      ownerWs.send(JSON.stringify({ type: 'client.hello', payload: { schemaVersion: 1, collaborationId: marker.collaborationId, workbenchId: 'workbench-a', participantId: 'owner' } }))
+      participantWs.send(JSON.stringify({ type: 'client.hello', payload: { schemaVersion: 1, collaborationId: marker.collaborationId, workbenchId: 'workbench-a', participantId: participantLease } }))
+      const [ownerSnapshot, participantSnapshot] = await Promise.all([ownerFrames.nextOfType('server.snapshot'), participantFrames.nextOfType('server.snapshot')])
+      expect(ownerSnapshot.payload.collaborationId).toBe(participantSnapshot.payload.collaborationId)
+      expect(ownerSnapshot.payload.workbenchId).toBe('workbench-a')
+
+      ownerWs.send(JSON.stringify({ type: 'client.command', payload: {
+        requestId: randomUUID(), collaborationId: marker.collaborationId, workbenchId: 'workbench-a', participantId: 'owner', baseRevision: ownerSnapshot.payload.workbenchRevision,
+        operation: { kind: 'canvas.set-layout', layout: { version: 2, root: { kind: 'area', areaId: 'area-a', tabs: [] }, activeGroupId: 'area-a' } },
+      } }))
+      const nextEvent = async (frames: ReturnType<typeof collect>, kind: string) => {
+        for (;;) { const frame = await frames.nextOfType('server.event'); if (frame.payload.kind === kind) return frame }
+      }
+      expect((await nextEvent(participantFrames, 'canvas.layout.changed')).payload.kind).toBe('canvas.layout.changed')
+      participantWs.send(JSON.stringify({ type: 'client.command', payload: {
+        requestId: randomUUID(), collaborationId: marker.collaborationId, workbenchId: 'workbench-a', participantId: participantLease, baseRevision: f.collaboration.get('workbench-a')?.snapshot().workbenchRevision ?? 0,
+        operation: { kind: 'canvas.set-focus', focus: { areaId: 'area-a', editorId: 'workbench.conversation' } },
+      } }))
+      expect((await nextEvent(ownerFrames, 'canvas.focus.changed')).payload.kind).toBe('canvas.focus.changed')
+      participantWs.send(JSON.stringify({ type: 'client.presence', payload: { participantId: participantLease, displayName: 'LAN', role: 'participant', areaId: 'area-a', editorId: 'workbench.conversation', intent: 'editing', connectionState: 'connected', updatedAt: Date.now() } }))
+      const presence = await nextEvent(ownerFrames, 'presence.changed')
+      expect(presence.payload.kind).toBe('presence.changed')
+      expect(presence.payload.payload.participantId).toBe(participantLease)
+    } finally {
+      ownerWs.close(); participantWs.close()
+    }
+  } finally {
+    await share.close()
+    await shareManager.dispose()
+  }
 })

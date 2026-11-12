@@ -8,6 +8,9 @@ import { WorkbenchAccessError } from './host-workbench-access.ts'
 import type { WorkbenchAccessContext } from './workbench-access-contract.ts'
 import { WORKBENCH_ACCESS_HEADER } from './workbench-access-contract.ts'
 import type { createGuestNativeTransport } from './host-workbench-native-access.ts'
+import type { WorkbenchCollaborationManagerV1, WorkbenchCollaborationSessionViewV1 } from './host-workbench-collaboration.ts'
+import type { ParticipantPresenceV1, WorkbenchCommandEnvelopeV1 } from './workbench-collaboration-contract.ts'
+import { WebSocketServer, type WebSocket } from 'ws'
 
 interface PreparedOwnerView { windowId: string; workbenchId: string; url: string; expiresAt: number }
 interface OwnerView { schemaVersion: 1; windowId: string; workbenchId: string; mode: 'browser-workbench'; closeToken: string }
@@ -17,13 +20,14 @@ export interface WorkbenchOwnerGatewayOptions {
   upstreamOrigin: string
   handleView(action: string, payload: unknown): Promise<ConnectionRpcHandlerResult>
   handleShare?(action: string, payload: unknown, context: WorkbenchAccessContext): Promise<ConnectionRpcHandlerResult>
+  collaboration?: WorkbenchCollaborationManagerV1
 }
 const WORKBENCH_ROUTES = new Set([
   '/api/workbench/directory/v1', '/api/workbench/bay-agent', '/api/workbench/bay-agent/draft', '/api/workbench/access/v1',
   '/api/workbench/complete/v5', '/api/workbench/complete/v5/upload', '/api/workbench/complete/v5/download',
 ])
 const VIEW_ACTIONS = new Set(['opened', 'ready', 'failed', 'status', 'heartbeat', 'watch-reclaim', 'reclaim-progress', 'metrics', 'attach', 'suspend', 'reclaim', 'reclaimed', 'floating-read', 'floating-stage'])
-const SHARE_ACTIONS = new Set(['start', 'stop', 'status', 'presence', 'guest-rename', 'guest-kick', 'reduce'])
+const SHARE_ACTIONS = new Set(['start', 'stop', 'status', 'guest-rename', 'guest-kick', 'reduce'])
 const BOOT_READS = new Set(['/api/session/list', '/api/session/search', '/api/session/modelCatalog', '/api/session/page', '/api/session/projections', '/api/session/state', '/api/session/attachment', '/api/agentPresets/list'])
 const BOOT_STREAMS = new Set(['$events', 'remoteAccess/follow', 'session/control', 'session/follow', 'session/observeEvent', 'session/observeState', 'session/observeProjections', 'workspace/follow'])
 const PAGE_HEADER = 'x-bay-page'
@@ -92,6 +96,7 @@ export async function createWorkbenchOwnerGateway(options: WorkbenchOwnerGateway
       const ticket = randomBytes(32).toString('base64url'), cookie = randomBytes(32).toString('base64url')
       const cookieName = 'bay-owner-' + randomBytes(8).toString('hex'), cookieHash = digest(cookie)
       const sockets = new Map<Duplex, string>()
+      const collaborationWss = new WebSocketServer({ noServer: true })
       const pageProofs = new Set<string>()
       let activeProof: string | undefined, activePageId: string | undefined
       let view: OwnerView | undefined, ownerCookie = '', ticketAvailable = true, documentHtml: string | undefined
@@ -112,6 +117,61 @@ export async function createWorkbenchOwnerGateway(options: WorkbenchOwnerGateway
         if (value.actor !== 'browser-owner' || value.workbenchId !== input.workbenchId) throw new Error('工作台控制身份已变化。')
         options.access.authorize(value, 'view', { workbenchId: input.workbenchId })
         return value
+      }
+      const sendCollaboration = (socket: WebSocket, type: string, payload: unknown): void => {
+        if (socket.readyState === 1) socket.send(JSON.stringify({ type, payload }))
+      }
+      const handleCollaboration = async (socket: WebSocket, collaboration: WorkbenchCollaborationSessionViewV1): Promise<void> => {
+        let connected = false
+        let disposed = false
+        const unsubscribe = collaboration.subscribe(event => sendCollaboration(socket, 'server.event', event))
+        const endIfRevoked = (): boolean => {
+          try { actor(); return false } catch {
+            sendCollaboration(socket, 'server.collaboration-ended', { reason: 'owner-access-revoked' })
+            socket.close(1008, 'Owner access revoked')
+            return true
+          }
+        }
+        socket.on('message', data => {
+          let message: unknown
+          try { message = JSON.parse(data.toString()) } catch { return }
+          if (!message || typeof message !== 'object' || Array.isArray(message)) return
+          const value = message as { type?: unknown; payload?: unknown }
+          if (typeof value.type !== 'string' || !value.payload || typeof value.payload !== 'object' || Array.isArray(value.payload)) return
+          if (endIfRevoked()) return
+          const payload = value.payload as Record<string, unknown>
+          if (value.type === 'client.hello') {
+            if (payload.collaborationId !== collaboration.snapshot().collaborationId || payload.workbenchId !== input.workbenchId || payload.participantId !== 'owner') {
+              sendCollaboration(socket, 'server.collaboration-ended', { reason: 'collaboration-scope-denied' }); socket.close(1008); return
+            }
+            const joined = collaboration.connect({ collaborationId: collaboration.snapshot().collaborationId, workbenchId: input.workbenchId, participantId: 'owner', displayName: '房主', role: 'owner' })
+            if ('error' in joined) { sendCollaboration(socket, 'server.collaboration-ended', joined); socket.close(1008); return }
+            connected = true; sendCollaboration(socket, 'server.snapshot', joined)
+            if (typeof payload.lastEventId === 'string') {
+              const replay = collaboration.eventsSince(payload.lastEventId)
+              if (replay !== undefined) for (const event of replay) sendCollaboration(socket, 'server.event', event)
+              else sendCollaboration(socket, 'server.resync-required', collaboration.snapshot())
+            }
+            return
+          }
+          if (!connected) return
+          if (value.type === 'client.command') {
+            const command = payload as unknown as WorkbenchCommandEnvelopeV1
+            void collaboration.command({ ...command, collaborationId: collaboration.snapshot().collaborationId, workbenchId: input.workbenchId, participantId: 'owner' }).then(result => sendCollaboration(socket, 'server.command-result', result))
+          } else if (value.type === 'client.presence') {
+            collaboration.publishPresence({ ...(payload as unknown as ParticipantPresenceV1), participantId: 'owner', displayName: '房主', role: 'owner', connectionState: 'connected', updatedAt: Date.now() })
+          } else if (value.type === 'client.resync') sendCollaboration(socket, 'server.snapshot', collaboration.snapshot())
+        })
+        const heartbeat = setInterval(() => { if (!disposed) endIfRevoked() }, 15_000)
+        heartbeat.unref?.()
+        const dispose = () => {
+          if (disposed) return
+          disposed = true
+          clearInterval(heartbeat)
+          unsubscribe()
+          if (connected) collaboration.disconnect('owner')
+        }
+        socket.once('close', dispose); socket.once('error', dispose)
       }
       const initialize = async () => {
         const cookieParts = new Map<string, string>()
@@ -204,8 +264,10 @@ export async function createWorkbenchOwnerGateway(options: WorkbenchOwnerGateway
           // validates the single active page connection before any ready write.
           const pageProof = randomBytes(24).toString('base64url'); pageProofs.add(pageProof)
           if (pageProofs.size > 32) for (const item of pageProofs) { if (item !== activeProof) { pageProofs.delete(item); break } }
-          const injection = `<script>globalThis.__WORKBENCH_WINDOW_VIEW__=${scriptJson(view)};globalThis.__DSH_REMOTE_ACCESS__=${scriptJson(options.native.bootstrap(context))};globalThis.__WORKBENCH_GATEWAY_PAGE__=${scriptJson(pageProof)};
-(()=>{const p=globalThis.__WORKBENCH_GATEWAY_PAGE__,f=globalThis.fetch.bind(globalThis);globalThis.fetch=(input,init)=>{const u=new URL(input instanceof Request?input.url:String(input),location.href);if(u.origin===location.origin&&u.pathname.startsWith('/api/')){const h=new Headers(init?.headers??(input instanceof Request?input.headers:undefined));h.set('${PAGE_HEADER}',p);return f(input,{...init,headers:h})}return f(input,init)};const W=globalThis.WebSocket;globalThis.WebSocket=class extends W{constructor(url,protocols){const u=new URL(String(url),location.href);if(u.host===location.host&&u.pathname==='/api/remote.mux')u.searchParams.set('bay-page',p);if(protocols===undefined)super(u.href);else super(u.href,protocols)}};if(typeof Worker==='function'){const send=Worker.prototype.postMessage;Worker.prototype.postMessage=function(message,transfer){if(message&&typeof message.url==='string'){const u=new URL(message.url,location.href);if(u.origin===location.origin&&u.pathname==='/api/session/uploadFileBinary')message={...message,headers:{...message.headers,'${PAGE_HEADER}':p}}}return transfer===undefined?send.call(this,message):send.call(this,message,transfer)}}})();</script>`
+          const collaboration = options.collaboration === undefined ? undefined : await options.collaboration.start(input.workbenchId, 'owner')
+          const collaborationMarker = collaboration === undefined ? '' : `globalThis.__WORKBENCH_COLLABORATION__=${scriptJson({ collaborationId: collaboration.collaborationId, participantId: 'owner', role: 'owner' })};`
+          const injection = `<script>globalThis.__WORKBENCH_WINDOW_VIEW__=${scriptJson(view)};globalThis.__DSH_REMOTE_ACCESS__=${scriptJson(options.native.bootstrap(context))};globalThis.__WORKBENCH_GATEWAY_PAGE__=${scriptJson(pageProof)};${collaborationMarker}
+ (()=>{const p=globalThis.__WORKBENCH_GATEWAY_PAGE__,f=globalThis.fetch.bind(globalThis);globalThis.fetch=(input,init)=>{const u=new URL(input instanceof Request?input.url:String(input),location.href);if(u.origin===location.origin&&u.pathname.startsWith('/api/')){const h=new Headers(init?.headers??(input instanceof Request?input.headers:undefined));h.set('${PAGE_HEADER}',p);return f(input,{...init,headers:h})}return f(input,init)};const W=globalThis.WebSocket;globalThis.WebSocket=class extends W{constructor(url,protocols){const u=new URL(String(url),location.href);if(u.host===location.host&&(u.pathname==='/api/remote.mux'||u.pathname==='/api/workbench-collaboration'))u.searchParams.set('bay-page',p);if(protocols===undefined)super(u.href);else super(u.href,protocols)}};if(typeof Worker==='function'){const send=Worker.prototype.postMessage;Worker.prototype.postMessage=function(message,transfer){if(message&&typeof message.url==='string'){const u=new URL(message.url,location.href);if(u.origin===location.origin&&u.pathname==='/api/session/uploadFileBinary')message={...message,headers:{...message.headers,'${PAGE_HEADER}':p}}}return transfer===undefined?send.call(this,message):send.call(this,message,transfer)}}})();</script>`
           const html = (await options.native.renderDocument(context)).replace(/<head(?:\s[^>]*)?>/iu, head => head + injection)
           headers(response); response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); response.end(method === 'HEAD' ? undefined : html); return
         }
@@ -238,7 +300,14 @@ export async function createWorkbenchOwnerGateway(options: WorkbenchOwnerGateway
       server.on('upgrade', (request, socket, head) => {
         try {
           const url = new URL(request.url ?? '/', origin), proof = url.searchParams.get('bay-page')
-          if (closed || !trusted(request) || !authenticated(request) || url.pathname !== '/api/remote.mux' || !proof || !pageProofs.has(proof)) throw new Error('unauthorized')
+          if (closed || !trusted(request) || !authenticated(request) || !proof || !pageProofs.has(proof)) throw new Error('unauthorized')
+          if (url.pathname === '/api/workbench-collaboration' && options.collaboration !== undefined) {
+            const collaboration = options.collaboration.get(input.workbenchId)
+            if (collaboration === undefined) throw new Error('collaboration-unavailable')
+            collaborationWss.handleUpgrade(request, socket, head, upgraded => { void handleCollaboration(upgraded, collaboration) })
+            return
+          }
+          if (url.pathname !== '/api/remote.mux') throw new Error('unauthorized')
           request.url = '/api/remote.mux'
           options.native.handleUpgrade(request, socket, head, actor(), (endpoint, _payload, phase) => {
             actor()
@@ -267,6 +336,7 @@ export async function createWorkbenchOwnerGateway(options: WorkbenchOwnerGateway
         closed = true
         clearTimeout(expiredTimer); if (revokedTimer) clearTimeout(revokedTimer); unsubscribe()
         for (const socket of sockets.keys()) socket.destroy()
+        collaborationWss.close()
         server.closeAllConnections()
         await new Promise<void>(resolve => server.close(() => resolve()))
       }

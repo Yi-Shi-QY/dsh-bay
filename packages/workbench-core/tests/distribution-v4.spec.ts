@@ -39,6 +39,24 @@ describe('17.2 signed package contract',()=>{
       const p=await inspectWorkbenchPackageV4(bytes);expect(p.manifest.mode).toBe(mode);expect(p.layout.retention).toBe('all-retained-tabs');expect(p.layout.name).toBe(layout().name)
     }
   })
+  it('accepts V4 archives and Core pages from the previous 18.x candidate',async()=>{
+    const l=layout()
+    if(l.document.root.kind!=='area')throw Error('fixture')
+    l.document.root.moduleHistory=[{moduleInstanceId:'guide-page',editorId:'workbench.guide',editorScope:'root',state:{schemaVersion:1},lastKnownTitle:'Guide'}]
+    l.document.root.activeModuleInstanceId='guide-page'
+    l.modules=[{editorId:'workbench.guide',scope:'root',packageName:'dsh-bay',version:'0.2.2-alpha.18.0'}]
+    const current=await buildWorkbenchPackageV4({layout:l,mode:'layout-only'})
+    const files=decodeDeterministicZip(current).map(file=>{
+      if(file.path!=='manifest.json')return file
+      const manifest=JSON.parse(new TextDecoder().decode(file.content))
+      manifest.version='0.2.2-alpha.18.0'
+      manifest.compatibility.core='0.2.2-alpha.18.0'
+      return{...file,content:new TextEncoder().encode(JSON.stringify(manifest))}
+    })
+    const preview=await inspectWorkbenchPackageV4(encodeDeterministicZip(files))
+    expect(preview.manifest.compatibility.core).toBe('0.2.2-alpha.18.0')
+    expect(preview.layout.modules[0]?.version).toBe('0.2.2-alpha.18.0')
+  })
   it('rejects payload tampering, key substitution and undeclared files',async()=>{
     const original=await buildWorkbenchPackageV4({layout:layout(),mode:'offline-embedded',...await signer()})
     const files=decodeDeterministicZip(original)

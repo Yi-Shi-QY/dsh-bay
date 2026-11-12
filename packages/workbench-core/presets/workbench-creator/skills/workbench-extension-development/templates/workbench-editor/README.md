@@ -2,7 +2,7 @@
 
 ## 18.0 项目身份与实例生命周期
 
-Core 兼容版本为 `0.2.2-alpha.18.0`。模板扩展自身保留独立的 `0.1.0` 版本，不能把它误当成 Core 版本。
+Core 兼容范围为 `>=0.2.2-alpha.18.0 <0.2.2-alpha.19.0`。模板扩展自身保留独立的 `0.1.0` 版本，不能把它误当成 Core 版本。
 
 - 声明 `presentation.floating: false` 可禁止浮窗；缺少完整绑定及生命周期声明的内页不能在浮窗运行。
 - `owner.projectId` 是项目持久身份；`owner.areaId` 只是展示位置。关闭 Area 后 Project 保留，重新打开显示概览，不自动恢复扩展内页。两个 Area 共享项目时背景和记忆共享，内页视图状态独立。全局页或 Main 可无 projectId，不能退回用 areaId 猜测。
@@ -56,7 +56,7 @@ ctx.slots.inject('workbench.editor.session', () => ctx.slots.register({
     moduleId: 'workbench.editor-example',
     apiVersion: 1,
     editorIds: ['workbench.example'],
-    coreCompatibility: '0.2.2-alpha.18.0',
+    coreCompatibility: '>=0.2.2-alpha.18.0 <0.2.2-alpha.19.0',
     dshGeneration: '0.2.2-rc.1',
   } } }),
 }, Editor))
@@ -77,11 +77,13 @@ binding: { requirement: 'session', unbound: 'pending', sharing: 'independent' }
 
 ## 18.0 offline-embedded 分发
 
-本模板已包含 distribution、精确 runtimeFiles、许可证及 exportState/importState。它的 client-only Host 入口仅用于原生注册，不执行 Host 业务；若需要 Host 功能，改为 client-host 并明确权限和行为。所有 Bundle row ID 必须与其他扩展不同。`exportPolicy: 'embed'` 是扩展制品可离线嵌入的前提；Host 会按 `runtimeFiles` 生成带 digest/integrity 的制品，不能把在线 URL 或未验证目录当作离线依赖。`offline-embedded` 是扩展/布局分发模式，完整工作台迁移使用 V5 `workbench-complete`。
+完整工作台迁移使用 V6；模板中的内页状态必须通过运行时注册暴露 `portability.exportState/importState`。旧扩展升级流程和状态 schema 迁移要求见技能与扩展规范。
+
+本模板已包含 distribution、精确 runtimeFiles、许可证及 exportState/importState。它的 client-only Host 入口仅用于原生注册，不执行 Host 业务；若需要 Host 功能，改为 client-host 并明确权限和行为。所有 Bundle row ID 必须与其他扩展不同。`exportPolicy: 'embed'` 是扩展制品可离线嵌入的前提；Host 会按 `runtimeFiles` 生成带 digest/integrity 的制品，不能把在线 URL 或未验证目录当作离线依赖。`offline-embedded` 是扩展/布局分发模式，完整工作台迁移使用 V6 `workbench-complete`。
 
 准备制品只收集发布清单中的文件，不打包整个工程，不运行构建命令。运行依赖须已打入产物；宿主 peer 使用精确版本。禁止安装脚本、凭据、本机路径、源码工程及会话记录。应分别测试多个后台标签的配置往返、无状态处理器、缺失依赖及错误状态。
 
-将目录作为持久 Bundle 安装到测试 Profile 后，先验证扩展制品可被离线收集，再通过完整工作台 V5 导出验证实际嵌入与资源关系。接收方按恢复报告处理 DSH 插件安装/启用、Workbench 许可及重启注册，再验证内页状态。完整包负责根目录文件、持久 Project、原生 Session、附件、背景、记忆和任务关系；扩展制品本身不携带模型、凭据、工作台文件或 Session transcript。只导出布局与扩展不能代替完整迁移验收。
+将目录作为持久 Bundle 安装到测试 Profile 后，先验证扩展制品可被离线收集，再通过完整工作台 V6 导出验证实际嵌入与资源关系。接收方按恢复报告处理 DSH 插件安装/启用、Workbench 许可及重启注册，再验证内页状态。完整包负责根目录文件、持久 Project、原生 Session、附件、背景、记忆和任务关系；扩展制品本身不携带模型、凭据、工作台文件或 Session transcript。只导出布局与扩展不能代替完整迁移验收。
 
 ## 18.0 开发验收最小路径
 
@@ -93,7 +95,7 @@ binding: { requirement: 'session', unbound: 'pending', sharing: 'independent' }
 → 在隔离 DSH Profile 安装/启用并重启
 → 在 Workbench 明确允许扩展
 → 在一个 Area 创建至少三个独立 Session 并分别添加内页
-→ 导出 V5 完整工作台包，确认包含所需离线扩展制品
+→ 导出 V6 完整工作台包，确认包含所需离线扩展制品
 → 在干净接收环境导入，确认项目目录、Session 和内页状态恢复
 ```
 

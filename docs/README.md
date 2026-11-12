@@ -1,6 +1,6 @@
 # DSH Bay 文档导航
 
-整理日期：2026-11-11（Asia/Shanghai）。当前版本 `0.2.2-alpha.18.0`，宿主 DSH `0.2.2-rc.1`；功能基线 `ab2a7d8`。本文是项目文档的统一入口。
+整理日期：2026-11-11（Asia/Shanghai）。当前候选 `0.2.2-alpha.18.1`，宿主 DSH `0.2.2-rc.1`；源码包含当前工作树改动。本文是项目文档的统一入口。
 
 ## 先了解，再上手
 
@@ -17,6 +17,7 @@
 | [项目与区域归属](V18-PROJECT-AREA-OWNERSHIP.zh-CN.md) | 项目持久化、区域关闭、重新关联、背景与记忆 |
 | [工作台总览与原版侧栏](V18-OVERVIEW-DESIGN.zh-CN.md) | 列表与详情、项目概览、侧栏固定、浏览器管理入口 |
 | [创建与分享迁移](V18-SHARING-PAGE-DESIGN.zh-CN.md) | 创建表单、完整包四阶段导入、错误与恢复 |
+| [完整工作台 V6](COMPLETE-WORKBENCH-V6.zh-CN.md) | 目标系统预检、扩展锁、两阶段导入、V5 续跑与验证边界 |
 | [浏览器与局域网](BROWSER-WORKBENCH.zh-CN.md) | 主控交接、页面关闭恢复、在线协作和验收边界 |
 | [Bay Agent 与上下文](BAY-AGENT-ORCHESTRATION-CONTEXT-ENGINE.zh-CN.md) | Main / Worker、模式发现、原生压缩、事件账本和报告队列 |
 | [内页菜单分类](V18-INNER-PAGE-MENU.zh-CN.md) | 官方分类、扩展文件夹和偏好保存 |

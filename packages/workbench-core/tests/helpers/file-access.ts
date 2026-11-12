@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { HostWorkbenchDirectory } from '../../src/host-workbench-directory.ts'
 import { HostWorkbenchAccess } from '../../src/host-workbench-access.ts'
+import { HostWorkbenchMemory } from '../../src/host-workbench-memory.ts'
 
 export async function fileAccessFixture(workbenchId = 'workbench-a') {
   const root = await mkdtemp(join(tmpdir(), 'bay-access-'))
@@ -13,6 +14,7 @@ export async function fileAccessFixture(workbenchId = 'workbench-a') {
     document: { version: 3, activeAreaId: 'area-a', root: { kind: 'split', id: 'split', axis: 'horizontal', ratio: .5,
       first: { kind: 'area', areaId: 'area-a', moduleHistory: [] }, second: { kind: 'area', areaId: 'area-b', moduleHistory: [] } } },
   } })
-  const access = new HostWorkbenchAccess(directory)
+  const memory = new HostWorkbenchMemory(id => directory.rootPath(id), id => directory.getSnapshot().value.workbenches[id]!)
+  const access = new HostWorkbenchAccess(directory, memory)
   return { root, directory, access, async dispose() { access.dispose(); await rm(root, { recursive: true, force: true }) } }
 }

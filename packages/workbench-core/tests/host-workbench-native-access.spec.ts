@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { HostWorkbenchDirectory } from '../src/host-workbench-directory.ts'
 import { HostWorkbenchAccess } from '../src/host-workbench-access.ts'
-import { COLLABORATION_GRANT } from '../src/workbench-access-contract.ts'
+import { SHARED_CONTROL_GRANT } from '../src/workbench-access-contract.ts'
 import { createGuestNativeTransport, currentWorkbenchExecutionOrigin, installWorkbenchNativeMutationRoutes } from '../src/host-workbench-native-access.ts'
 import type { WorkbenchRecordV2 } from '../src/foundation/persistence.ts'
 
@@ -24,7 +24,7 @@ async function fixture() {
   }
   await directory.registerSession('one', 'main', { sessionKey: 'main-logical', role: 'main', relativePath: '', title: 'Bay', agentPreset: 'default', createdAt: 1 })
   const access = new HostWorkbenchAccess(directory); cleanup.push(() => access.dispose())
-  access.registerGuest('guest', 'one', COLLABORATION_GRANT, () => true)
+  access.registerGuest('guest', 'one', SHARED_CONTROL_GRANT, () => true, { collaborationId: 'collaboration-one', displayName: '协作者' })
   const context = new Context(); cleanup.push(() => context.fiber.dispose())
   const remoteAccess = new RemoteAccessService(context)
   const hooks = new Map<string, Function>(), peers: any[] = [], guards: Function[] = [], routes = new Map<string, any>()
@@ -71,10 +71,10 @@ it('resolves real file Workbenches, creates non-owner peers and scopes catalog g
   expect(JSON.stringify(baseline)).not.toContain('other-session')
   expect(f.peers[0].principal.kind).toBe('bay-workbench')
   expect(await f.http('session/prompt', { request: { sessionId: 'one-session', mode: 'steer', requestId: 'id', content: [{ type: 'text', text: 'hello' }] } })).toMatchObject({ type: 'server-response', result: { ok: true } })
-  expect(f.invoke.mock.calls[0]![0].args.request.mode).toBe('queue')
+  expect(f.invoke.mock.calls[0]![0].args.request.mode).toBe('steer')
   expect(await f.http('session/prompt', { request: { sessionId: 'other-session', mode: 'queue' } })).toMatchObject({ result: { ok: false } })
-  expect(await f.http('session/prompt', { request: { sessionId: 'main', mode: 'queue' } })).toMatchObject({ result: { ok: false } })
-  expect(f.invoke).toHaveBeenCalledTimes(1)
+  expect(await f.http('session/prompt', { request: { sessionId: 'main', mode: 'queue' } })).toMatchObject({ result: { ok: true } })
+  expect(f.invoke).toHaveBeenCalledTimes(2)
 })
 
 it('rejects foreign attachments even when a caller knows their native reference', async () => {
@@ -83,9 +83,9 @@ it('rejects foreign attachments even when a caller knows their native reference'
   expect(await f.http('session/attachment', { request: { sessionId: 'one-session', attachment: { attachmentId: 'mine' } } })).toEqual({ kind: 'bay-workbench' })
 })
 
-it('confines native file resources to actual Session roots and explicit granted paths', async () => {
+it('confines native file resources to the current Workbench root and rejects foreign roots', async () => {
   const f = await fixture()
-  f.access.registerGuest('reader', 'one', { ...COLLABORATION_GRANT, capabilities: ['view', 'message', 'read-files'], paths: ['project'] }, () => true)
+  f.access.registerGuest('reader', 'one', { ...SHARED_CONTROL_GRANT, capabilities: ['view', 'message', 'read-files'] }, () => true)
   const reader = f.access.getContext('reader')
   await writeFile(join(f.root, 'one', 'project', 'file.txt'), 'visible')
   await writeFile(join(f.root, 'other', 'project', 'private.txt'), 'private')
@@ -96,9 +96,9 @@ it('confines native file resources to actual Session roots and explicit granted 
   expect(await read('file.txt')).toEqual({ kind: 'bay-workbench' })
   expect(await read('../../other/project/private.txt')).toMatchObject({ result: { ok: false } })
   expect(await read('external/private.txt')).toMatchObject({ result: { ok: false } })
-  expect(await read('../outputs/result.txt')).toMatchObject({ result: { ok: false } })
+  expect(await read('../outputs/result.txt')).toEqual({ kind: 'bay-workbench' })
   expect(await read('../.bay/workbench.json')).toMatchObject({ result: { ok: false } })
-  expect(await read('file.txt', f.guest())).toMatchObject({ result: { ok: false } })
+  expect(await read('file.txt', f.guest())).toEqual({ kind: 'bay-workbench' })
   expect(await f.http('workspaceFiles/readBytes', { workspaceFileScopeId: 'other-session', path: 'private.txt' }, reader)).toMatchObject({ result: { ok: false } })
   expect(await read('file.txt', reader, { baseFile: 'file.txt' })).toEqual({ kind: 'bay-workbench' })
   f.services.sessions = { get: () => ({ header: { cwd: join(f.root, 'other', 'project') } }) }
@@ -123,6 +123,16 @@ it('refreshes browser-owner grants after handoff without replacing its live peer
   expect(() => f.access.authorize(owner, 'message', { workbenchId: 'one', sessionId: 'one-session' })).not.toThrow()
   expect(f.peers[0]).toBe(peer)
   expect(peer.signal.aborted).toBe(false)
+})
+
+it('admits owner prompts while the browser controls the Workbench', async () => {
+  const f = await fixture()
+  f.access.registerOwner('browser', 'one', () => true, undefined, () => true)
+  expect(await f.http('session/prompt', {
+    request: { sessionId: 'one-session', mode: 'steer', requestId: 'browser-owner-prompt', content: [{ type: 'text', text: 'hello from browser' }] },
+  }, f.access.getContext('browser'))).toMatchObject({ type: 'server-response', result: { ok: true } })
+  expect(await f.step([{ source: { kind: 'user', rpcId: 'browser-owner-prompt' } }])).toMatchObject({ kind: 'enter' })
+  expect(await f.step([{ source: { kind: 'user', rpcId: 'untrusted-prompt' } }], 2)).toEqual({ kind: 'reject' })
 })
 
 it('rechecks terminal control and snapshot barriers throughout a live stream', async () => {
@@ -161,16 +171,15 @@ it('requires one-shot tool approval, binds exact arguments, and carries origin i
   expect(f.guards[0]!(exec)).toBeUndefined()
   expect(f.guards[0]!({ ...exec, arguments: { command: 'changed' } })).toBeTypeOf('string')
   const origin = await f.hooks.get('tools/execute')!(exec, async () => currentWorkbenchExecutionOrigin())
-  expect(origin).toMatchObject({ accessId: 'guest', actor: 'lan-guest', workbenchId: 'one' })
+  expect(origin).toMatchObject({ accessId: 'guest', actor: 'lan-guest', workbenchId: 'one', participantId: 'guest', collaborationId: 'collaboration-one', displayName: '协作者' })
   f.hooks.get('tools/result')!(exec)
   expect(f.guards[0]!(exec)).toBeTypeOf('string')
 })
 
-it('intersects multiple guest scopes and invalidates an open execution when either is revoked', async () => {
+it('shares native operations through one Host grant and invalidates execution on revoke', async () => {
   const f = await fixture()
-  f.access.registerGuest('reader', 'one', { ...COLLABORATION_GRANT, capabilities: ['view', 'message', 'read-files'] }, () => true)
-  await f.step([f.message('reader'), f.message('guest')])
-  expect(f.guards[0]!(f.tool('read', { file_path: 'file.txt' }))).toBeTypeOf('string')
+  await f.step([f.message('guest')])
+  expect(f.guards[0]!(f.tool('read', { file_path: 'file.txt' }))).toBeUndefined()
   f.access.revoke('guest')
   expect(f.agent.cancel).toHaveBeenCalledOnce()
   expect(await f.step([], 1)).toEqual({ kind: 'reject' })
@@ -215,7 +224,7 @@ it('waits for native execution to quiesce before publishing a snapshot and relea
 
 it('uses effective native cwd for file permission and persists relayed provenance through the native inbox', async () => {
   const f = await fixture()
-  f.access.registerGuest('reader', 'one', { ...COLLABORATION_GRANT, capabilities: ['view', 'message', 'read-files'], paths: ['project'] }, () => true)
+  f.access.registerGuest('reader', 'one', { ...SHARED_CONTROL_GRANT, capabilities: ['view', 'message', 'read-files'] }, () => true)
   await f.step([f.message('reader')])
   const exec = f.tool('read', { file_path: 'file.txt' })
   expect(f.guards[0]!(exec)).toBeUndefined()
@@ -266,6 +275,6 @@ it('streams only uploads for authorized Sessions and rechecks access as bytes ar
   }), f.guest())
   expect(await (await upload('one-session')).json()).toMatchObject({ ok: true, value: { receiptId: 'receipt', file: { bytes: 4 } } })
   expect((await upload('other-session')).status).toBe(403)
-  expect((await upload('main')).status).toBe(403)
-  expect(uploadStream).toHaveBeenCalledOnce()
+  expect((await upload('main')).status).toBe(200)
+  expect(uploadStream).toHaveBeenCalledTimes(2)
 })

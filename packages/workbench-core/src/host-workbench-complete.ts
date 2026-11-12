@@ -1,7 +1,7 @@
 import { hydrateProjects } from './host-workbench-projects.ts'
 import { createHash, randomUUID } from 'node:crypto'
 import { createReadStream, createWriteStream, existsSync, readFileSync, readdirSync } from 'node:fs'
-import { mkdir, mkdtemp, readFile, realpath, rename, rm, writeFile, lstat, open, stat } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, rename, rm, writeFile, lstat, open, stat, readlink } from 'node:fs/promises'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import path from 'node:path'
@@ -12,8 +12,8 @@ import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
 import type { AttachmentStore } from '@deepseek-ai/dsh-attachment'
 import type { WorkspaceRegistry } from '@deepseek-ai/dsh-workspace'
 import { HostWorkbenchDirectory, atomicJson } from './host-workbench-directory.ts'
-import { NativeSessionPortability, resolvePortablePath, type NativeSessionSnapshot } from './host-native-session-portability.ts'
-import { copyTree, hashFile, readInventory, validateTargetName, writeInventory } from './host-workbench-complete-files.ts'
+import { NativeSessionPortability, portableRelativePath, resolvePortablePath, type NativeSessionSnapshot } from './host-native-session-portability.ts'
+import { copyTree, hashFile, readInventory, validateTargetName, writeInventory, checkInventoryPlatform, walkFiles } from './host-workbench-complete-files.ts'
 import { WORKBENCH_COMPLETE_ROUTE, WORKBENCH_COMPLETE_UPLOAD_ROUTE, WORKBENCH_COMPLETE_DOWNLOAD_ROUTE, WORKBENCH_COMPLETE_CHUNK_BYTES, type CompletePackageJob, type CompletePackageJobView, type CompletePackageUpload, type CompletePackageDirectoryRequest } from './workbench-complete-contract.ts'
 import type { HostWorkbenchAccess } from './host-workbench-access.ts'
 import type { WorkbenchAccessContext } from './workbench-access-contract.ts'
@@ -25,6 +25,11 @@ import { baySessionId } from './host-bay-agent-store.ts'
 import { HostWorkbenchMemory } from './host-workbench-memory.ts'
 import { areasOf, type WorkbenchNodeV3 } from './foundation/document-v3.ts'
 import type { CompletePackagePreflight } from './workbench-complete-contract.ts'
+import { COMPLETE_PLATFORMS, type CompletePlatform, type CompleteExtensionLock } from './workbench-complete-contract.ts'
+import { CompleteMigrationRegistry } from './host-complete-migrations.ts'
+import { completeExternalEditors, type CompleteExtensions } from './host-complete-extensions.ts'
+import { portableStateSafe } from './foundation/workbench-layout-package.ts'
+import type { CompletePageState } from './workbench-complete-contract.ts'
 
 export type CompleteOptions = {
   profile: string
@@ -35,6 +40,10 @@ export type CompleteOptions = {
   workspaces: Pick<WorkspaceRegistry, 'create'>
   orchestration?: { load(id: string): BayAgentWorkStateV1; save(id: string, state: BayAgentWorkStateV1): void }
   access?: HostWorkbenchAccess
+  extensions?: () => CompleteExtensions | undefined
+  migrations?: CompleteMigrationRegistry
+  /** Tests may simulate a new Host; production allocates this once per service lifetime. */
+  bootId?: string
   /** Quiesce managed execution before snapshotting; false restores its prior policy. */
   setBarrier?: (workbenchId: string, active: boolean) => Promise<void> | void
 }
@@ -95,29 +104,54 @@ function persistedJobForRequest(profile: string, requestId: string): CompletePac
 
 type CompleteManifest = {
   type: 'workbench-complete'
-  version: 5
+  version: 5 | 6
   workbenchId: string
   sourceRoot?: string
   sessionKeys: Record<string, string>
   workspacePaths?: Record<string, string>
   orchestration?: string
   orchestrationSha256?: string
+  sourcePlatform?: CompletePlatform
+  targetPlatform?: CompletePlatform
+  extensions?: CompleteExtensionLock[]
+  inventorySha256?: string
+  nativeSha256?: string
+  extensionDataSha256?: string
+  exclusions?: string[]
 }
 
 async function readManifest(stage: string) {
   const manifestFile = path.join(stage, 'manifest.json')
   const manifest = JSON.parse(await readFile(manifestFile, 'utf8')) as CompleteManifest
-  if (manifest.type !== 'workbench-complete' || manifest.version !== 5 || !manifest.workbenchId || !manifest.sessionKeys) {
-    throw new Error('不是完整工作台包 V5。')
+  if (manifest.type !== 'workbench-complete' || ![5, 6].includes(manifest.version) || !manifest.workbenchId || !manifest.sessionKeys) {
+    throw new Error('不是受支持的 18.0 完整工作台包 V5 / V6。')
   }
   for (const relative of ['manifest.json', 'files.ndjson', 'workbench/.bay/workbench.json', 'native/native-sessions.json']) {
     if (!existsSync(path.join(stage, relative))) throw new Error('完整包缺少必要内容：' + relative)
+  }
+  if (manifest.version === 6) {
+    if (!COMPLETE_PLATFORMS.includes(manifest.sourcePlatform!) || !COMPLETE_PLATFORMS.includes(manifest.targetPlatform!) || !Array.isArray(manifest.extensions)) throw new Error('V6 平台或扩展清单无效。')
+    for (const [file, expected] of [['files.ndjson', manifest.inventorySha256], ['native/native-sessions.json', manifest.nativeSha256], ['extension-data.json', manifest.extensionDataSha256]]) {
+      if (!expected || await hashFile(path.join(stage, file!)) !== expected) throw new Error('V6 清单摘要不匹配：' + file)
+    }
+    const packages = new Set<string>()
+    for (const extension of manifest.extensions) {
+      if (!extension.packageName || !extension.moduleId || !extension.version || !/^[a-f0-9]{64}$/u.test(extension.artifactSha256) || packages.has(extension.packageName)
+        || !['embed', 'reference', 'forbid'].includes(extension.exportPolicy)
+        || !Array.isArray(extension.platforms) || !Array.isArray(extension.permissions) || !Array.isArray(extension.editorIds)
+        || !Array.isArray(extension.migrations?.events) || !Array.isArray(extension.migrations?.workbenchData)) throw new Error('V6 扩展身份或迁移声明无效。')
+      packages.add(extension.packageName)
+      if (extension.artifactPath && (extension.exportPolicy !== 'embed' || extension.artifactPath !== 'extensions/' + extension.artifactSha256 + '.tgz' || await hashFile(resolvePortablePath(stage, extension.artifactPath)) !== extension.artifactSha256)) throw new Error('扩展制品路径、许可或摘要不匹配。')
+      if (extension.distribution && (extension.distribution.packageName !== extension.packageName || extension.distribution.moduleId !== extension.moduleId || extension.distribution.version !== extension.version || extension.distribution.archiveSha256 !== extension.artifactSha256)) throw new Error('扩展原生安装身份与 V6 锁不一致。')
+      if (extension.distribution && (JSON.stringify([...extension.permissions].sort()) !== JSON.stringify([...extension.distribution.permissions].sort())
+        || JSON.stringify([...extension.editorIds].sort()) !== JSON.stringify(extension.distribution.editorScopes.map(row => row.editorId).sort()) || extension.distribution.exportPolicy !== extension.exportPolicy)) throw new Error('扩展权限或内页声明与原生安装身份不一致。')
+    }
   }
   const paths = new Set<string>()
   let fileCount = 0, bytes = 0
   for await (const row of readInventory(path.join(stage, 'files.ndjson'))) {
     validateTargetName(row.path, process.platform)
-    const key = process.platform === 'linux' ? row.path : row.path.toLocaleLowerCase('und')
+    const key = process.platform === 'linux' ? row.path : row.path.normalize('NFC').toLocaleLowerCase('und')
     if (paths.has(key)) throw new Error('目标平台存在文件名冲突：' + row.path)
     paths.add(key)
     if (row.type === 'file') { fileCount++; bytes += row.bytes ?? 0 }
@@ -125,11 +159,28 @@ async function readManifest(stage: string) {
     const file = resolvePortablePath(path.join(stage, 'workbench'), row.path), info = await lstat(file)
     if (row.type === 'file' ? !info.isFile() || info.size !== row.bytes || await hashFile(file) !== row.sha256
       : row.type === 'directory' ? !info.isDirectory() : row.type !== 'symlink' || !info.isSymbolicLink()) throw new Error('完整包文件类型或摘要不匹配：' + row.path)
+    if (row.type === 'symlink') {
+      const actual = path.resolve(path.dirname(file), await readlink(file))
+      if (portableRelativePath(path.join(stage, 'workbench'), actual) !== row.target) throw new Error('完整包链接关系与清单不一致：' + row.path)
+    }
   }
+  let actualEntries = 0
+  for await (const row of walkFiles(path.join(stage, 'workbench'))) {
+    const key = process.platform === 'linux' ? row.path : row.path.normalize('NFC').toLocaleLowerCase('und')
+    if (!paths.has(key)) throw new Error('完整包含清单外的文件：' + row.path)
+    actualEntries++
+  }
+  if (actualEntries !== paths.size) throw new Error('完整包目录清单不完整。')
   const envelope = JSON.parse(await readFile(path.join(stage, 'workbench/.bay/workbench.json'), 'utf8')) as FileWorkbenchV1
   if (![1, 2].includes(envelope.schemaVersion) || envelope.record.workbenchId !== manifest.workbenchId) throw new Error('工作台定义与清单身份不匹配。')
   validateWorkbenchRelations(envelope.record)
+  if (manifest.version === 6) for (const editor of completeExternalEditors(envelope.record)) {
+    if (!manifest.extensions!.some(extension => extension.editorIds.includes(editor))) throw new Error('V6 缺少内页的扩展锁：' + editor)
+  }
   const native = JSON.parse(await readFile(path.join(stage, 'native/native-sessions.json'), 'utf8')) as NativeSessionSnapshot
+  if (native.version !== 1 || !Array.isArray(native.sessions) || !Array.isArray(native.attachments)) throw new Error('原生会话快照格式无效。')
+  for (const row of native.sessions) if (await hashFile(resolvePortablePath(path.join(stage, 'native'), row.log)) !== row.sha256) throw new Error('原生会话日志摘要不匹配：' + row.key)
+  for (const row of native.attachments) if (await hashFile(resolvePortablePath(path.join(stage, 'native'), row.file)) !== row.sha256) throw new Error('会话附件缺失或摘要不匹配。')
   for (const key of Object.keys(envelope.record.sessionCatalog ?? {})) if (!manifest.sessionKeys[key] || !native.sessions.some(row => row.key === manifest.sessionKeys[key])) throw new Error('完整包缺少对话历史：' + key)
   if (envelope.record.projectModelVersion) hydrateProjects(path.join(stage, 'workbench'), envelope.record)
   let taskCount = 0
@@ -176,8 +227,17 @@ function importedWorkbenchId(directory: HostWorkbenchDirectory, sourceId: string
   return `${sourceId.slice(0, 150)}-import-${jobId.slice(0, 12)}`
 }
 
-/** V5 is a complete, inert snapshot. Native runtime activation never happens during import. */
+/** V5/V6 remain inert until validation and publication. Installation is a separate explicit action. */
 export function installWorkbenchCompleteRoute(connection: HostConnectionHandle, options: CompleteOptions) {
+  // A route/HMR reload is not a Host restart. Keep the epoch on the process object.
+  const epochKey = Symbol.for('dsh-bay.complete.host-boot-id')
+  const processEpoch = process as typeof process & { [key: symbol]: string | undefined }
+  const bootId = options.bootId ?? (processEpoch[epochKey] ??= randomUUID())
+  const migrations = options.migrations ?? new CompleteMigrationRegistry()
+  const platform = (value: unknown): CompletePlatform => {
+    if (!COMPLETE_PLATFORMS.includes(value as CompletePlatform)) throw new Error('请选择 Windows、macOS 或 Linux。')
+    return value as CompletePlatform
+  }
   const running = new Map<string, { abort: AbortController; promise: Promise<CompletePackageJob> }>()
   const serial = new Map<string, Promise<unknown>>()
   let disposed = false
@@ -191,18 +251,16 @@ export function installWorkbenchCompleteRoute(connection: HostConnectionHandle, 
   const text = (input: Record<string, unknown>, key: string) => { if (typeof input[key] !== 'string' || !input[key]) throw new PackageRequestError(400, '缺少字段：' + key); return input[key] as string }
   const actor = (request: Request) => {
     const context = options.access?.resolve(request.headers) ?? desktop
-    if (context.actor === 'lan-guest') throw new PackageRequestError(403, '完整工作台包仅供主控操作。')
     return context
   }
   const authorize = (context: WorkbenchAccessContext, workbenchId: string, write = true) => {
     // Importing the first workbench is a desktop operation without an existing scope.
     if (context.actor === 'desktop' && workbenchId === '') return
-    if (context.actor === 'lan-guest' || context.actor === 'browser-owner' && context.workbenchId !== workbenchId) throw new PackageRequestError(403, '不能访问其他工作台的完整包。')
+    if (context.actor !== 'desktop' && context.workbenchId !== workbenchId) throw new PackageRequestError(403, '不能访问其他工作台的完整包。')
     options.access?.authorize(context, write ? 'package' : 'view', { workbenchId })
   }
   const importScope = (input: Record<string, unknown>, context: WorkbenchAccessContext) => context.actor === 'desktop' && (input.workbenchId === undefined || input.workbenchId === '') ? '' : text(input, 'workbenchId')
   const owned = (context: WorkbenchAccessContext, value: { ownerAccessId?: string; workbenchId: string; accessWorkbenchId?: string }) => {
-    if (context.actor === 'browser-owner' && context.accessId !== value.ownerAccessId) throw new PackageRequestError(403, '此作业属于另一个主控窗口。')
     const id = value.accessWorkbenchId ?? value.workbenchId
     // Standalone desktop imports may not have a registered source workbench.
     if (context.actor !== 'desktop' || options.directory.getSnapshot().value.workbenches[id]) authorize(context, id, false)
@@ -217,6 +275,9 @@ export function installWorkbenchCompleteRoute(connection: HostConnectionHandle, 
   const readDirectory = (id: string, context: WorkbenchAccessContext) => { const value = readRecord<StoredDirectoryRequest>(directoryRequestPath(options.profile, id)); if (!value) throw new PackageRequestError(404, '找不到目录选择请求。'); owned(context, value); return value }
   const view = (job: CompletePackageJob): CompletePackageJobView => ({ version: job.version, id: job.id, kind: job.kind, requestId: job.requestId, workbenchId: job.workbenchId,
     stage: job.stage, files: job.files, bytes: job.bytes, updatedAt: job.updatedAt, ...(job.error ? { error: job.error } : {}), report: job.report,
+    ...(job.targetPlatform ? { targetPlatform: job.targetPlatform } : {}), ...(job.packageVersion ? { packageVersion: job.packageVersion } : {}),
+    ...(job.extensions ? { extensions: job.extensions } : {}), ...(job.extensionPlanDigest ? { extensionPlanDigest: job.extensionPlanDigest } : {}),
+    ...(job.restartTransactionId ? { restartTransactionId: job.restartTransactionId } : {}), ...(job.overview ? { overview: job.overview } : {}),
     ...(job.name ? { name: job.name } : {}), ...(job.targetPath || job.parentPath && job.folderName ? { targetDisplayPath: job.targetPath ?? path.join(job.parentPath!, job.folderName!) } : {}),
     running: running.has(job.id), recoverable: job.stage !== 'complete' && !running.has(job.id) && !job.replacementDirectoryId,
     canChangeDestination: job.kind === 'import' && !!job.uploadId && !job.stageDir && !job.sessionMap && !job.replacementDirectoryId && ['failed', 'cancelled'].includes(job.stage) && !running.has(job.id) })
@@ -240,19 +301,35 @@ export function installWorkbenchCompleteRoute(connection: HostConnectionHandle, 
   } }
   const folder = (name: string) => { if (!name.trim() || name.includes('/') || name.includes('\\') || name === '.' || name === '..') throw new PackageRequestError(400, '文件夹名称必须是一个名称，不能包含路径。'); validateTargetName(name, process.platform); return name }
   const failed = (job: CompletePackageJob, error: unknown, signal?: AbortSignal) => update(options.profile, job, { stage: signal?.aborted ? 'cancelled' : 'failed', error: message(error), report: { ...job.report, data: 'blocked', blockers: [message(error)] } })
+  const externalPages = (record: FileWorkbenchV1['record']) => {
+    const editors = new Set(completeExternalEditors(record))
+    return areasOf(record.document.root).flatMap(area => area.moduleHistory.filter(page => editors.has(page.editorId)))
+  }
+  const applyPageStates = (record: FileWorkbenchV1['record'], states: CompletePageState[]) => {
+    const pages = externalPages(record)
+    if (!Array.isArray(states) || states.length !== pages.length || new Set(states.map(row => row.moduleInstanceId)).size !== states.length) throw new Error('内页配置迁移清单不完整。')
+    for (const page of pages) {
+      const row = states.find(value => value.moduleInstanceId === page.moduleInstanceId && value.editorId === page.editorId)
+      if (!row || !portableStateSafe(row.state)) throw new Error('缺少有效内页配置：' + page.editorId)
+      page.state = structuredClone(row.state)
+      delete page.sessionStates; delete page.sessionStateOrder
+    }
+  }
 
   const exportPackage = async (input: Record<string, unknown>, existing?: CompletePackageJob, signal?: AbortSignal) => {
     const workbenchId = String(input.workbenchId)
     const root = options.directory.rootPath(workbenchId)
     const requestId = typeof input.requestId === 'string' ? input.requestId : randomUUID()
     const prior = existing ?? persistedJobForRequest(options.profile, requestId)
+    const targetPlatform = platform(input.targetPlatform ?? prior?.targetPlatform ?? process.platform)
+    if (prior?.targetPlatform && prior.targetPlatform !== targetPlatform) throw new PackageRequestError(409, '重复导出请求的目标系统不同。')
     if (prior && (prior.kind !== 'export' || prior.workbenchId !== workbenchId || input.path && path.resolve(String(input.path)) !== path.resolve(prior.path))) throw new PackageRequestError(409, '重复导出请求与原作业不同。')
     if (prior?.kind === 'export' && prior.stage === 'complete') return prior
     const archive = prior?.path ?? String(input.path || path.join(jobDirectory(options.profile), 'archives', randomUUID() + '.tar.gz'))
     const relativeArchive = path.relative(root, archive)
     if (!relativeArchive.startsWith('..' + path.sep) && relativeArchive !== '..' && !path.isAbsolute(relativeArchive)) throw new PackageRequestError(400, '导出文件必须位于工作台根目录之外。')
     const job: CompletePackageJob = prior ?? {
-      version: 5, id: randomUUID(), kind: 'export', requestId, workbenchId, path: archive,
+      version: 6, id: randomUUID(), kind: 'export', requestId, workbenchId, path: archive, targetPlatform,
       stage: 'preflight', files: 0, bytes: 0, updatedAt: Date.now(),
       report: { data: 'pending', environment: 'unchecked', tasks: 'waiting-for-user', blockers: [], exclusions: [], environmentSteps: ['导入后由用户主动恢复插件、模型和工具链。'] },
     }
@@ -268,25 +345,42 @@ export function installWorkbenchCompleteRoute(connection: HostConnectionHandle, 
       delete job.error
       update(options.profile, job, { stage: 'snapshot', files: 0, bytes: 0, report: { ...job.report, data: 'pending', blockers: [] } })
       const definition = options.directory.definition(workbenchId)
+      if (externalPages(definition.record).length && (!job.exportPageStates || job.exportDefinitionRevision !== definition.revision)) throw new Error('请在分享页面重新准备扩展内页配置；工作台定义可能已改变。')
+      const extensionService = options.extensions?.()
+      if (completeExternalEditors(definition.record).length && !extensionService) throw new Error('扩展分发服务尚未就绪，无法完整导出扩展内页。')
       await copyTree(root, workbench, {
         exclude: relative => relative.startsWith('.bay/writer.lock') || relative.startsWith('.bay/creation.json'),
         ...(signal ? { signal } : {}), progress: progress(job),
       })
-      const paused = { ...definition, record: { ...definition.record, executionPaused: true } }
+      const paused = structuredClone({ ...definition, record: { ...definition.record, executionPaused: true } })
+      if (job.exportPageStates) applyPageStates(paused.record, job.exportPageStates)
       atomicJson(path.join(workbench, '.bay', 'workbench.json'), paused)
       await writeInventory(workbench, path.join(stage, 'files.ndjson'), signal)
+      await checkInventoryPlatform(path.join(stage, 'files.ndjson'), targetPlatform)
       const ids = options.directory.sessionMap(workbenchId)
-      const portability = new NativeSessionPortability(options.persistence, options.attachments)
-      await portability.exportSnapshot(Object.values(ids), root, native)
+      const eventPackages = new Set<string>()
+      const portability = new NativeSessionPortability(options.persistence, options.attachments, migrations.exportAdapters(name => eventPackages.add(name)))
+      await portability.exportSnapshot(Object.values(ids), root, native, signal)
+      if (eventPackages.size && !extensionService) throw new Error('会话事件依赖的扩展分发服务尚未就绪。')
+      const extensions = await extensionService?.collect(definition.record, stage, targetPlatform, [...eventPackages]) ?? []
+      migrations.assertExportOwners(extensions, eventPackages)
+      migrations.adapters(extensions) // Verify that exported locks name the registered migration builds.
+      await writeFile(path.join(stage, 'extension-data.json'), JSON.stringify(await migrations.exportData(extensions, { workbenchId, root })), 'utf8')
       signal?.throwIfAborted()
       if (options.orchestration) {
         const portable = exportTaskSnapshot(definition.record, options.orchestration.load(workbenchId), ids)
         await writeFile(path.join(stage, 'orchestration.json'), JSON.stringify(portable), 'utf8')
       }
       await writeFile(meta, JSON.stringify({
-        type: 'workbench-complete', version: 5, schemaVersion: 5, workbenchId,
+        type: 'workbench-complete', version: 6, schemaVersion: 6, workbenchId,
+        sourcePlatform: platform(process.platform), targetPlatform, extensions,
+        inventorySha256: await hashFile(path.join(stage, 'files.ndjson')), nativeSha256: await hashFile(path.join(native, 'native-sessions.json')),
+        extensionDataSha256: await hashFile(path.join(stage, 'extension-data.json')),
+        exclusions: ['.bay/writer.lock', '.bay/creation.json'],
+        compatibility: { checkedPlatform: targetPlatform, checkedAt: Date.now(), files: 'passed', sessionEvents: 'passed' },
         record: paused.record, sessionKeys: ids, generatedAt: Date.now(),
-        workspacePaths: Object.fromEntries(Object.values(options.directory.getSnapshot().value.workbenches[workbenchId]!.projects ?? options.directory.getSnapshot().value.workbenches[workbenchId]!.areaProjects ?? {}).filter(project => project.workspaceId).map(project => [project.workspaceId!, project.relativePath])),
+        workspacePaths: Object.fromEntries([...Object.values(options.directory.getSnapshot().value.workbenches[workbenchId]!.projects ?? {}), ...Object.values(options.directory.getSnapshot().value.workbenches[workbenchId]!.areaProjects ?? {})]
+          .filter(project => project.workspaceId).map(project => [project.workspaceId!, project.relativePath])),
         packageSha: sha(workbenchId + ':' + requestId), orchestration: options.orchestration ? 'orchestration.json' : undefined,
         ...(options.orchestration ? { orchestrationSha256: await hashFile(path.join(stage, 'orchestration.json')) } : {}),
       }), 'utf8')
@@ -294,10 +388,12 @@ export function installWorkbenchCompleteRoute(connection: HostConnectionHandle, 
       update(options.profile, job, { stage: 'files', bytes: job.bytes, manifestSha256: await hashFile(meta) })
       await mkdir(path.dirname(archive), { recursive: true })
       const output = archive + '.partial'
-      await pipeline(c({ cwd: stage, gzip: true, portable: true, noMtime: true, follow: false }, ['manifest.json', 'files.ndjson', 'workbench', 'native', ...(options.orchestration ? ['orchestration.json'] : [])]), createWriteStream(output), ...(signal ? [{ signal }] : []))
+      await pipeline(c({ cwd: stage, gzip: true, portable: true, noMtime: true, follow: false,
+        onWriteEntry: entry => { if (entry.type === 'SymbolicLink' && entry.linkpath && path.isAbsolute(entry.linkpath)) entry.linkpath = path.relative(path.dirname(path.join(stage, entry.path)), entry.linkpath).split(path.sep).join('/') },
+      }, ['manifest.json', 'files.ndjson', 'extension-data.json', 'workbench', 'native', ...(existsSync(path.join(stage, 'extensions')) ? ['extensions'] : []), ...(options.orchestration ? ['orchestration.json'] : [])]), createWriteStream(output), ...(signal ? [{ signal }] : []))
       signal?.throwIfAborted()
       await rename(output, archive)
-      update(options.profile, job, { stage: 'complete', report: { ...job.report, data: 'complete' } })
+      update(options.profile, job, { version: 6, packageVersion: 6, targetPlatform, archiveSha256: await hashFile(archive), stage: 'complete', report: { ...job.report, data: 'complete', exclusions: ['.bay/writer.lock', '.bay/creation.json'] } })
       return job
     } catch (error) {
       failed(job, error, signal)
@@ -305,19 +401,29 @@ export function installWorkbenchCompleteRoute(connection: HostConnectionHandle, 
     } finally { await rm(stage, { recursive: true, force: true }) }
   }
 
+  const finishImport = async (job: CompletePackageJob, manifest: CompleteManifest) => {
+    update(options.profile, job, { stage: 'complete', report: { ...job.report, data: 'complete', environment: 'needs-setup', blockers: [], exclusions: manifest.exclusions ?? [], environmentSteps: ['扩展与数据已核验；继续任务前请确认本机模型连接和工具链。'] } })
+    // A cleanup failure must not turn an already published workbench into a failed import.
+    if (job.stageDir) await rm(job.stageDir, { recursive: true, force: true }).catch(() => {})
+    return job
+  }
   const resumeImport = async (job: CompletePackageJob, signal?: AbortSignal): Promise<CompletePackageJob> => {
     signal?.throwIfAborted()
     if (job.kind !== 'import' || !job.stageDir || !job.targetPath || !job.parentPath || !job.folderName) throw new Error('导入作业缺少可恢复信息。')
     const stage = job.stageDir
     if (!existsSync(stage)) throw new Error('导入暂存目录已丢失，无法继续该作业。')
-    if (job.archiveSha256 !== undefined && await hashFile(job.path) !== job.archiveSha256) throw new Error('导入归档已被替换，拒绝继续。')
-    const { manifest, manifestSha256 } = await readManifest(stage)
-    if (job.manifestSha256 !== undefined && job.manifestSha256 !== manifestSha256) throw new Error('导入清单已发生变化，拒绝继续。')
+    if (!job.archiveSha256 || await hashFile(job.path) !== job.archiveSha256) throw new Error('导入归档已变化或缺少原摘要。请重新导入，原暂存已保留。')
+    const { manifest, manifestSha256, overview } = await readManifest(stage)
+    if (!job.manifestSha256 || job.manifestSha256 !== manifestSha256) throw new Error('导入清单已变化或缺少原摘要。请重新导入，原暂存已保留。')
     const target = job.targetPath
+    if (path.resolve(target) !== path.resolve(job.parentPath, folder(job.folderName)) || await realpath(job.parentPath) !== job.parentPath) throw new Error('导入目标位置已改变。')
     const targetStage = target + '.importing-' + job.id
-    await realpath(job.parentPath)
-    update(options.profile, job, { stage: 'files' })
-    if (!existsSync(target)) await copyTree(path.join(stage, 'workbench'), targetStage, { ...(signal ? { signal } : {}), progress: progress(job) })
+    update(options.profile, job, { version: 6, packageVersion: manifest.version, overview, stage: 'files' })
+    if (!job.filesPrepared && !existsSync(target)) {
+      update(options.profile, job, { files: 0, bytes: 0 })
+      await copyTree(path.join(stage, 'workbench'), targetStage, { ...(signal ? { signal } : {}), progress: progress(job) })
+      update(options.profile, job, { filesPrepared: true })
+    }
     signal?.throwIfAborted()
     const envelope = JSON.parse(await readFile(path.join(stage, 'workbench', '.bay', 'workbench.json'), 'utf8')) as FileWorkbenchV1
     envelope.record.workbenchId = job.workbenchId
@@ -327,25 +433,73 @@ export function installWorkbenchCompleteRoute(connection: HostConnectionHandle, 
     const sessionMap = job.sessionMap === undefined
       ? Object.fromEntries(snapshot.sessions.map(row => [row.key, baySessionId('import:' + job.id + ':' + row.key)]))
       : { ...job.sessionMap }
+    if (Object.keys(sessionMap).length !== snapshot.sessions.length || new Set(Object.values(sessionMap)).size !== snapshot.sessions.length
+      || snapshot.sessions.some(row => sessionMap[row.key] !== baySessionId('import:' + job.id + ':' + row.key))) throw new Error('导入会话映射不一致，请保留此作业并重新导入。')
+    update(options.profile, job, { sessionMap, sourceRoot: snapshot.sourceRoot })
     const logicalSessions = Object.fromEntries(Object.entries(manifest.sessionKeys).map(([key, source]) => {
       if (!sessionMap[source]) throw new Error('原生会话映射缺失：' + key)
       return [key, sessionMap[source]]
     })) as Record<string, string>
+    if (job.publicationReady && options.directory.getSnapshot().value.workbenches[job.workbenchId]) {
+      const current = options.directory.sessionMap(job.workbenchId)
+      if (options.directory.rootPath(job.workbenchId) !== target || Object.keys(current).length !== Object.keys(logicalSessions).length
+        || Object.entries(logicalSessions).some(([key, id]) => current[key] !== id)) throw new Error('已发布工作台与导入作业身份不一致。')
+      return finishImport(job, manifest)
+    }
+    const extensionLocks = manifest.extensions ?? job.extensions?.map(row => row.extension) ?? []
+    if (manifest.version === 5 && completeExternalEditors(envelope.record).length && !job.extensions) {
+      update(options.profile, job, { stage: 'awaiting-extensions', report: { ...job.report, environment: 'needs-setup', blockers: ['V5 没有扩展锁。请在 DSH 客户端将内页映射到本机已安装扩展后继续。'] } })
+      return job
+    }
+    const checks = extensionLocks.length
+      ? await options.extensions?.()?.check(extensionLocks, platform(process.platform), stage) ?? extensionLocks.map(extension => ({ extension, state: 'manual' as const, message: 'Host 扩展服务尚未就绪。' }))
+      : []
+    const extensionPlanDigest = sha(JSON.stringify(extensionLocks))
+    update(options.profile, job, { extensions: checks, extensionPlanDigest })
+    const unresolved = checks.filter(row => row.state !== 'ready')
+    if (job.restartRequiredFromBoot === bootId) {
+      update(options.profile, job, { stage: 'awaiting-restart' })
+      return job
+    }
+    if (unresolved.length || externalPages(envelope.record).length && job.extensionConsentDigest !== extensionPlanDigest) {
+      const stage = unresolved.some(row => ['conflict', 'manual', 'migration-missing'].includes(row.state)) ? 'blocked' : 'awaiting-extensions'
+      update(options.profile, job, { stage, report: { ...job.report, environment: 'needs-setup', blockers: unresolved.map(row => row.message ?? row.extension.packageName) } })
+      return job
+    }
+    const adapters = migrations.adapters(extensionLocks)
+    if (existsSync(target)) {
+      const current = JSON.parse(await readFile(path.join(target, '.bay', 'workbench.json'), 'utf8')) as FileWorkbenchV1
+      if (current.record.workbenchId !== job.workbenchId) throw new Error('导入目标已被其他工作台占用。')
+    }
     const taskSnapshot = manifest.orchestration ? JSON.parse(await readFile(path.join(stage, manifest.orchestration), 'utf8')) as CompleteTaskSnapshot : undefined
     if (taskSnapshot && !options.orchestration) throw new Error('此宿主不能恢复完整任务快照，请启用 Bay Agent 编排存储。')
     const tasks = taskSnapshot ? restoreTaskSnapshot(taskSnapshot, envelope.record, logicalSessions, job.updatedAt) : undefined
     if (!existsSync(target)) await rename(targetStage, target)
-    const workspaces: Record<string, string> = {}
+    const workspaces: Record<string, string> = job.workspaceMap ?? {}
     for (const [source, relative] of Object.entries(manifest.workspacePaths ?? {})) {
       validateTargetName(relative, process.platform)
-      workspaces[source] = (await options.workspaces.create(path.join(target, ...relative.split('/')))).id
+      if (!workspaces[source]) {
+        workspaces[source] = (await options.workspaces.create(path.join(target, ...relative.split('/')))).id
+        update(options.profile, job, { workspaceMap: workspaces })
+      }
     }
     remapCompletePageReferences(envelope.record, { ...sessionMap, ...logicalSessions }, workspaces)
     atomicJson(path.join(target, '.bay', 'workbench.json'), envelope)
     update(options.profile, job, { stage: 'sessions', sessionMap, sourceRoot: snapshot.sourceRoot, manifestSha256 })
-    const native = new NativeSessionPortability(options.persistence, options.attachments)
+    const native = new NativeSessionPortability(options.persistence, options.attachments, adapters)
     signal?.throwIfAborted()
-    await native.importSnapshot(snapshot, path.join(stage, 'native'), { sessionIds: sessionMap, sourceRoot: snapshot.sourceRoot, targetRoot: target })
+    const remap = { sessionIds: sessionMap, sourceRoot: snapshot.sourceRoot, targetRoot: target }
+    await native.importSnapshot(snapshot, path.join(stage, 'native'), remap, signal)
+    update(options.profile, job, { stage: 'extension-data' })
+    if (manifest.version === 6) await migrations.restoreData(extensionLocks, JSON.parse(await readFile(path.join(stage, 'extension-data.json'), 'utf8')), { jobId: job.id, workbenchId: job.workbenchId, root: target, remap })
+    if (externalPages(envelope.record).length) {
+      if (!job.pageStatesRestored) {
+        update(options.profile, job, { stage: 'awaiting-page-state', report: { ...job.report, blockers: [] } })
+        return job
+      }
+      applyPageStates(envelope.record, JSON.parse(await readFile(path.join(stage, 'restored-pages.json'), 'utf8')))
+      atomicJson(path.join(target, '.bay', 'workbench.json'), envelope)
+    }
     signal?.throwIfAborted()
     update(options.profile, job, { stage: 'relations' })
     if (tasks) options.orchestration!.save(job.workbenchId, tasks)
@@ -353,11 +507,22 @@ export function installWorkbenchCompleteRoute(connection: HostConnectionHandle, 
       await rename(targetStage, target)
     }
     signal?.throwIfAborted()
-    update(options.profile, job, { stage: 'publish' })
+    update(options.profile, job, { stage: 'verifying' })
+    validateWorkbenchRelations(envelope.record)
+    for await (const entry of readInventory(path.join(stage, 'files.ndjson'))) {
+      signal?.throwIfAborted()
+      if (entry.path === '.bay/workbench.json') continue // Rewritten local identities are verified separately.
+      const file = resolvePortablePath(target, entry.path), info = await lstat(file)
+      if (entry.type === 'file' && (!info.isFile() || await hashFile(file) !== entry.sha256) || entry.type === 'directory' && !info.isDirectory()) throw new Error('恢复文件校验失败：' + entry.path)
+      if (entry.type === 'symlink' && (!info.isSymbolicLink() || portableRelativePath(target, path.resolve(path.dirname(file), await readlink(file))) !== entry.target)) throw new Error('恢复链接校验失败：' + entry.path)
+    }
+    if (extensionLocks.length) {
+      const finalChecks = await options.extensions?.()?.check(extensionLocks, platform(process.platform), stage)
+      if (!finalChecks || finalChecks.some(row => row.state !== 'ready')) throw new Error('扩展状态在恢复期间改变，工作台尚未发布。')
+    }
+    update(options.profile, job, { stage: 'publish', publicationReady: true })
     await options.directory.publishImported(target, envelope, logicalSessions)
-    update(options.profile, job, { stage: 'complete', report: { ...job.report, data: 'complete', environment: 'needs-setup' } })
-    await rm(stage, { recursive: true, force: true })
-    return job
+    return finishImport(job, manifest)
   }
 
   const importPackage = async (input: Record<string, unknown>, existing?: CompletePackageJob, signal?: AbortSignal) => {
@@ -379,7 +544,7 @@ export function installWorkbenchCompleteRoute(connection: HostConnectionHandle, 
     if (existsSync(targetPath)) throw new Error('目标工作台文件夹已存在，请选择其他名称。')
     const job: CompletePackageJob = {
       ...prior,
-      version: 5, id, kind: 'import', requestId, workbenchId, path: archive, parentPath, folderName,
+      version: 6, packageVersion: checked.manifest.version, id, kind: 'import', requestId, workbenchId, path: archive, parentPath, folderName,
       stageDir, targetPath, archiveSha256, manifestSha256: checked.manifestSha256, stage: 'snapshot', files: 0, bytes: 0, updatedAt: Date.now(),
       report: { data: 'pending', environment: 'unchecked', tasks: 'waiting-for-user', blockers: [], exclusions: [], environmentSteps: ['请在导入完成后主动检查插件和模型映射。'] },
     }
@@ -406,7 +571,8 @@ export function installWorkbenchCompleteRoute(connection: HostConnectionHandle, 
   const jobForStart = (input: Record<string, unknown>, context: WorkbenchAccessContext, kind: 'export' | 'import', location: { archive: string; parentPath?: string; folderName?: string; uploadId?: string }) => {
     const workbenchId = kind === 'import' ? importScope(input, context) : text(input, 'workbenchId'), requestId = validId(text(input, 'requestId'))
     const name = typeof input.name === 'string' ? input.name.trim().slice(0, 160) : undefined
-    const inputDigest = sha(JSON.stringify({ kind, workbenchId, uploadId: location.uploadId, parentPath: location.parentPath, folderName: location.folderName, ...(name ? { name } : {}) }))
+    const targetPlatform = kind === 'export' ? platform(input.targetPlatform ?? process.platform) : undefined
+    const inputDigest = sha(JSON.stringify({ kind, workbenchId, uploadId: location.uploadId, parentPath: location.parentPath, folderName: location.folderName, ...(name ? { name } : {}), ...(targetPlatform ? { targetPlatform } : {}), ...(kind === 'export' ? { pageStates: input.pageStates, definitionRevision: input.definitionRevision } : {}) }))
     const prior = persistedJobForRequest(options.profile, requestId)
     if (prior) {
       owned(context, prior)
@@ -415,7 +581,8 @@ export function installWorkbenchCompleteRoute(connection: HostConnectionHandle, 
       return prior
     }
     authorize(context, workbenchId)
-    const job: CompletePackageJob = { version: 5, id: randomUUID(), kind, requestId, workbenchId, accessWorkbenchId: workbenchId, ownerAccessId: context.accessId,
+    const job: CompletePackageJob = { version: 6, id: randomUUID(), kind, requestId, workbenchId, accessWorkbenchId: workbenchId, ownerAccessId: context.accessId, ...(targetPlatform ? { targetPlatform } : {}),
+      ...(kind === 'export' && Array.isArray(input.pageStates) ? { exportPageStates: input.pageStates as CompletePageState[], exportDefinitionRevision: Number(input.definitionRevision) } : {}),
       inputDigest, path: location.archive, ...(name ? { name } : {}), ...(location.parentPath ? { parentPath: location.parentPath } : {}), ...(location.folderName ? { folderName: location.folderName } : {}), ...(location.uploadId ? { uploadId: location.uploadId } : {}),
       stage: 'queued', files: 0, bytes: 0, updatedAt: Date.now(), report: { data: 'pending', environment: 'unchecked', tasks: 'waiting-for-user', blockers: [], exclusions: [], environmentSteps: ['导入后由用户主动恢复插件、模型和工具链。'] } }
     saveJob(options.profile, job)
@@ -518,7 +685,11 @@ export function installWorkbenchCompleteRoute(connection: HostConnectionHandle, 
           const archiveSha256 = await hashFile(uploadFilePath(options.profile, id))
           const checked = await ephemeralPreflight(uploadFilePath(options.profile, id))
           try {
-            upload.preflight = { valid: true, workbenchId: checked.manifest.workbenchId, sessionCount: Object.keys(checked.manifest.sessionKeys).length, manifestSha256: checked.manifestSha256, overview: checked.overview }
+            upload.preflight = { valid: true, workbenchId: checked.manifest.workbenchId, sessionCount: Object.keys(checked.manifest.sessionKeys).length, manifestSha256: checked.manifestSha256, overview: checked.overview,
+              packageVersion: checked.manifest.version, recipientPlatform: platform(process.platform),
+              ...(checked.manifest.sourcePlatform ? { sourcePlatform: checked.manifest.sourcePlatform } : {}), ...(checked.manifest.targetPlatform ? { targetPlatform: checked.manifest.targetPlatform } : {}),
+              warnings: checked.manifest.version === 5 ? ['V5 不含扩展锁与离线制品，需要人工映射扩展。'] : checked.manifest.targetPlatform !== process.platform ? ['接收系统与导出目标不同，已按当前系统重新检查文件。'] : [],
+              extensions: await options.extensions?.()?.check(checked.manifest.extensions ?? [], platform(process.platform), checked.stage) ?? [] }
             upload.archiveSha256 = archiveSha256; upload.state = 'ready'; upload.updatedAt = Date.now(); atomicJson(uploadMetaPath(options.profile, id), upload)
             return upload.preflight
           }
@@ -575,9 +746,73 @@ export function installWorkbenchCompleteRoute(connection: HostConnectionHandle, 
           update(options.profile, job, { replacementDirectoryId: id, stage: 'cancelled' })
           return { selection: publicDirectory(selection), upload: publicUpload(upload), preflight: upload.preflight }
         })
+      } else if (action === 'export-page-input') {
+        const id = text(input, 'workbenchId'); authorize(context, id)
+        const definition = options.directory.definition(id)
+        value = { revision: definition.revision, pages: externalPages(definition.record) }
+      } else if (action === 'page-restore-input' || action === 'restore-pages') {
+        const job = readJob(text(input, 'id'), context); authorizeJobMutation(context, job)
+        value = await lock('job:' + job.id, async () => {
+          if (running.has(job.id) || job.stage !== 'awaiting-page-state' || !job.targetPath || !job.stageDir) throw new Error('此作业尚未准备好恢复内页。')
+          const envelope = JSON.parse(await readFile(path.join(job.targetPath, '.bay/workbench.json'), 'utf8')) as FileWorkbenchV1
+          if (action === 'page-restore-input') return { pages: externalPages(envelope.record), digest: sha(JSON.stringify(envelope)) }
+          if (input.digest !== sha(JSON.stringify(envelope))) throw new Error('待恢复的内页已改变，请重新检查。')
+          applyPageStates(envelope.record, input.pageStates as CompletePageState[])
+          atomicJson(path.join(job.stageDir, 'restored-pages.json'), input.pageStates)
+          update(options.profile, job, { pageStatesRestored: true })
+          return launch(job)
+        })
+      } else if (action === 'map-v5-extensions') {
+        if (context.actor !== 'desktop') throw new PackageRequestError(403, '扩展映射请在 DSH 客户端确认。')
+        const job = readJob(text(input, 'id'), context)
+        authorizeJobMutation(context, job)
+        value = await lock('job:' + job.id, async () => {
+          if (running.has(job.id) || job.packageVersion !== 5 || !job.stageDir || job.stage === 'complete') throw new Error('此作业不能映射 V5 扩展。')
+          const checked = await readManifest(job.stageDir)
+          if (checked.manifestSha256 !== job.manifestSha256) throw new Error('导入清单已改变。')
+          const service = options.extensions?.()
+          if (!service) throw new Error('Host 扩展分发服务尚未就绪。')
+          const envelope = JSON.parse(await readFile(path.join(job.stageDir, 'workbench/.bay/workbench.json'), 'utf8')) as FileWorkbenchV1
+          const extensions = await service.collect(envelope.record, job.stageDir, platform(process.platform))
+          update(options.profile, job, { extensions: await service.check(extensions, platform(process.platform), job.stageDir), extensionPlanDigest: sha(JSON.stringify(extensions)), stage: 'awaiting-extensions' })
+          return view(job)
+        })
+      } else if (action === 'confirm-extensions') {
+        if (context.actor !== 'desktop') throw new PackageRequestError(403, '扩展安装与权限请在 DSH 客户端确认。')
+        const job = readJob(text(input, 'id'), context)
+        authorizeJobMutation(context, job)
+        value = await lock('job:' + job.id, async () => {
+          if (running.has(job.id)) return view(job)
+          if (!job.stageDir || job.kind !== 'import' || job.stage === 'complete' || input.confirmed !== true || text(input, 'digest') !== job.extensionPlanDigest) throw new Error('请确认当前扩展清单与权限。')
+          if (await hashFile(job.path) !== job.archiveSha256 || (await readManifest(job.stageDir)).manifestSha256 !== job.manifestSha256) throw new Error('导入内容已改变。')
+          const service = options.extensions?.()
+          if (!service) throw new Error('Host 扩展安装服务尚未就绪。')
+          const extensions = job.extensions?.map(row => row.extension) ?? []
+          const checks = await service.check(extensions, platform(process.platform), job.stageDir)
+          if (checks.some(row => ['conflict', 'manual'].includes(row.state))) throw new Error('请先处理扩展版本冲突或手动安装项。')
+          const abort = new AbortController()
+          update(options.profile, job, { stage: 'installing-extensions', extensionInstallStarted: true })
+          const promise = Promise.resolve().then(async () => {
+            const result = await service.install(extensions, job.stageDir!, job.id, abort.signal)
+            if (result.consents) {
+              const current = options.directory.getSnapshot()
+              const saved = await options.directory.patch({ operation: 'set', path: ['extensionConsents'], value: { ...current.value.extensionConsents, ...result.consents }, expectedRevision: current.revision })
+              if (saved.status !== 'committed') throw new Error('扩展权限保存发生版本冲突，请重新确认扩展清单。')
+            }
+            abort.signal.throwIfAborted()
+            update(options.profile, job, { extensionConsentDigest: job.extensionPlanDigest! })
+            if (result.restartRequired) {
+              update(options.profile, job, { stage: 'awaiting-restart', restartRequiredFromBoot: bootId, ...(result.transactionId ? { restartTransactionId: result.transactionId } : {}) })
+              return job
+            }
+            return resumeImport(job, abort.signal)
+          }).catch(error => { failed(job, error, abort.signal); return job }).finally(() => running.delete(job.id))
+          running.set(job.id, { abort, promise })
+          return view(job)
+        })
       } else if (action === 'jobs') {
         const workbenchId = importScope(input, context); authorize(context, workbenchId, false)
-        value = records<CompletePackageJob>(jobDirectory(options.profile)).filter(job => input.allImports === true && context.actor === 'desktop' ? job.kind === 'import' : (job.accessWorkbenchId ?? job.workbenchId) === workbenchId && (context.actor === 'desktop' || job.ownerAccessId === context.accessId)).map(view)
+        value = records<CompletePackageJob>(jobDirectory(options.profile)).filter(job => input.allImports === true && context.actor === 'desktop' ? job.kind === 'import' : (job.accessWorkbenchId ?? job.workbenchId) === workbenchId).map(view)
       } else if (action === 'cancel') {
         const job = readJob(text(input, 'id'), context)
         authorizeJobMutation(context, job, true)
@@ -608,6 +843,10 @@ export function installWorkbenchCompleteRoute(connection: HostConnectionHandle, 
       return replyError(error)
     }
   }})
+  // Restart reconciliation never replays cancelled/failed jobs or business execution.
+  for (const job of records<CompletePackageJob>(jobDirectory(options.profile))) {
+    if (job.kind === 'import' && job.stage === 'awaiting-restart' && job.restartRequiredFromBoot !== bootId) launch(job)
+  }
   return async () => {
     disposed = true; tickets.clear()
     for (const task of running.values()) task.abort.abort(new Error('完整包服务已停止，可在下次启动后继续。'))

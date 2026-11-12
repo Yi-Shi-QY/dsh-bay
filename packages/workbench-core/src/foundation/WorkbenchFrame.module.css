@@ -68,7 +68,8 @@
   gap: 9px;
 }
 
-.browserWorkspaceIdentity strong {
+.browserWorkspaceIdentity > strong {
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -76,6 +77,47 @@
   font-size: 13px;
   font-weight: 650;
 }
+
+.browserWorkspacePath {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.browserWorkspacePath button {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 6px;
+  color: var(--dsw-alias-label-secondary);
+  background: transparent;
+  cursor: pointer;
+}
+
+.browserWorkspacePath button:hover, .browserWorkspacePath button:focus-visible {
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.browserWorkspacePathPopover {
+  position: absolute;
+  z-index: 120;
+  top: calc(100% + 8px);
+  left: 0;
+  display: grid;
+  width: min(420px, calc(100vw - 32px));
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 6px;
+  background: var(--dsw-alias-bg-layer-1);
+  box-shadow: 0 6px 24px rgb(0 0 0 / 14%);
+}
+
+.browserWorkspacePathPopover strong { font-size: 11px; color: var(--dsw-alias-label-secondary); }
+.browserWorkspacePathPopover code { overflow-wrap: anywhere; color: var(--dsw-alias-label-primary); font: 12px/1.5 ui-monospace, monospace; }
 
 .browserWorkspaceKicker {
   flex: 0 0 auto;
@@ -176,9 +218,10 @@
 
 @media (max-width: 700px) {
   .browserWorkspaceBar { flex-wrap: wrap; }
-  .browserWorkspaceIdentity { flex-basis: 100%; }
-  .browserWorkspaceBar .browserWorkspaceActions { width: 100%; justify-content: flex-end; }
-  .browserWorkspaceStatus { display: none; }
+  .browserWorkspaceIdentity { flex-basis: 100%; flex-wrap: wrap; row-gap: 5px; }
+  .browserWorkspaceIdentity > strong { flex: 1 1 140px; }
+  .browserWorkspaceBar .browserWorkspaceActions { width: 100%; flex-wrap: wrap; justify-content: flex-start; }
+  .browserWorkspaceStatus { max-width: 100%; white-space: normal; }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -21,7 +21,9 @@ import type { WorkbenchSidebarHostActionsV1 } from './workbench-sidebar-browser.
 import { WorkbenchCoreSettingsDialog, type WorkbenchCoreSettingsPage } from './WorkbenchCoreSettingsDialog.tsx'
 import type { WorkbenchToolGatewayManagerV1 } from '../tool-gateway.ts'
 import type { WorkbenchShareControllerV1 } from '../client/workbench-share-controller.ts'
-import { isWorkbenchShareGuestPage } from '../client/workbench-share-guest.ts'
+import { isWorkbenchCollaborationPage } from '../client/workbench-collaboration-page.ts'
+import { DESKTOP_WORKBENCH_SURFACE_V1 } from '../client/workbench-surface-context.ts'
+import type { WorkbenchCollaborationClientV1 } from '../client/workbench-collaboration-client.ts'
 
 // Locked DSH footer panels use 30; public menus use 100 and modals use 1000.
 const WORKBENCH_SURFACE_LAYER = 40
@@ -88,7 +90,7 @@ function useWorkbenchDesktopGeometry(): WorkbenchDesktopGeometryV1 {
 export type WorkbenchCoreInnerPageInjection =
   Pick<WorkbenchFrameProps,
     'settings' | 'editorCatalog' | 'extensionRegistry' | 'sidebarCompatibility' | 'workbenchDirectory' | 'runtimeMetrics' | 'floatingRuntime'
-     | 'connectWorkspace' | 'createWorkspaceSession' | 'createWorkspace' | 'pickDirectory' | 'openOfficialSession' | 'windowController' | 'browserView' | 'browserWorkbenchId' | 'requestBrowserReclaim' | 'toolGateway' | 'shareController' | 'bayAgent' | 'generateContextDraft' | 'conversationStatus'>
+     | 'connectWorkspace' | 'createWorkspaceSession' | 'createWorkspace' | 'pickDirectory' | 'openOfficialSession' | 'windowController' | 'surfaceContext' | 'collaborationClient' | 'requestBrowserReclaim' | 'toolGateway' | 'shareController' | 'bayAgent' | 'generateContextDraft' | 'conversationStatus'>
   & {
     modeController: WorkbenchModeControllerV1
     extensionRegistry?: import('../client/workbench-extension-registry.ts').WorkbenchExtensionRegistryV1
@@ -117,7 +119,10 @@ export function WorkbenchCoreInnerPage(props: WorkbenchCoreInnerPageProps): Reac
   return <FloatingWorkspaceContext.Provider value={runtime}><WorkbenchCoreInnerPageView {...props} floatingRuntime={runtime} /><FloatingInstanceHost runtime={runtime} /></FloatingWorkspaceContext.Provider>
 }
 function WorkbenchCoreInnerPageView(props: WorkbenchCoreInnerPageProps): ReactNode {
-  const shareGuest = isWorkbenchShareGuestPage()
+  const surfaceContext = props.surfaceContext ?? DESKTOP_WORKBENCH_SURFACE_V1
+  const browserSurface = surfaceContext.kind !== 'desktop'
+  const browserWorkbenchId = surfaceContext.kind === 'desktop' ? undefined : surfaceContext.workbenchId
+  const sharedControlPage = isWorkbenchCollaborationPage()
   const [exitError, setExitError] = useState<string>()
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsOptions, setSettingsOptions] = useState<WorkbenchSettingsOpenOptionsV1>()
@@ -154,22 +159,22 @@ function WorkbenchCoreInnerPageView(props: WorkbenchCoreInnerPageProps): ReactNo
     directory?.getSnapshot ?? (() => EMPTY_WORKBENCH_DIRECTORY_SNAPSHOT),
   )
   const [surfaceView, setSurfaceView] = useState<'home' | 'workbench'>(() => (
-    props.browserView === true || directory === undefined || directorySnapshot.openWorkbenchIds.length > 0 ? 'workbench' : 'home'
+    browserSurface || directory === undefined || directorySnapshot.openWorkbenchIds.length > 0 ? 'workbench' : 'home'
   ))
   useEffect(() => {
-    if (!directory || props.browserView) return
+    if (!directory || browserSurface) return
     const open = async (workbenchId: string) => {
-      if (!await beforeHomeLeave()) throw new Error('请先处理总览中尚未保存的修改。')
+      if (!await beforeHomeLeave()) throw new Error('\u8bf7\u5148\u5904\u7406\u603b\u89c8\u4e2d\u5c1a\u672a\u4fdd\u5b58\u7684\u4fee\u6539\u3002')
       const result = await directory.openAndSelect(workbenchId)
-      if (result.status !== 'committed') throw new Error('无法打开工作台，请检查目录和保存状态。')
+      if (result.status !== 'committed') throw new Error('\u65e0\u6cd5\u6253\u5f00\u5de5\u4f5c\u53f0\uff0c\u8bf7\u68c0\u67e5\u76ee\u5f55\u548c\u4fdd\u5b58\u72b6\u6001\u3002')
       await props.modeController.enter({ workbenchId })
       setSurfaceView('workbench')
     }
     directory.openInSurface = open
     return () => { if (directory.openInSurface === open) delete directory.openInSurface }
-  }, [directory, props.browserView, props.modeController, beforeHomeLeave])
+  }, [directory, browserSurface, props.modeController, beforeHomeLeave])
   const openSettings = useCallback((options?: WorkbenchSettingsOpenOptionsV1) => {
-    if (props.browserView !== true && directory && (options?.section === 'workbenches' || options?.section === 'sharing')) {
+    if (!browserSurface && directory && (options?.section === 'workbenches' || options?.section === 'sharing')) {
       void (async () => {
         if (!(await directory.flushBeforeLifecycleTransition?.() ?? true)) return
         if (homeNavigation.current) homeNavigation.current(options)
@@ -179,28 +184,28 @@ function WorkbenchCoreInnerPageView(props: WorkbenchCoreInnerPageProps): ReactNo
       return
     }
     setSettingsOptions(options); setSettingsOpen(true)
-  }, [props.browserView, directory])
+  }, [browserSurface, directory])
   useEffect(() => {
-    if (props.browserView === true) {
+    if (browserSurface) {
       setSurfaceView('workbench')
       return
     }
     if (directory !== undefined && directorySnapshot.openWorkbenchIds.length === 0) setSurfaceView('home')
-  }, [directory, directorySnapshot.openWorkbenchIds.length, props.browserView])
+  }, [directory, directorySnapshot.openWorkbenchIds.length, browserSurface])
   const nativePluginsPanelVisible = useSyncExternalStore(
     props.nativePluginsPanelVisible?.subscribe ?? (() => () => {}),
     props.nativePluginsPanelVisible?.getSnapshot ?? (() => false),
     props.nativePluginsPanelVisible?.getSnapshot ?? (() => false),
   )
   useLayoutEffect(() => {
-    const id = props.browserWorkbenchId ?? ('activeWorkbenchId' in directorySnapshot ? directorySnapshot.activeWorkbenchId : undefined)
-    const enabled = mode.mode === 'workbench' && !shareGuest && (!props.browserWorkbenchId || props.floatingRuntime?.hasControl?.(props.browserWorkbenchId) !== false)
+    const id = browserWorkbenchId ?? ('activeWorkbenchId' in directorySnapshot ? directorySnapshot.activeWorkbenchId : undefined)
+    const enabled = mode.mode === 'workbench' && (!browserWorkbenchId || props.floatingRuntime?.hasControl?.(browserWorkbenchId) !== false)
     props.floatingRuntime?.setSurface(enabled, enabled && !nativePluginsPanelVisible && surfaceView === 'workbench' ? id : undefined)
-  }, [props.floatingRuntime, props.browserWorkbenchId, mode.mode, surfaceView, directorySnapshot, shareGuest, nativePluginsPanelVisible])
+  }, [props.floatingRuntime, browserWorkbenchId, mode.mode, surfaceView, directorySnapshot, nativePluginsPanelVisible])
   // A browser Workbench view is its own page surface. It must not inherit the
   // Electron titlebar/sidebar offsets from the DSH desktop document.
   const measuredDesktopGeometry = useWorkbenchDesktopGeometry()
-  const desktopGeometry = props.browserView === true ? EMPTY_DESKTOP_GEOMETRY : measuredDesktopGeometry
+  const desktopGeometry = browserSurface ? EMPTY_DESKTOP_GEOMETRY : measuredDesktopGeometry
   // Native DSH tab occurrences belong to the Workbench host lifetime, not to
   // an individual React body. Defer teardown so StrictMode's effect replay
   // cannot abort a live occurrence during development, while an actual host
@@ -231,7 +236,7 @@ function WorkbenchCoreInnerPageView(props: WorkbenchCoreInnerPageProps): ReactNo
       {...(props.renderFooterActions === undefined ? {} : { renderFooterActions: props.renderFooterActions })}
       openSettings={openSettings} settingsOpen={settingsOpen} exit={() => {
       setExitError(undefined)
-      void props.modeController.exit().catch(() => setExitError('布局未能保存，请恢复连接或解决布局冲突后重试退出。'))
+      void props.modeController.exit().catch(() => setExitError('\u5e03\u5c40\u672a\u80fd\u4fdd\u5b58\uff0c\u8bf7\u6062\u590d\u8fde\u63a5\u6216\u89e3\u51b3\u5e03\u5c40\u51b2\u7a81\u540e\u91cd\u8bd5\u9000\u51fa\u3002'))
     }} />
   ), [props.modeController, props.renderFooterActions, openSettings, settingsOpen])
 
@@ -246,8 +251,8 @@ function WorkbenchCoreInnerPageView(props: WorkbenchCoreInnerPageProps): ReactNo
     }}>
       <section style={{ width: 'min(440px, calc(100% - 48px))', padding: 24, border: '1px solid var(--dsw-alias-border-l2, #d9dcdf)', borderRadius: 8, background: 'var(--dsw-alias-bg-layer-1, Canvas)', textAlign: 'center' }}>
         <span aria-hidden="true" style={{ display: 'inline-block', width: 24, height: 24, border: '2px solid var(--dsw-alias-border-l2, #d9dcdf)', borderTopColor: 'var(--dsw-alias-label-link, #1769d2)', borderRadius: '50%', animation: 'dsh-workbench-enter-spin 800ms linear infinite' }} />
-        <h1 style={{ margin: '12px 0 0', fontSize: 18, fontWeight: 600 }}>正在载入工作台</h1>
-        <p style={{ margin: '8px 0 0', color: 'var(--dsw-alias-label-secondary, #62676d)' }}>正在读取布局并恢复区域内容…</p>
+        <h1 style={{ margin: '12px 0 0', fontSize: 18, fontWeight: 600 }}>{'\u6b63\u5728\u8f7d\u5165\u5de5\u4f5c\u53f0'}</h1>
+        <p style={{ margin: '8px 0 0', color: 'var(--dsw-alias-label-secondary, #62676d)' }}>{'\u6b63\u5728\u8bfb\u53d6\u5e03\u5c40\u5e76\u6062\u590d\u533a\u57df\u5185\u5bb9\u2026'}</p>
       </section>
       <style>{'@keyframes dsh-workbench-enter-spin { to { transform: rotate(360deg); } } @media (prefers-reduced-motion: reduce) { [data-workbench-mode="entering"] span { animation: none !important; } }'}</style>
     </div>, document.body)
@@ -272,17 +277,17 @@ function WorkbenchCoreInnerPageView(props: WorkbenchCoreInnerPageProps): ReactNo
     projectNeutral: true,
     conversationResourcePolicy: settingsSnapshot.value?.interactionPolicy,
     showSessionAccentFrames: settingsSnapshot.value?.interactionPolicy?.showSessionAccentFrames !== false,
-    surfaceView: props.browserView === true ? 'workbench' : surfaceView,
-    onShowHome: props.browserView === true ? undefined : () => {
+    surfaceView: browserSurface ? 'workbench' : surfaceView,
+    onShowHome: browserSurface ? undefined : () => {
       if (homeNavigation.current) homeNavigation.current()
       else setHomeOptions(undefined)
       setSurfaceView('home')
     },
-    onShowWorkbench: props.browserView === true ? undefined : () => setSurfaceView('workbench'),
-    onImportWorkbench: props.browserView === true || shareGuest ? undefined : () => openSettings({ section: 'sharing', shareMode: 'import' }),
-    onManageEditors: shareGuest ? undefined : () => openSettings({ section: 'pages' }),
+    onShowWorkbench: browserSurface ? undefined : () => setSurfaceView('workbench'),
+    onImportWorkbench: browserSurface || sharedControlPage ? undefined : () => openSettings({ section: 'sharing', shareMode: 'import' }),
+    onManageEditors: sharedControlPage ? undefined : () => openSettings({ section: 'pages' }),
     beforeHomeLeave,
-    renderHome: directory === undefined || props.browserView === true ? null : <WorkbenchHomeCenter
+    renderHome: directory === undefined || browserSurface ? null : <WorkbenchHomeCenter
       {...props.settingsPage}
       directory={directory}
       {...(homeOptions ? { openOptions: homeOptions } : {})}
@@ -293,7 +298,7 @@ function WorkbenchCoreInnerPageView(props: WorkbenchCoreInnerPageProps): ReactNo
       registerBeforeLeave={registerHomeLeave}
       onOpenWorkbench={async workbenchId => {
         const result = await directory.openAndSelect(workbenchId)
-        if (result.status !== 'committed') throw new Error('无法打开工作台')
+        if (result.status !== 'committed') throw new Error('\u65e0\u6cd5\u6253\u5f00\u5de5\u4f5c\u53f0')
         setSurfaceView('workbench')
       }}
       onCreated={() => {
@@ -301,7 +306,7 @@ function WorkbenchCoreInnerPageView(props: WorkbenchCoreInnerPageProps): ReactNo
       }}
     />,
     embeddedDesktop: desktopGeometry.desktop,
-    ...((desktopGeometry.desktop || (props.browserView === true && !shareGuest)) ? { desktopControls: {
+    ...((desktopGeometry.desktop || browserSurface) ? { desktopControls: {
       openSettings,
     } } : {}),
   }
@@ -312,7 +317,7 @@ function WorkbenchCoreInnerPageView(props: WorkbenchCoreInnerPageProps): ReactNo
     ? { position: 'fixed', top: desktopGeometry.top, left: desktopGeometry.left, right: 0, bottom: 0, zIndex: WORKBENCH_SURFACE_LAYER }
     : { position: 'fixed', inset: 0, zIndex: WORKBENCH_SURFACE_LAYER }
 
-  return createPortal(<div data-workbench-inner-page data-workbench-mode={mode.mode} data-workbench-id={mode.workbenchId} data-workbench-desktop-content={desktopGeometry.desktop || undefined} aria-busy={mode.mode === 'exiting'} style={surfaceStyle}>
+  return createPortal(<div data-workbench-inner-page data-workbench-mode={mode.mode} data-workbench-id={mode.workbenchId} data-workbench-surface={surfaceContext.kind} data-workbench-desktop-content={desktopGeometry.desktop || undefined} aria-busy={mode.mode === 'exiting'} style={surfaceStyle}>
     <div {...(mode.mode === 'exiting' ? { inert: '' } : {})} style={{ position: 'absolute', inset: 0 }}>
       <WorkbenchFrame {...frameProps} />
     </div>
@@ -321,20 +326,20 @@ function WorkbenchCoreInnerPageView(props: WorkbenchCoreInnerPageProps): ReactNo
     }}>
       <div style={{ width: 'min(540px, calc(100% - 48px))', padding: 28, border: '1px solid currentColor', borderRadius: 8, background: 'var(--dsw-alias-bg-layer-1, Canvas)', pointerEvents: 'auto' }}>
         <strong>还没有可用的容器内页</strong>
-        <p>当前 Core 没有注册可用的内页。请打开“工作台设置”检查 Core 版本；功能扩展需从受信任目录导入。</p>
-        {shareGuest ? null : <button type="button" onClick={() => openSettings()}><IconSettingsOutlineMedium size={16} /> 工作台设置</button>}
+        <p>{'\u5f53\u524d Core \u6ca1\u6709\u6ce8\u518c\u53ef\u7528\u7684\u5185\u9875\u3002\u8bf7\u6253\u5f00\u201c\u5de5\u4f5c\u53f0\u8bbe\u7f6e\u201d\u68c0\u67e5 Core \u7248\u672c\uff1b\u529f\u80fd\u6269\u5c55\u9700\u4ece\u53d7\u4fe1\u4efb\u76ee\u5f55\u5bfc\u5165\u3002'}</p>
+        {sharedControlPage ? null : <button type="button" onClick={() => openSettings()}><IconSettingsOutlineMedium size={16} /> {'\u5de5\u4f5c\u53f0\u8bbe\u7f6e'}</button>}
       </div>
     </section> : null}
     {settingsOpen && mode.mode === 'workbench' ? <WorkbenchCoreSettingsDialog
       {...props.settingsPage} {...(settingsOptions ? { openOptions: settingsOptions } : {})} workbenchSettings={props.workbenchSettings} onClose={closeSettings}
       onOpenWorkbench={async id => {
         const result=await directory?.openAndSelect(id)
-        if(result?.status!=='committed')throw new Error('无法打开工作台，请检查保存状态。')
+        if(result?.status!=='committed')throw new Error('\u65e0\u6cd5\u6253\u5f00\u5de5\u4f5c\u53f0\uff0c\u8bf7\u68c0\u67e5\u4fdd\u5b58\u72b6\u6001\u3002')
         setSurfaceView('workbench');closeSettings()
       }}
       useSessions={props.useSessions} useWorkspaces={props.useWorkspaces}
     /> : null}
-    {mode.mode === 'exiting' ? <div role="status" style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center' }}>正在保存并退出工作台模式…</div> : null}
+    {mode.mode === 'exiting' ? <div role="status" style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center' }}>{'\u6b63\u5728\u4fdd\u5b58\u5e76\u9000\u51fa\u5de5\u4f5c\u53f0\u6a21\u5f0f\u2026'}</div> : null}
     {exitError === undefined ? null : <div role="alert" style={{ position: 'absolute', bottom: 16, left: 16, right: 16, padding: 12, background: 'var(--dsw-alias-bg-layer-1, Canvas)' }}>{exitError}</div>}
   </div>, document.body)
 }

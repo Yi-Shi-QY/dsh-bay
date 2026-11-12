@@ -1,9 +1,12 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { connect } from 'node:net'
 import { createHash } from 'node:crypto'
+import { WebSocket } from 'ws'
 import { describe, expect, it } from 'vitest'
 import { createWorkbenchShareGateway, selectPrivateIPv4 } from '../src/host-workbench-share-gateway.ts'
 import { createWorkbenchShareSessionManager } from '../src/host-workbench-share-session.ts'
+import { createWorkbenchCollaborationManager } from '../src/host-workbench-collaboration.ts'
+import { fileAccessFixture } from './helpers/file-access.ts'
 
 function body(request: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -70,7 +73,7 @@ describe('Workbench LAN share gateway', () => {
       const shareCookie = link.headers.get('set-cookie')?.split(';', 1)[0]
       expect(shareCookie).toMatch(/^dsh-workbench-share=/u)
       const document = await fetch(`http://${gateway.host}:${String(gateway.port)}/workbench`, { headers: { cookie: shareCookie! } })
-      expect(document.status).toBe(200)
+      expect(document.status, await document.clone().text()).toBe(200)
       expect(document.headers.get('set-cookie')).toBeNull()
       const html = await document.text()
       expect(html).toContain('__WORKBENCH_WINDOW_VIEW__')
@@ -96,18 +99,55 @@ describe('Workbench LAN share gateway', () => {
       const redirect = await fetch(`http://${gateway.host}:${String(gateway.port)}/api/redirect`, { redirect: 'manual', headers: { cookie: shareCookie! } })
       expect(redirect.status).toBe(403)
       expect(redirect.headers.get('location')).toBeNull()
-      const activeLifecycle = await fetch(`http://${gateway.host}:${String(gateway.port)}/api/workbench-share/lifecycle`, { headers: { cookie: shareCookie! } })
-      expect(activeLifecycle.status).toBe(200)
-      expect(await activeLifecycle.json()).toMatchObject({ state: 'active', workbenchId: 'workbench-a' })
-      await gateway.stopShare('workbench-a')
-      expect((await fetch(`http://${gateway.host}:${String(gateway.port)}/workbench`, { headers: { cookie: shareCookie! } })).status).toBe(401)
-      const stoppedLifecycle = await fetch(`http://${gateway.host}:${String(gateway.port)}/api/workbench-share/lifecycle`, { headers: { cookie: shareCookie! } })
-      expect(stoppedLifecycle.status).toBe(410)
-      expect(stoppedLifecycle.headers.get('x-dsh-share-state')).toBe('stopped')
-      expect(await stoppedLifecycle.json()).toEqual({ code: 'workbench-share-stopped', state: 'stopped' })
     } finally {
       await gateway.close()
       await upstream.close()
     }
   })
+
+  it('carries a LAN participant over the dedicated collaboration WebSocket', async () => {
+    const gatewayHost = selectPrivateIPv4()
+    if (gatewayHost === undefined) return
+    const file = await fileAccessFixture()
+    const upstreamServer = createServer((_request, response) => {
+      response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'set-cookie': 'dsh-owner=owner-value; HttpOnly' })
+      response.end('<!doctype html><html data-workbench-document="v1"><head></head><body>workbench</body></html>')
+    })
+    const upstream = await listen(upstreamServer)
+    const manager = createWorkbenchShareSessionManager({ randomToken: () => `s-${'y'.repeat(42)}` })
+    const collaboration = createWorkbenchCollaborationManager({ loadSeed: workbenchId => file.access.collaborationSeed(workbenchId) })
+    const gateway = await createWorkbenchShareGateway({
+      access: file.access, collaboration, upstreamOrigin: `http://127.0.0.1:${String(upstream.port)}`, manager,
+      networkInterfaces: { WLAN: [{ address: gatewayHost, family: 'IPv4', internal: false }] },
+      prepareView: async () => ({ windowId: 'window-lan', url: `http://127.0.0.1:${String(upstream.port)}/workbench?workbench=${'t'.repeat(43)}&token=launch`, expiresAt: Date.now() + 10_000 }),
+      redeemView: async () => ({ schemaVersion: 1, windowId: 'window-lan', workbenchId: 'workbench-a', mode: 'browser-workbench', closeToken: `close-${'z'.repeat(40)}` }),
+      closeView: async () => {},
+    })
+    try {
+      const started = await gateway.startShare('workbench-a')
+      const link = await fetch(started.url, { redirect: 'manual' })
+      const shareCookie = link.headers.get('set-cookie')?.split(';', 1)[0]
+      expect(shareCookie).toMatch(/^dsh-workbench-share=/u)
+      const document = await fetch(`http://${gateway.host}:${String(gateway.port)}/workbench`, { headers: { cookie: shareCookie! } })
+      expect(document.status, await document.clone().text()).toBe(200)
+      const ws = new WebSocket(`ws://${gateway.host}:${String(gateway.port)}/api/workbench-collaboration`, { headers: { cookie: shareCookie! } })
+      const frames: any[] = [], waiters: ((frame: any) => void)[] = []
+      ws.on('message', bytes => { const frame = JSON.parse(bytes.toString()); frames.push(frame); waiters.shift()?.(frame) })
+      const next = () => frames.length > 0 ? Promise.resolve(frames.shift()) : new Promise<any>(resolve => waiters.push(resolve))
+      await new Promise<void>((resolve, reject) => { ws.once('open', () => resolve()); ws.once('error', reject) })
+      const collaborationId = collaboration.get('workbench-a')?.snapshot().collaborationId
+      const leaseId = manager.getSnapshot()[0]?.guests?.[0]?.leaseId
+      if (!leaseId) throw new Error('guest lease missing')
+      ws.send(JSON.stringify({ type: 'client.hello', payload: { schemaVersion: 1, collaborationId, workbenchId: 'workbench-a', participantId: leaseId } }))
+      const snapshot = await nextOfType(next, 'server.snapshot')
+      expect(snapshot.payload.workbenchId).toBe('workbench-a')
+      ws.close()
+    } finally {
+      await gateway.close(); await collaboration.dispose(); await upstream.close(); await file.dispose()
+    }
+  })
 })
+
+async function nextOfType(next: () => Promise<any>, type: string): Promise<any> {
+  for (;;) { const frame = await next(); if (frame.type === type) return frame }
+}

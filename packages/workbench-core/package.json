@@ -1,7 +1,7 @@
 {
   "name": "dsh-bay",
   "description": "DSH Bay multi-area workbench for developing, validating and sharing DSH plugins",
-  "version": "0.2.2-alpha.18.0",
+  "version": "0.2.2-alpha.18.1",
   "private": false,
   "repository": {
     "type": "git",
@@ -124,11 +124,11 @@
       "moduleId": "workbench.core",
       "kind": "official-builtin",
       "delivery": "core-bundled",
-      "coreCompatibility": "0.2.2-alpha.18.0",
+      "coreCompatibility": "0.2.2-alpha.18.1",
       "activation": "restart-only",
       "dshGeneration": "0.2.2-rc.1",
-      "candidateId": "dsh-bay-0.2.2-alpha.18.0-dsh-0.2.2-rc.1",
-      "productLine": "DSH Bay 0.2.2-alpha.18.0",
+      "candidateId": "dsh-bay-0.2.2-alpha.18.1-dsh-0.2.2-rc.1",
+      "productLine": "DSH Bay 0.2.2-alpha.18.1",
       "upstreamCommit": "66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db",
       "morePolicy": "deferred-official-only",
       "defaultInstall": [

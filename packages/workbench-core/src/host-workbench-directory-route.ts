@@ -26,9 +26,7 @@ export function installWorkbenchDirectoryRoute(connection: HostConnectionHandle,
       const workbenchId = typeof body.workbenchId === 'string' ? body.workbenchId : patch?.path?.[0] === 'workbenches' ? patch.path[1] : actor?.workbenchId
       const mutation = ['create', 'create-session', 'prepare-creator-repair', 'show-area', 'open-project', 'bind-area', 'register-session', 'patch', 'memory-write', 'project-write'].includes(String(body.action))
       const writeTargets = new Set<string>(workbenchId ? [workbenchId] : [])
-      // Preserve area-scoped authorization through the final directory
       // transaction wrapper. Rechecking only the workbench would discard the
-      // area scope and reject a valid guest edit.
       const writeAreas = new Map<string, Set<string>>()
       const scopedRequirements: { capability: WorkbenchCapability; target: WorkbenchAccessTarget }[] = []
       const addScopedRequirement = (capability: WorkbenchCapability, target: WorkbenchAccessTarget) => {
@@ -55,7 +53,6 @@ export function installWorkbenchDirectoryRoute(connection: HostConnectionHandle,
         if (mutation && actor.actor !== 'desktop' && (typeof body.requestId !== 'string' || !body.requestId)) throw new WorkbenchAccessError('request-id-required', '修改操作缺少请求标识。', 400)
         if (body.action === 'register-session' && actor.actor !== 'desktop') throw new WorkbenchAccessError('session-registration-denied', '请通过区域新建会话或打开已登记的会话。')
         if (body.action === 'prepare-creator-repair' && actor.actor !== 'desktop') throw new WorkbenchAccessError('creator-repair-desktop-required', '请在 DSH 客户端中打开插件修复会话。')
-        if (actor.actor === 'lan-guest' && ['memory-list', 'memory-read', 'memory-write'].includes(String(body.action))) throw new WorkbenchAccessError('memory-owner-required', '工作台正式记忆由当前主控管理。')
         if (patch) {
           if (!Array.isArray(patch.path)) throw new Error('无效的修改路径。')
           if (patch.path[0] === 'workbenches' && patch.path[1]) writeTargets.add(patch.path[1])
@@ -66,76 +63,6 @@ export function installWorkbenchDirectoryRoute(connection: HostConnectionHandle,
             if (after) for (const id of new Set([...Object.keys(before), ...Object.keys(after)])) if (before[id] && !isDeepStrictEqual(before[id], after[id])) writeTargets.add(id)
           }
           if (actor.workbenchId && (patch.path[0] !== 'workbenches' || patch.path[1] !== actor.workbenchId)) throw new WorkbenchAccessError('patch-scope-denied', '只能修改当前工作台。')
-          if (actor.actor === 'lan-guest') {
-            if (!workbenchId || patch.operation !== 'set' || patch.path.length !== 2) throw new WorkbenchAccessError('patch-scope-denied', '访客修改必须包含完整版本检查。')
-            const before = access.getRecord(workbenchId), after = patch.value as WorkbenchRecordV2
-            if (!after || after.workbenchId !== workbenchId) throw new WorkbenchAccessError('patch-scope-denied', '工作台身份不能修改。')
-            if (!Number.isSafeInteger(patch.expectedRevision)) throw new WorkbenchAccessError('revision-required', '修改操作缺少版本。', 400)
-            // Local paths and opaque host bindings are never supplied by guests.
-            if (before.fileWorkbench) after.fileWorkbench = before.fileWorkbench
-            if (before.externalBindings) after.externalBindings = before.externalBindings
-            // Merge against the exact scoped projection, not a truncated full
-            // definition: invisible host fields must survive guest edits.
-            const projection = access.snapshot(actor).value.workbenches[workbenchId]!
-            for (const key of ['backgroundAi', 'bayAgentOrchestration', 'sessionCatalog', 'areaProjects', 'areaDefinitions', 'bayAgentSession', 'projectMigration', 'projectModelVersion'] as const) {
-              if (!isDeepStrictEqual(after[key], projection[key])) throw new WorkbenchAccessError('patch-field-denied', '此字段只能由主控修改：' + key)
-              if (before[key] === undefined) delete after[key]
-              else Object.assign(after, { [key]: before[key] })
-            }
-            if (before.projects) {
-              if (!isDeepStrictEqual(Object.keys(after.projects ?? {}).sort(), Object.keys(projection.projects ?? {}).sort())) throw new WorkbenchAccessError('project-scope-denied', '不能修改项目登记。')
-              const merged = structuredClone(before.projects)
-              for (const [id, project] of Object.entries(after.projects ?? {})) {
-                const { context, ...identity } = project, { context: _context, ...original } = projection.projects![id]!
-                if (!isDeepStrictEqual(identity, original)) throw new WorkbenchAccessError('project-scope-denied', '不能修改项目身份。')
-                if (context !== undefined) merged[id]!.context = context
-              }
-              after.projects = merged
-            }
-            if (actor.grant?.areaIds) {
-              if (isDeepStrictEqual(after.document, projection.document)) after.document = structuredClone(before.document)
-              const allowed = new Set(actor.grant.areaIds)
-              for (const key of ['areaContexts', 'areaMetadata'] as const) {
-                const merged = {
-                  ...Object.fromEntries(Object.entries(before[key] ?? {}).filter(([id]) => !allowed.has(id))), ...after[key],
-                }
-                if (before[key] === undefined && Object.keys(merged).length === 0) delete after[key]
-                else Object.assign(after, { [key]: merged })
-              }
-            }
-            const nextAreas = areasOf(after.document.root), priorAreas = areasOf(before.document.root)
-            if (nextAreas.some(area => area.areaId === before.document.activeAreaId)) after.document.activeAreaId = before.document.activeAreaId
-            for (const area of nextAreas) {
-              const selected = priorAreas.find(prior => prior.areaId === area.areaId)?.activeModuleInstanceId
-              if (selected && area.moduleHistory.some(page => page.moduleInstanceId === selected)) area.activeModuleInstanceId = selected
-            }
-            const classifications: Record<string, WorkbenchCapability> = { document: 'layout', context: 'context', name: 'layout', description: 'context', areaContexts: 'context', projects: 'context', areaMetadata: 'layout', updatedAt: 'layout' }
-            for (const key of new Set([...Object.keys(before), ...Object.keys(after)])) {
-              if (isDeepStrictEqual(before[key as keyof typeof before], after[key as keyof typeof after])) continue
-              if (key === 'updatedAt') continue
-              const required = classifications[key]
-              if (!required) throw new WorkbenchAccessError('patch-field-denied', '此字段只能由主控修改：' + key)
-              if (key === 'projects') {
-                const changedProjects = new Set([...Object.keys(before.projects ?? {}), ...Object.keys(after.projects ?? {})])
-                for (const id of changedProjects) if (!isDeepStrictEqual(before.projects?.[id], after.projects?.[id])) {
-                  const areaId = Object.entries(before.areaProjects ?? {}).find(([areaId, ref]) => ref.projectId === id && (!actor.grant?.areaIds || actor.grant.areaIds.includes(areaId)))?.[0]
-                  if (actor.grant?.areaIds && !areaId) throw new WorkbenchAccessError('project-scope-denied', '项目不在授权范围内。')
-                  const target = { workbenchId, ...(areaId ? { areaId } : {}) }; access.authorize(actor, 'context', target); addScopedRequirement('context', target)
-                }
-              } else if (key === 'areaContexts' || key === 'areaMetadata') {
-                for (const id of new Set([...Object.keys(before[key] ?? {}), ...Object.keys(after[key] ?? {})])) if (!isDeepStrictEqual(before[key]?.[id], after[key]?.[id])) {
-                  const target = { workbenchId, areaId: id }
-                  access.authorize(actor, required, target)
-                  addWriteArea(workbenchId, id); addScopedRequirement(required, target)
-                }
-              } else if (actor.grant?.areaIds) throw new WorkbenchAccessError('area-scope-denied', '此操作影响整个工作台，需要完整结构授权。')
-              if (key !== 'areaContexts' && key !== 'areaMetadata' && key !== 'projects') access.authorize(actor, required, { workbenchId })
-              capability = required
-            }
-            // Every bound page must already belong to this workbench. A layout
-            // grant cannot be used to register an arbitrary Profile Session.
-            for (const area of areasOf(after.document.root)) for (const page of area.moduleHistory) if (page.binding?.sessionId) access.authorize(actor, 'view', { workbenchId, sessionId: page.binding.sessionId })
-          }
         }
         if (workbenchId) {
           if (mutation && typeof body.areaId === 'string') addWriteArea(workbenchId, body.areaId)
@@ -147,7 +74,6 @@ export function installWorkbenchDirectoryRoute(connection: HostConnectionHandle,
             relativePath = [project.relativePath, relativePath].filter(Boolean).join('/')
           }
           // `patch` performs field-level checks above. Applying a second bare
-          // workbench check here would reject an area-scoped guest patch even
           // though every changed area has already been authorized.
           if (body.action !== 'patch') access.authorize(actor, capability, { workbenchId, ...(typeof body.areaId === 'string' ? { areaId: body.areaId } : {}), ...(relativePath !== undefined ? { relativePath } : {}) })
           if (body.action === 'bind-area' && body.createDirectory === true) access.authorize(actor, 'write-files', { workbenchId, ...(typeof body.areaId === 'string' ? { areaId: body.areaId } : {}), relativePath: text('relativePath') })

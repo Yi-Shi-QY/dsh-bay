@@ -26,7 +26,7 @@ describe('Workbench 18.0 rc1 identity', () => {
     const root = json('package.json')
     const core = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as Record<string, any>
     const provenance = json('provenance/dsh-0.2.2-rc.1.json')
-    expect(WORKBENCH_CORE_VERSION).toBe('0.2.2-alpha.18.0')
+    expect(WORKBENCH_CORE_VERSION).toBe('0.2.2-alpha.18.1')
     expect(WORKBENCH_DSH_GENERATION).toBe('0.2.2-rc.1')
     expect(WORKBENCH_UPSTREAM_COMMIT).toBe('66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db')
     expect(root.devDependencies['@deepseek-ai/dsh']).toBe(WORKBENCH_DSH_GENERATION)
@@ -81,11 +81,15 @@ describe('Workbench 18.0 rc1 identity', () => {
     ]
     for (const file of files) {
       const source = readFileSync(new URL(file, presetRoot), 'utf8')
-      expect(source).toContain(WORKBENCH_CORE_VERSION)
       expect(source).toContain(WORKBENCH_DSH_GENERATION)
       expect(source).toContain(WORKBENCH_UPSTREAM_COMMIT)
       expect(source).not.toContain('0.2.2-alpha.15')
       expect(source).not.toContain('0.2.1-rc.3')
+    }
+    expect(readFileSync(new URL('SKILL.md', presetRoot), 'utf8')).toContain(WORKBENCH_CORE_VERSION)
+    expect(readFileSync(new URL('WORKBENCH-CONTAINER-INNER-PAGE-EXTENSION-SPEC.zh.md', presetRoot), 'utf8')).toContain(WORKBENCH_CORE_VERSION)
+    for (const file of files.filter(file => file.startsWith('templates/'))) {
+      expect(readFileSync(new URL(file, presetRoot), 'utf8')).toContain('>=0.2.2-alpha.18.0 <0.2.2-alpha.19.0')
     }
   })
 })

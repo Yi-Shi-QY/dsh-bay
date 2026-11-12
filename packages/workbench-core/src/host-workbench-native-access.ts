@@ -24,13 +24,13 @@ import type {} from '@deepseek-ai/dsh-client-file-upload'
 
 declare module '@deepseek-ai/dsh-typert-protocol' {
   interface PrincipalMap {
-    'bay-workbench': { kind: 'bay-workbench'; actor: 'lan-guest' | 'browser-owner'; accessId: string; workbenchId: string; inheritedAccessIds?: readonly string[] }
+    'bay-workbench': { kind: 'bay-workbench'; actor: 'lan-guest' | 'browser-owner'; accessId: string; workbenchId: string; participantId?: string; collaborationId?: string; displayName?: string; inheritedAccessIds?: readonly string[] }
   }
 }
 
 type BayPrincipal = import('@deepseek-ai/dsh-typert-protocol').PrincipalMap['bay-workbench']
 type NativePrincipal = BayPrincipal | import('@deepseek-ai/dsh-typert-protocol').PrincipalMap['owner']
-type ExecutionOrigin = { accessId: string; workbenchId: string; actor: 'lan-guest' | 'browser-owner'; inheritedAccessIds?: readonly string[] }
+type ExecutionOrigin = { accessId: string; workbenchId: string; actor: 'lan-guest' | 'browser-owner'; participantId?: string; collaborationId?: string; displayName?: string; inheritedAccessIds?: readonly string[] }
 const executionOrigin = new AsyncLocalStorage<ExecutionOrigin>()
 /** A relay or Runtime adapter must copy this origin before leaving a native tool's execution. */
 export function currentWorkbenchExecutionOrigin(): ExecutionOrigin | undefined { return executionOrigin.getStore() }
@@ -111,6 +111,7 @@ export function createGuestNativeTransport(ctx: Context, access: HostWorkbenchAc
   const peers = new Map<string, PeerScope>()
   const sockets = new Map<string, Set<WebSocket>>()
   const live = new Map<string, { agent: Agent; turn: number; origin: ExecutionOrigin }>()
+  const browserOwnerPrompts = new Map<string, ReturnType<typeof setTimeout>>()
   const inherited = new WeakMap<UserMessage, ExecutionOrigin>()
   const approvals = new Map<string, { value: WorkbenchNativeApproval; digest: string; resolve: (allow: boolean) => void }>()
   const approved = new Map<ToolExecution['token'], { accessId: string; revisions: Readonly<Record<string, number>>; workbenchRevision: number; digest: string }>()
@@ -132,7 +133,10 @@ export function createGuestNativeTransport(ctx: Context, access: HostWorkbenchAc
     if (!peer || peer.signal.aborted) {
       const principal: NativePrincipal = value.actor === 'browser-owner'
         ? { kind: 'owner' }
-        : { kind: 'bay-workbench', actor: 'lan-guest', accessId: value.accessId, workbenchId: value.workbenchId! }
+      : { kind: 'bay-workbench', actor: 'lan-guest', accessId: value.accessId, workbenchId: value.workbenchId!,
+          ...(value.participantId === undefined ? {} : { participantId: value.participantId }),
+          ...(value.collaborationId === undefined ? {} : { collaborationId: value.collaborationId }),
+          ...(value.displayName === undefined ? {} : { displayName: value.displayName }) }
       peer = connection.createPeer({ principal, interactions: 'answer' })
       peers.set(value.accessId, peer)
     }
@@ -161,14 +165,13 @@ export function createGuestNativeTransport(ctx: Context, access: HostWorkbenchAc
       if (!can(value, 'view', target)) continue
       const actions = [...READ_ACTIONS]
       if (value.actor === 'browser-owner') actions.push(...OWNER_SESSION_WRITES, ...OWNER_TERMINAL)
-      else if (can(value, 'message', target)) actions.push('session/prompt', 'fileUploads/upload')
+      else if (can(value, 'message', target)) actions.push(...OWNER_SESSION_WRITES)
       if (can(value, 'read-files', target)) actions.push(...FILE_READS)
       const condition: RemoteAccessCondition<'session'> = ({ action, args }) => {
         try {
           const now = current(p.accessId)
           access.authorize(now, action === 'session/prompt' || action === 'fileUploads/upload' ? 'message'
             : FILE_READS.includes(action) ? 'read-files' : action.startsWith('event:') || READ_ACTIONS.includes(action) ? 'view' : 'tasks', target)
-          if (action === 'session/prompt' && now.actor === 'lan-guest' && args !== undefined && obj(args.request).mode !== 'queue') return { kind: 'deny', reason: '访客消息只能进入下一轮队列。' }
           return { kind: 'allow' }
         } catch (error) { return { kind: 'deny', reason: String(error) } }
       }
@@ -242,7 +245,6 @@ export function createGuestNativeTransport(ctx: Context, access: HostWorkbenchAc
     if (endpoint === 'session/prompt') {
       if (typeof request.sessionId !== 'string') throw failure('缺少会话身份。')
       access.authorize(value, 'message', targetFor(value, request.sessionId))
-      if (value.actor === 'lan-guest' && request.mode !== 'queue') throw failure('访客消息只能进入下一轮队列。')
     }
   }
 
@@ -309,7 +311,21 @@ export function createGuestNativeTransport(ctx: Context, access: HostWorkbenchAc
       const decided = await next()
       if (decided.kind !== 'enter') return decided
       const previous = live.get(payload.agent.id)
-      const origins = decided.messages.map(message => principal(message) ?? inherited.get(message)).filter((origin): origin is ExecutionOrigin => !!origin)
+      const origins = decided.messages.map(message => principal(message) ?? inherited.get(message)).filter((origin): origin is ExecutionOrigin => !!origin).map(origin => {
+        // Native SessionController messages may only carry the stable access
+        // identity. Enrich it from the current Host lease before it becomes a
+        // live execution origin so audit records retain the participant name
+        // and collaboration id without trusting browser supplied fields.
+        try {
+          const identity = access.getContext(origin.accessId)
+          return {
+            ...origin,
+            ...(origin.participantId === undefined && identity.participantId === undefined ? {} : { participantId: origin.participantId ?? identity.participantId }),
+            ...(origin.collaborationId === undefined && identity.collaborationId === undefined ? {} : { collaborationId: origin.collaborationId ?? identity.collaborationId }),
+            ...(origin.displayName === undefined && identity.displayName === undefined ? {} : { displayName: origin.displayName ?? identity.displayName }),
+          }
+        } catch { return origin }
+      })
       const selected = origins.find(row => row.actor === 'lan-guest') ?? origins[0] ?? (previous?.turn === payload.turn ? previous.origin : undefined)
       const origin = selected && { ...selected, inheritedAccessIds: [...new Set(origins.filter(row => row.actor === 'lan-guest').flatMap(sourceIds).concat(selected.inheritedAccessIds ?? []))] }
       if (origin) {
@@ -327,8 +343,22 @@ export function createGuestNativeTransport(ctx: Context, access: HostWorkbenchAc
             ? { ...message, source: { ...message.source, principal: { kind: 'bay-workbench', ...origin } } } as UserMessage : message) }
         } catch { return { kind: 'reject' } }
       }
+      const browserOwnerPrompt = decided.messages.some(message => {
+        const source = obj(message.source), requestId = source.rpcId
+        const promptId = typeof requestId === 'string' ? requestId : undefined
+        const timer = promptId === undefined ? undefined : browserOwnerPrompts.get(promptId)
+        if (timer === undefined) return false
+        clearTimeout(timer)
+        browserOwnerPrompts.delete(promptId!)
+        return true
+      })
+      // DSH intentionally omits `source.principal` for the owner. Keep the
+      // browser-owner prompt admission explicit on the Host side instead of
+      // treating every untagged user message as trusted while the browser
+      // controls a Workbench.
       const target = access.sessionTarget(payload.agent.id)
-      if (target && access.controller(target.workbenchId) === 'browser' && decided.messages.some(message => message.source.kind === 'user')) return { kind: 'reject' }
+      if (target && access.controller(target.workbenchId) === 'browser'
+        && decided.messages.some(message => message.source.kind === 'user') && !browserOwnerPrompt) return { kind: 'reject' }
       if (previous?.turn !== payload.turn) live.delete(payload.agent.id)
       return decided
     }))
@@ -462,7 +492,6 @@ export function createGuestNativeTransport(ctx: Context, access: HostWorkbenchAc
         const envelope = clientRequestSchema.parse(JSON.parse(Buffer.from(bytes).toString('utf8')))
         rpcId = envelope.rpcId
         if (envelope.method !== endpoint) throw failure('请求方法与地址不匹配。')
-        if (endpoint === 'session/prompt' && current(input).actor === 'lan-guest') obj(obj(envelope.payload).args).request = { ...obj(obj(obj(envelope.payload).args).request), mode: 'queue' }
         await inspect(endpoint, envelope.payload, input)
         if (MUTATIONS.has(endpoint)) {
           const args = obj(obj(envelope.payload).args), mutationRequest = obj(args.request)
@@ -472,6 +501,12 @@ export function createGuestNativeTransport(ctx: Context, access: HostWorkbenchAc
           // client baseline. Keep the Host lease as the source of truth for
           // every mutation, including mutations without a prompt inspect.
           access.authorize(current(input), endpoint === 'session/prompt' ? 'message' : 'tasks', targetFor(current(input), targetId))
+          const promptId = mutationRequest.requestId
+          if (endpoint === 'session/prompt' && current(input).actor === 'browser-owner' && typeof promptId === 'string') {
+            const previous = browserOwnerPrompts.get(promptId)
+            if (previous !== undefined) clearTimeout(previous)
+            browserOwnerPrompts.set(promptId, setTimeout(() => browserOwnerPrompts.delete(promptId), 30_000))
+          }
           const [namespace, method] = endpoint.split('/')
           const value = await gateway.invoke({ namespace: namespace!, method: method!, args: obj(obj(envelope.payload).args), peer: peerFor(input), signal: request.signal })
           return Response.json({ type: 'server-response', rpcId, result: { ok: true, value } })
@@ -554,6 +589,8 @@ export function createGuestNativeTransport(ctx: Context, access: HostWorkbenchAc
       for (const off of disposers.reverse()) off()
       for (const pending of approvals.values()) pending.resolve(false)
       approvals.clear(); approved.clear(); wss.close()
+      for (const timer of browserOwnerPrompts.values()) clearTimeout(timer)
+      browserOwnerPrompts.clear()
     },
   }
 }

@@ -10,10 +10,10 @@ import type { ConnectionRpcHandlerResult, HostConnectionHandle } from '@deepseek
 import { workbenchWindowEndpointForRpc } from './workbench-window-rpc.ts'
 import { createWorkbenchShareSessionManager } from './host-workbench-share-session.ts'
 import { createWorkbenchShareGateway, type WorkbenchShareGatewayV1 } from './host-workbench-share-gateway.ts'
-import { createWorkbenchSharePresenceBroker } from './host-workbench-share-presence.ts'
 import { decodeFloatingHandoff, type FloatingHandoffV1 } from './floating-handoff.ts'
-import { WORKBENCH_ACCESS_SERVICE, parseWorkbenchGrant } from './workbench-access-contract.ts'
-import type { HostWorkbenchAccess } from './host-workbench-access.ts'
+import { SHARED_CONTROL_GRANT, WORKBENCH_ACCESS_SERVICE, parseWorkbenchGrant } from './workbench-access-contract.ts'
+import { createFileWorkbenchCollaborationStore, createWorkbenchCollaborationManager } from './host-workbench-collaboration.ts'
+import { executeWorkbenchCollaborationCommand, type HostWorkbenchAccess } from './host-workbench-access.ts'
 import { WORKBENCH_NATIVE_SERVICE } from './host-workbench-native-service.ts'
 import type { createGuestNativeTransport } from './host-workbench-native-access.ts'
 import { createWorkbenchOwnerGateway } from './host-workbench-owner-gateway.ts'
@@ -708,7 +708,7 @@ const BROWSER_WINDOW_RPC_ACTIONS = [
   'floating-stage', 'floating-read',
 ] as const
 
-const BROWSER_SHARE_ENDPOINTS = ['start', 'stop', 'status', 'presence', 'guest-rename', 'guest-kick', 'reduce'] as const
+const BROWSER_SHARE_ENDPOINTS = ['start', 'stop', 'status', 'guest-rename', 'guest-kick', 'reduce'] as const
 
 interface BrowserWindowRpcRequest {
   type?: unknown
@@ -808,6 +808,11 @@ export function installWorkbenchBrowserWindowController(ctx: BrowserWindowHostCo
     openExternalBrowser,
     prepareOwnerUrl: async (view): Promise<string> => {
       if (!native) throw new Error('browser-scoped-transport-unavailable')
+      // The browser-owner surface must keep using the single-workbench native
+      // Host path until the LAN shared-control surface is explicitly joined.
+      // Starting collaboration here changes the owner canvas into a separate
+      // in-memory projection and makes ordinary browser layout/editor actions
+      // depend on the unfinished LAN protocol.
       ownerGateway ??= createWorkbenchOwnerGateway({ access, native, upstreamOrigin: server.getOrigin(),
         handleView: async (action, payload): Promise<ConnectionRpcHandlerResult> => {
           const result = await controller.handle(action, payload)
@@ -825,26 +830,57 @@ export function installWorkbenchBrowserWindowController(ctx: BrowserWindowHostCo
     },
   })
   const shareSessions = createWorkbenchShareSessionManager()
-  const presence = createWorkbenchSharePresenceBroker()
+  const collaborations = createWorkbenchCollaborationManager({
+    store: createFileWorkbenchCollaborationStore(workbenchId => {
+      try { return access.directory.rootPath(workbenchId) } catch { return undefined }
+    }),
+    loadSeed: workbenchId => access.collaborationSeed(workbenchId),
+    subscribeTaskChanges: (workbenchId, listener) => access.subscribeTaskChanges(workbenchId, listener),
+    persistLayout: ({ workbenchId, layout }) => access.persistCollaborationLayout(workbenchId, layout),
+    executeCommand: ({ workbenchId, operation }) => executeWorkbenchCollaborationCommand(access, { workbenchId, operation: operation as Extract<typeof operation, { kind: 'workbench.command' }> }),
+    authorizeCommand: ({ participantId, role, workbenchId, operation }) => {
+      // The owner participant is created by the Host itself. LAN identities
+      // are lease ids and must pass the same grant and scope checks as every
+      // other Host route before a shared command can mutate state.
+      if (role === 'owner') return
+      const context = access.getContext(participantId)
+      const capability = operation.kind === 'draft.set-selection' || operation.kind === 'draft.ensure'
+        || operation.kind === 'draft.apply' || operation.kind === 'draft.set-attachments' || operation.kind === 'draft.clear'
+        ? 'message' as const
+        : operation.kind === 'workbench.command' && operation.operation === 'snapshot'
+          ? 'view' as const
+        : operation.kind === 'workbench.command' && operation.operation === 'context.write'
+          ? 'context' as const
+        : operation.kind === 'workbench.command' && /^(?:memory\.(?:list|read|write))$/u.test(operation.operation)
+          ? 'memory' as const
+        : operation.kind === 'workbench.command' && /^(?:project\.read|project\.entries|project\.preview)/u.test(operation.operation)
+          ? 'read-files' as const
+        : operation.kind === 'workbench.command' && operation.operation === 'project.write'
+          ? 'write-files' as const
+        : operation.kind === 'workbench.command' && /^(?:task\.(?:list|create|action))$/u.test(operation.operation)
+          ? 'tasks' as const
+        : operation.kind === 'workbench.command' && /^(?:workbench\.rename|area\.(?:create|show|archive)|session\.rename|project\.bind|project\.open)$/u.test(operation.operation)
+          ? 'layout' as const
+          : 'layout' as const
+      access.authorize(context, capability, { workbenchId })
+    },
+  })
+  // The desktop owner still writes the durable Workbench through the normal
+  // directory service. Reflect those commits into an active collaboration
+  // session so LAN participants never keep a stale layout snapshot.
+  const stopCollaborationRefresh = access.directory.subscribe(() => {
+    for (const workbenchId of Object.keys(access.directory.getSnapshot().value.workbenches)) {
+      void collaborations.refresh(workbenchId)
+    }
+  })
   let shareGateway: WorkbenchShareGatewayV1 | undefined
   let shareGatewayStart: Promise<WorkbenchShareGatewayV1> | undefined
   const getShareGateway = async (): Promise<WorkbenchShareGatewayV1> => {
     if (shareGateway !== undefined) return shareGateway
     shareGatewayStart ??= createWorkbenchShareGateway({
       access,
-      ...(native ? { guestHttp: native.handleHttp, guestUpgrade: native.handleUpgrade, revokeGuest: native.revoke, guestDocument: native.renderDocument } : {}),
-      guestPresence: async (payload, actor) => {
-        const input = record(payload)
-        if (!input || input.workbenchId !== actor.workbenchId) return fail('presence-scope-denied')
-        if (input.action !== 'clear') {
-          if (typeof input.sessionId !== 'string' || typeof input.areaId !== 'string') return fail('presence-scope-denied')
-          access.authorize(actor, input.action === 'publish' ? 'message' : 'view', { workbenchId: actor.workbenchId!, sessionId: input.sessionId, areaId: input.areaId })
-        }
-        const normalized = { ...input, participantId: actor.accessId, role: 'guest' }
-        if (input.action === 'read') { delete (normalized as Record<string, unknown>).participantId; delete (normalized as Record<string, unknown>).role }
-        if (input.action === 'clear') delete (normalized as Record<string, unknown>).role
-        return shareRpc('presence', normalized)
-      },
+      collaboration: collaborations,
+      ...(native ? { guestHttp: native.handleHttp, guestUpgrade: native.handleUpgrade, revokeGuest: native.revoke } : {}),
       upstreamOrigin: server.getOrigin(),
       manager: shareSessions,
       prepareView: async workbenchId => {
@@ -878,14 +914,13 @@ export function installWorkbenchBrowserWindowController(ctx: BrowserWindowHostCo
         || !access.lookup(workbenchId)) return fail('workbench-unavailable')
       try {
         const gateway = await getShareGateway()
-        const result = await gateway.startShare(workbenchId, parseWorkbenchGrant(body.grant))
+        const result = await gateway.startShare(workbenchId, body.grant === undefined ? SHARED_CONTROL_GRANT : parseWorkbenchGrant(body.grant))
         return ok(result)
       } catch (error) { return fail(error instanceof Error ? error.message : 'workbench-share-start-failed') }
     }
     if (endpoint === 'stop') {
       if (body === undefined || Object.keys(body).some(key => key !== 'workbenchId') || !validWorkbenchId(body.workbenchId)) return fail('invalid-workbench-id')
       await shareGateway?.stopShare(body.workbenchId)
-      presence.clearWorkbench(body.workbenchId)
       return ok({ status: 'stopped' })
     }
     if (endpoint === 'reduce') {
@@ -906,7 +941,7 @@ export function installWorkbenchBrowserWindowController(ctx: BrowserWindowHostCo
               httpRequests: 0, httpErrors: 0, httpInFlight: 0, queueDepth: 0,
               websocketConnections: 0, websocketReconnects: 0,
             },
-            presenceCount: presence.snapshot({ workbenchId: row.workbenchId }).length,
+            presenceCount: collaborations.get(row.workbenchId)?.snapshot().participants.length ?? 0,
             ...(latestMetrics === undefined ? {} : { workbenchMetrics: latestMetrics }),
           }
         })
@@ -926,57 +961,6 @@ export function installWorkbenchBrowserWindowController(ctx: BrowserWindowHostCo
       const kicked = await shareGateway?.kickGuest(body.workbenchId, body.leaseId)
       if (kicked !== true) return fail('workbench-share-guest-not-found')
       return ok({ status: 'kicked' })
-    }
-    if (endpoint === 'presence') {
-      if (body === undefined || typeof body.action !== 'string' || !validWorkbenchId(body.workbenchId)) return fail('invalid-presence-request')
-      if (shareSessions.getSession(body.workbenchId) === undefined) return fail('workbench-share-inactive')
-      if (body.action === 'publish' || body.action === 'clear') {
-        const activeSession = shareSessions.getSession(body.workbenchId)
-        if (activeSession === undefined) return fail('workbench-share-inactive')
-      }
-      if (body.action === 'read') {
-        if (Object.keys(body).some(key => !['action', 'workbenchId', 'sessionId', 'areaId', 'role'].includes(key))) return fail('invalid-presence-request')
-        if (body.sessionId !== undefined && !validWorkbenchId(body.sessionId)) return fail('invalid-presence-request')
-        if (body.areaId !== undefined && !validWorkbenchId(body.areaId)) return fail('invalid-presence-request')
-        if (body.role !== undefined && body.role !== 'host' && body.role !== 'guest') return fail('invalid-presence-request')
-        return ok({ presence: presence.snapshot({
-          workbenchId: body.workbenchId,
-          ...(body.sessionId === undefined ? {} : { sessionId: body.sessionId }),
-          ...(body.areaId === undefined ? {} : { areaId: body.areaId }),
-          ...(body.role === undefined ? {} : { role: body.role }),
-        }) })
-      }
-      if (body.action === 'clear') {
-        const sessionId = body.sessionId
-        const areaId = body.areaId
-        if (Object.keys(body).some(key => !['action', 'workbenchId', 'participantId', 'sessionId', 'areaId'].includes(key))
-          || !validWorkbenchId(body.participantId)) return fail('invalid-presence-request')
-        if (sessionId !== undefined && !validWorkbenchId(sessionId)) return fail('invalid-presence-request')
-        if (areaId !== undefined && !validWorkbenchId(areaId)) return fail('invalid-presence-request')
-        presence.clearParticipant(body.workbenchId, body.participantId, sessionId as string | undefined, areaId as string | undefined)
-        return ok({ status: 'cleared' })
-      }
-      if (body.action === 'publish') {
-        const revision = body.revision
-        if (Object.keys(body).some(key => !['action', 'workbenchId', 'sessionId', 'areaId', 'participantId', 'role', 'typing', 'draftText', 'hasAttachments', 'revision'].includes(key))) return fail('invalid-presence-request')
-        if (!validWorkbenchId(body.sessionId) || !validWorkbenchId(body.areaId) || !validWorkbenchId(body.participantId)
-          || (body.role !== 'host' && body.role !== 'guest') || typeof body.typing !== 'boolean'
-          || typeof body.draftText !== 'string' || typeof body.hasAttachments !== 'boolean'
-          || typeof revision !== 'number' || !Number.isSafeInteger(revision)) return fail('invalid-presence-request')
-        const result = presence.publish({
-          workbenchId: body.workbenchId,
-          sessionId: body.sessionId,
-          areaId: body.areaId,
-          participantId: body.participantId,
-          role: body.role,
-          typing: body.typing,
-          draftText: body.draftText,
-          hasAttachments: body.hasAttachments,
-          revision,
-        })
-        return result.ok ? ok(result) : fail(result.error)
-      }
-      return fail('invalid-presence-action')
     }
     return fail('invalid-action')
   }
@@ -1043,8 +1027,9 @@ export function installWorkbenchBrowserWindowController(ctx: BrowserWindowHostCo
     controller.dispose()
     void ownerGateway?.then(value => value.close())
     void shareGateway?.close()
-    presence.dispose()
+    void collaborations.dispose()
     shareSessions.dispose()
+    stopCollaborationRefresh()
     unregisterWorkbenchDocument?.(); unregisterDesktop?.(); void unregister(); void unregisterClose()
     for (const dispose of unregisterShareRoutes) void dispose()
   }

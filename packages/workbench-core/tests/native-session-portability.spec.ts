@@ -4,11 +4,12 @@ import * as jsonl from '@deepseek-ai/dsh-session-persistence-jsonl'
 import { LocalAttachmentStore } from '@deepseek-ai/dsh-attachment-local'
 import { Session, SessionId, SessionLogOffset, SESSION_FORMAT_VERSION, buildForkSeed } from '@deepseek-ai/dsh-session'
 import { createAssistantMessage, createUserMessage, createToolResultMessage, ToolCallId } from '@deepseek-ai/dsh-llm'
+import type {} from '@deepseek-ai/dsh-tool-present/types'
 import { mkdtemp, mkdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import sharp from 'sharp'
-import { NativeSessionPortability, portableRelativePath, resolvePortablePath } from '../src/host-native-session-portability.ts'
+import { NativeSessionPortability, portableRelativePath, remapNativeEvent, resolvePortablePath } from '../src/host-native-session-portability.ts'
 
 const disposers: (() => Promise<unknown>)[] = []
 afterEach(async () => { const errors: unknown[] = []; for (const dispose of disposers.splice(0).reverse()) { try { await dispose() } catch (error) { errors.push(error) } } if (errors.length) throw new AggregateError(errors) })
@@ -88,10 +89,48 @@ it('preflights missing attachments before publishing any recipient session', asy
   expect(await f.target.sessionPersistence.list()).toHaveLength(0)
 })
 
+it('rebases delivered file paths from the source workbench into the imported workbench', async () => {
+  const f = await setup()
+  const session = Session.create(SessionId('delivery'), [], { version: SESSION_FORMAT_VERSION, id: SessionId('delivery'), cwd: join(f.sourceRoot, 'project'), createdAt: 1, isSeeded: false })
+  session.append('deliverables/presented', { turn: 1, callId: ToolCallId('call-delivered'), files: [
+    { path: join(f.sourceRoot, 'project', 'absolute-output.md'), description: 'Absolute path' },
+    { path: 'relative-output.md', description: 'Legacy session-relative path' },
+  ] })
+  await persist(f.source, session)
+  const snapshot = await f.exporter.exportSnapshot(['delivery'], f.sourceRoot, f.snapshotDir)
+  const mapping = { sourceRoot: f.sourceRoot, targetRoot: f.targetRoot, sessionIds: { delivery: 'import-delivery' } }
+
+  await f.importer.importSnapshot(snapshot, f.snapshotDir, mapping)
+
+  const handle = await f.target.sessionPersistence.open(SessionId('import-delivery'), 'read')
+  try {
+    const event = (await handle.read()).events.find(row => row.type === 'deliverables/presented')
+    expect(event?.data).toMatchObject({ files: [
+      { path: join(f.targetRoot, 'project', 'absolute-output.md'), description: 'Absolute path' },
+      { path: join(f.targetRoot, 'project', 'relative-output.md'), description: 'Legacy session-relative path' },
+    ] })
+  } finally { await handle.close() }
+})
+
+it('rejects delivered file paths that escape the source workbench before publishing a recipient session', async () => {
+  const f = await setup()
+  const session = Session.create(SessionId('external-delivery'), [], { version: SESSION_FORMAT_VERSION, id: SessionId('external-delivery'), cwd: join(f.sourceRoot, 'project'), createdAt: 1, isSeeded: false })
+  session.append('deliverables/presented', { turn: 1, callId: ToolCallId('call-external'), files: [
+    { path: join(f.root, 'outside.md') },
+  ] })
+  await persist(f.source, session)
+  await expect(f.exporter.exportSnapshot(['external-delivery'], f.sourceRoot, f.snapshotDir)).rejects.toThrow('工作台根目录之外')
+  expect(await f.target.sessionPersistence.list()).toHaveLength(0)
+})
+
 it('understands foreign path dialects and rejects escaping paths', () => {
   expect(portableRelativePath('C:\\Work\\Bay', 'c:\\work\\bay\\app')).toBe('app')
   expect(portableRelativePath('/home/bay', '/home/bay/project')).toBe('project')
   expect(() => portableRelativePath('/home/bay', '/home/bay-other/project')).toThrow()
   expect(() => resolvePortablePath('/tmp/bay', '../outside')).toThrow()
   expect(() => resolvePortablePath('/tmp/bay', 'C:/outside')).toThrow()
+  const event = remapNativeEvent({ type: 'deliverables/presented', data: { files: [{ path: 'output.md' }] } } as never, {
+    sourceRoot: 'C:\\Work\\Bay', sourceCwd: 'C:\\Work\\Bay\\app', targetRoot: join(tmpdir(), 'recipient'), sessionIds: {},
+  })
+  expect(event).toMatchObject({ data: { files: [{ path: join(tmpdir(), 'recipient', 'app', 'output.md') }] } })
 })

@@ -40,8 +40,16 @@ describe('Workbench editor extension template identity', () => {
       },
     })
     expect(registration?.registrant).toBe(packageName)
-    const registrationMetadata = (registration?.inject as (() => { workbenchEditor: { presentation?: { iconSvg?: unknown } } }) | undefined)?.()
+    const registrationMetadata = (registration?.inject as (() => { workbenchEditor: { presentation?: { iconSvg?: unknown }; declaration: { state: { share: string } }; portability?: { exportState?: (value: any, context: any) => unknown; importState?: (value: any, context: any) => unknown } } }) | undefined)?.()
     expect(normalizeWorkbenchEditorSvgIcon(registrationMetadata?.workbenchEditor.presentation?.iconSvg)?.paths).toHaveLength(2)
+    expect(registrationMetadata?.workbenchEditor.declaration.state.share).toBe('portable')
+    expect(registrationMetadata?.workbenchEditor.portability).toEqual(expect.objectContaining({
+      version: 1, exportState: expect.any(Function), importState: expect.any(Function),
+    }))
+    const portableState = registrationMetadata!.workbenchEditor.portability!
+    const projectedState = portableState.exportState!({ schemaVersion: 1, acknowledged: true, localOnly: 'drop me' }, {} as never)
+    expect(projectedState).toEqual({ schemaVersion: 1, acknowledged: true })
+    expect(portableState.importState!(projectedState, {} as never)).toEqual({ schemaVersion: 1, acknowledged: true })
 
     const editors = [{
       id: 'workbench.example', label: 'Example', scope: 'root', pluginId: fiber.name,
@@ -92,6 +100,7 @@ describe('Workbench session editor template variant', () => {
     expect(metadata.declaration).toMatchObject({ scope: 'session', requiredBinding: 'session', presentation: { floating: false }, binding: { requirement: 'session', unbound: 'pending', sharing: 'independent' } })
     expect(metadata.distribution).toMatchObject({ exportPolicy: 'embed', packageName, provides: { editorIds: ['workbench.example'] } })
     expect(metadata.portability).toEqual(expect.objectContaining({ version: 1, exportState: expect.any(Function), importState: expect.any(Function) }))
+    expect(metadata.declaration.state.share).toBe('portable')
     await fiber.dispose()
   })
 })

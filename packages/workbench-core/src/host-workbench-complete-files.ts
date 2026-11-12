@@ -81,3 +81,15 @@ export function validateTargetName(relative: string, platform: NodeJS.Platform):
     if (platform === 'win32' && (/[<>:"|?*\u0000-\u001f]/u.test(segment) || /[. ]$/u.test(segment) || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/iu.test(segment))) throw new Error('目标平台不支持文件名：' + relative)
   }
 }
+
+/** Checks the selected target on export and the actual recipient on import. */
+export async function checkInventoryPlatform(file: string, platform: NodeJS.Platform): Promise<void> {
+  const paths = new Set<string>()
+  for await (const entry of readInventory(file)) {
+    validateTargetName(entry.path, platform)
+    const key = platform === 'linux' ? entry.path : entry.path.normalize('NFC').toLocaleLowerCase('und')
+    if (paths.has(key)) throw new Error('目标平台存在文件名冲突：' + entry.path)
+    paths.add(key)
+    if (entry.target !== undefined) validateTargetName(entry.target, platform)
+  }
+}

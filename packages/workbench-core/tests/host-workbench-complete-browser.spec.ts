@@ -6,7 +6,7 @@ import { HostWorkbenchDirectory } from '../src/host-workbench-directory.ts'
 import { HostWorkbenchAccess } from '../src/host-workbench-access.ts'
 import { installWorkbenchCompleteRoute, type CompleteOptions } from '../src/host-workbench-complete.ts'
 import { WORKBENCH_COMPLETE_ROUTE, WORKBENCH_COMPLETE_UPLOAD_ROUTE, WORKBENCH_COMPLETE_DOWNLOAD_ROUTE, type CompletePackageJobView, type CompletePackageUpload } from '../src/workbench-complete-contract.ts'
-import { COLLABORATION_GRANT, WORKBENCH_ACCESS_HEADER } from '../src/workbench-access-contract.ts'
+import { SHARED_CONTROL_GRANT, WORKBENCH_ACCESS_HEADER } from '../src/workbench-access-contract.ts'
 import { backgroundAiPreferencesOf } from '../src/foundation/background-ai-preferences.ts'
 
 const cleanups: (() => Promise<void>)[] = []
@@ -113,8 +113,11 @@ it('requires desktop directory selection and imports a browser upload as an iner
   expect(corrected).toMatchObject({ status: 200, value: { selection: { state: 'selected' }, upload: { id: upload.id } } })
   expect((await f.call({ action: 'reset-import-location', id: failedId })).value).toEqual(corrected.value)
   expect((await f.call({ action: 'resume', id: failedId })).status).toBe(409)
-  const guest = f.access.registerGuest('guest-1', 'wb', COLLABORATION_GRANT, () => true)
-  expect((await f.call({ action: 'jobs', workbenchId: 'wb' }, guest)).status).toBe(403)
+  const guest = f.access.registerGuest('guest-1', 'wb', SHARED_CONTROL_GRANT, () => true)
+  expect((await f.call({ action: 'jobs', workbenchId: 'wb' }, guest)).status).toBe(200)
+  const guestExport = await f.call<CompletePackageJobView>({ action: 'start-export', workbenchId: 'wb', requestId: 'guest-export' }, guest)
+  expect(guestExport.status).toBe(200)
+  expect(guestExport.value.workbenchId).toBe('wb')
 })
 
 it('cancels and resumes a job with the same identity after a delayed snapshot boundary', async () => {

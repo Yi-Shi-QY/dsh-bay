@@ -1,4 +1,5 @@
 import { workbenchEditorDeclarationFailureV1, type WorkbenchEditorScopeV1 } from './module-contract.ts'
+import { workbenchCoreCompatibilitySatisfies } from './module-source.ts'
 
 /** Public self-description repeated on every contributed Workbench editor. */
 export interface WorkbenchExtensionDeclarationV1 {
@@ -428,7 +429,7 @@ export function resolveWorkbenchExtensionAccessV1(input: {
     } else if (!provider.bundle.enabled || !provider.plugin.enabled || provider.plugin.fiberPhase !== 'active') {
       availability = 'dsh-disabled'
       detail = '此插件当前未由 DSH 正常运行；请在 DSH 插件管理中处理。'
-    } else if (extension.coreCompatibility !== input.coreVersion || extension.dshGeneration !== input.dshGeneration) {
+    } else if (!workbenchCoreCompatibilitySatisfies(input.coreVersion, extension.coreCompatibility) || extension.dshGeneration !== input.dshGeneration) {
       availability = 'incompatible'
       detail = '扩展声明的 Workbench Core 或 DSH 版本与当前运行版本不一致。'
     }

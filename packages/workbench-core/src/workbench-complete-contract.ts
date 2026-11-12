@@ -1,4 +1,36 @@
+/** The transport URL remains stable so an existing V5 upload can resume. */
 export const WORKBENCH_COMPLETE_ROUTE = '/api/workbench/complete/v5'
+export const WORKBENCH_COMPLETE_FORMAT = 6
+export type CompletePlatform = 'win32' | 'darwin' | 'linux'
+export const COMPLETE_PLATFORMS: readonly CompletePlatform[] = ['win32', 'darwin', 'linux']
+export interface CompleteMigrationDeclaration {
+  events: { type: string; schemaVersion: number }[]
+  workbenchData: { key: string; schemaVersion: number }[]
+}
+export interface CompleteExtensionLock {
+  packageName: string
+  moduleId: string
+  version: string
+  artifactSha256: string
+  permissions: string[]
+  editorIds: string[]
+  exportPolicy: 'embed' | 'reference' | 'forbid'
+  platforms: CompletePlatform[]
+  migrations: CompleteMigrationDeclaration
+  artifactPath?: string
+  /** Existing DSH distribution identity, validated before native installation. */
+  distribution?: import('./foundation/workbench-package-v4.ts').WorkbenchPackageDependencyV4
+}
+export interface CompleteExtensionCheck {
+  extension: CompleteExtensionLock
+  state: 'ready' | 'install' | 'restart' | 'conflict' | 'manual' | 'migration-missing'
+  message?: string
+}
+export interface CompletePageState {
+  moduleInstanceId: string
+  editorId: string
+  state: import('./foundation/model.ts').JsonValue
+}
 export const WORKBENCH_COMPLETE_UPLOAD_ROUTE = WORKBENCH_COMPLETE_ROUTE + '/upload'
 export const WORKBENCH_COMPLETE_DOWNLOAD_ROUTE = WORKBENCH_COMPLETE_ROUTE + '/download'
 export const WORKBENCH_COMPLETE_CHUNK_BYTES = 8 * 1024 * 1024
@@ -11,7 +43,7 @@ export interface CompletePackageReport {
   environmentSteps: string[]
 }
 export interface CompletePackageJob {
-  version: 5
+  version: 5 | 6
   id: string
   kind: 'export' | 'import'
   requestId: string
@@ -36,7 +68,24 @@ export interface CompletePackageJob {
   archiveSha256?: string
   manifestSha256?: string
   sourceRoot?: string
-  stage: 'queued' | 'preflight' | 'snapshot' | 'files' | 'sessions' | 'relations' | 'publish' | 'complete' | 'cancelled' | 'failed'
+  targetPlatform?: CompletePlatform
+  packageVersion?: 5 | 6
+  extensions?: CompleteExtensionCheck[]
+  extensionConsentDigest?: string
+  extensionPlanDigest?: string
+  restartRequiredFromBoot?: string
+  restartTransactionId?: string
+  /** Installer receipt is durable before any mutation; resumed by the same job. */
+  extensionInstallStarted?: boolean
+  workspaceMap?: Record<string, string>
+  filesPrepared?: boolean
+  exportPageStates?: CompletePageState[]
+  exportDefinitionRevision?: number
+  pageStatesRestored?: boolean
+  /** All validation completed; publication may have committed before the last job write. */
+  publicationReady?: boolean
+  overview?: CompletePackagePreflight['overview']
+  stage: 'queued' | 'preflight' | 'snapshot' | 'files' | 'awaiting-extensions' | 'installing-extensions' | 'awaiting-restart' | 'sessions' | 'extension-data' | 'awaiting-page-state' | 'relations' | 'verifying' | 'publish' | 'complete' | 'blocked' | 'cancelled' | 'failed'
   files: number
   bytes: number
   updatedAt: number
@@ -51,6 +100,12 @@ export type CompletePackageJobView = Pick<CompletePackageJob, 'version' | 'id' |
   name?: string
   targetDisplayPath?: string
   canChangeDestination?: boolean
+  targetPlatform?: CompletePlatform
+  packageVersion?: 5 | 6
+  extensions?: CompleteExtensionCheck[]
+  extensionPlanDigest?: string
+  restartTransactionId?: string
+  overview?: CompletePackagePreflight['overview']
 }
 
 export interface CompletePackageUpload {
@@ -80,6 +135,12 @@ export interface CompletePackagePreflight {
   workbenchId: string
   sessionCount: number
   manifestSha256: string
+  packageVersion?: 5 | 6
+  sourcePlatform?: CompletePlatform
+  targetPlatform?: CompletePlatform
+  recipientPlatform?: CompletePlatform
+  warnings?: string[]
+  extensions?: CompleteExtensionCheck[]
   overview?: {
     name: string
     description: string

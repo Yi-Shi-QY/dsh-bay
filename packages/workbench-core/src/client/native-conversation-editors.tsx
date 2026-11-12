@@ -4,16 +4,24 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { SessionReference } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { ConversationSnapshot } from '@deepseek-ai/dsh-client-ui-conversation/client'
+import type { SessionInput } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { SessionSnapshot } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { PropsRenderFactories, SessionProviderComponent, FactoryLocalComponent } from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { WorkbenchEditorOwnerProps } from './editor-slots.ts'
 import { retainWorkbenchArea } from './native-area-reference.ts'
 import { createWorkbenchNativeAreaSlotRenderer } from './native-area-slot-renderer.tsx'
-import { createWorkbenchSharePresenceClient, type WorkbenchSharePresenceV1 } from './workbench-share-presence.ts'
+import type { WorkbenchCollaborationClientV1 } from './workbench-collaboration-client.ts'
+import type { DraftOperationV1 } from '../workbench-collaboration-contract.ts'
 
 type NativeOwner = WorkbenchEditorOwnerProps & PropsRenderFactories & {
   SessionProvider: SessionProviderComponent
+}
+
+type PendingDraftOperation = {
+  readonly draftId: string
+  readonly operations: readonly DraftOperationV1[]
+  readonly requestId: string
 }
 
 type StartPlacement =
@@ -67,126 +75,256 @@ type InputStateSource = {
   readonly getSnapshot: () => { readonly draft?: unknown; readonly attachmentIds?: readonly unknown[]; readonly draftRev?: unknown }
 }
 
-/** Retained Session contexts identify the Session but do not grant service injection. */
-function conversationInputState(ctx: Context, binding: SessionReference['binding']): InputStateSource | undefined {
+type InputFacade = Pick<SessionInput, 'setDraft'> & { readonly state: InputStateSource }
+
+function conversationInput(ctx: Context, binding: SessionReference['binding']): InputFacade | undefined {
   const conversation = (ctx as unknown as {
-    conversation?: { input?: { for(scope: unknown): { state: InputStateSource } } }
+    conversation?: { input?: { for(scope: unknown): InputFacade } }
   }).conversation
-  return conversation?.input?.for(binding.ctx).state
+  return conversation?.input?.for(binding.ctx)
 }
 
-function SharePresenceBar({
-  ctx, owner, binding, scopeRef,
-}: {
+/** Retained Session contexts identify the Session but do not grant service injection. */
+function conversationInputState(ctx: Context, binding: SessionReference['binding']): InputStateSource | undefined {
+  return conversationInput(ctx, binding)?.state
+}
+
+function textDelta(before: string, after: string): readonly DraftOperationV1[] {
+  let prefix = 0
+  while (prefix < before.length && prefix < after.length && before[prefix] === after[prefix]) prefix += 1
+  let suffix = 0
+  while (suffix < before.length - prefix && suffix < after.length - prefix
+    && before[before.length - 1 - suffix] === after[after.length - 1 - suffix]) suffix += 1
+  const operations: DraftOperationV1[] = []
+  if (prefix > 0) operations.push({ type: 'retain', count: prefix })
+  const deleted = before.length - prefix - suffix
+  if (deleted > 0) operations.push({ type: 'delete', count: deleted })
+  const inserted = after.slice(prefix, after.length - suffix)
+  if (inserted.length > 0) operations.push({ type: 'insert', text: inserted })
+  if (suffix > 0) operations.push({ type: 'retain', count: suffix })
+  return operations
+}
+
+function selectionOffsets(root: HTMLElement): { readonly start: number; readonly end: number } | undefined {
+  const selection = globalThis.getSelection?.()
+  if (selection === null || selection === undefined || selection.rangeCount === 0 || !root.contains(selection.anchorNode) || !root.contains(selection.focusNode)) return undefined
+  const offset = (node: Node, position: number): number => {
+    const range = document.createRange()
+    range.selectNodeContents(root)
+    try { range.setEnd(node, position) } catch { return 0 }
+    return range.toString().length
+  }
+  return { start: offset(selection.anchorNode!, selection.anchorOffset), end: offset(selection.focusNode!, selection.focusOffset) }
+}
+
+function CollaborationPresenceBar({ ctx, owner, binding, scopeRef, client, session, conversation }: {
   ctx: Context
   owner: NativeOwner
   binding: SessionReference['binding']
   scopeRef: { readonly current: HTMLDivElement | null }
+  client: WorkbenchCollaborationClientV1
+  session?: SessionSnapshot
+  conversation?: ConversationSnapshot
 }) {
-  const enabled = owner.sharePresenceEnabled === true
-    && owner.workbenchId !== undefined && owner.sessionId !== undefined && owner.areaId !== undefined
-  const client = useMemo(() => createWorkbenchSharePresenceClient(ctx), [ctx])
-  const inputSource = useMemo<InputStateSource | undefined>(() => {
-    try {
-      return conversationInputState(ctx, binding)
-    } catch {
-      return undefined
-    }
-  }, [binding])
+  const snapshot = useSyncExternalStore(
+    client.subscribe,
+    client.getSnapshot,
+    client.getSnapshot,
+  )
+  const input = useMemo<InputFacade | undefined>(() => {
+    try { return conversationInput(ctx, binding) } catch { return undefined }
+  }, [binding, ctx])
+  const inputSource = input?.state
   const subscribeInput = useCallback((listener: () => void) => inputSource?.subscribe(listener) ?? (() => {}), [inputSource])
   const getInputSnapshot = useCallback(() => inputSource?.getSnapshot() ?? EMPTY_INPUT_SNAPSHOT, [inputSource])
   const inputSnapshot = useSyncExternalStore(subscribeInput, getInputSnapshot, getInputSnapshot)
+  const focusedRef = useRef(false)
   const [focused, setFocused] = useState(false)
-  const [remotePresence, setRemotePresence] = useState<readonly WorkbenchSharePresenceV1[]>([])
-  const identityKey = `${owner.workbenchId ?? ''}:${owner.sessionId ?? ''}:${owner.areaId ?? ''}`
+  const identityKey = `${owner.workbenchId ?? ''}:${owner.areaId ?? ''}:${owner.editorId ?? ''}:${owner.sessionId ?? ''}`
   const draftText = typeof inputSnapshot.draft === 'string' ? inputSnapshot.draft : ''
-  const attachmentIds = Array.isArray(inputSnapshot.attachmentIds) ? inputSnapshot.attachmentIds : []
-  const hasAttachments = attachmentIds.length > 0
-  const typing = focused && (draftText.length > 0 || hasAttachments)
-  const revisionRef = useRef<{ key: string; value: number; signature: string }>({ key: '', value: 0, signature: '' })
-  const revision = useMemo(() => {
-    const sourceRevision = typeof inputSnapshot.draftRev === 'number' && Number.isSafeInteger(inputSnapshot.draftRev)
-      ? inputSnapshot.draftRev : 0
-    const signature = `${draftText}\0${hasAttachments ? '1' : '0'}\0${typing ? '1' : '0'}\0${sourceRevision}`
-    if (revisionRef.current.key !== identityKey) revisionRef.current = { key: identityKey, value: 0, signature: '' }
-    if (revisionRef.current.signature !== signature) {
-      revisionRef.current.signature = signature
-      revisionRef.current.value = Math.max(revisionRef.current.value + 1, sourceRevision)
-    }
-    return revisionRef.current.value
-  }, [draftText, hasAttachments, identityKey, inputSnapshot.draftRev, typing])
-
+  const draft = snapshot === undefined ? undefined : Object.values(snapshot.drafts).find(value =>
+    value.areaId === owner.areaId && value.editorId === owner.editorId && value.sessionId === owner.sessionId)
+  const draftId = draft?.draftId ?? (owner.areaId && owner.editorId
+    ? `draft:${owner.areaId}:${owner.editorId}:${owner.sessionId ?? ''}`
+    : undefined)
+  const lastLocalText = useRef<string | undefined>(undefined)
+  const applyingRemote = useRef(false)
+  const ensuredDraft = useRef<string | undefined>(undefined)
+  const lastAttachments = useRef<string | undefined>(undefined)
+  const composing = useRef(false)
+  const pendingDraftOperations = useRef<PendingDraftOperation[]>([])
+  const flushingDraftOperations = useRef(false)
+  const [selection, setSelection] = useState<{ readonly start: number; readonly end: number }>()
+  const role = client.participantId === 'owner' ? 'owner' as const : 'participant' as const
+  const runtime = session as (SessionSnapshot & { running?: boolean; promptAttempted?: boolean }) | undefined
   useEffect(() => {
-    if (!enabled || scopeRef.current === null) return
+    focusedRef.current = focused
+  }, [focused])
+  useEffect(() => {
+    if (scopeRef.current === null) return
     const root = scopeRef.current
-    const refreshFocus = () => {
+    const refresh = () => {
       const active = document.activeElement
-      setFocused(active instanceof HTMLElement && root.contains(active) && active.isContentEditable)
+      const next = active instanceof HTMLElement && root.contains(active) && (active.isContentEditable || active instanceof HTMLTextAreaElement || active instanceof HTMLInputElement)
+      setFocused(next)
+      setSelection(selectionOffsets(root))
     }
-    root.addEventListener('focusin', refreshFocus)
-    root.addEventListener('focusout', refreshFocus)
-    refreshFocus()
+    const compositionStart = () => { composing.current = true }
+    const compositionEnd = () => { composing.current = false; refresh() }
+    root.addEventListener('focusin', refresh)
+    root.addEventListener('focusout', refresh)
+    root.addEventListener('compositionstart', compositionStart)
+    root.addEventListener('compositionend', compositionEnd)
+    document.addEventListener('selectionchange', refresh)
+    refresh()
     return () => {
-      root.removeEventListener('focusin', refreshFocus)
-      root.removeEventListener('focusout', refreshFocus)
+      root.removeEventListener('focusin', refresh); root.removeEventListener('focusout', refresh)
+      root.removeEventListener('compositionstart', compositionStart); root.removeEventListener('compositionend', compositionEnd)
+      document.removeEventListener('selectionchange', refresh)
     }
-  }, [enabled, scopeRef, identityKey])
-
+  }, [scopeRef, identityKey])
   useEffect(() => {
-    if (!enabled || owner.workbenchId === undefined || owner.sessionId === undefined || owner.areaId === undefined) {
-      setRemotePresence([])
+    if (draftId === undefined || owner.areaId === undefined || owner.editorId === undefined || client.getState() !== 'connected') return
+    if (ensuredDraft.current === draftId) return
+    ensuredDraft.current = draftId
+    void client.command({
+      kind: 'draft.ensure', draftId, areaId: owner.areaId, editorId: owner.editorId,
+      ...(owner.sessionId === undefined ? {} : { sessionId: owner.sessionId }),
+    }).catch(() => { if (ensuredDraft.current === draftId) ensuredDraft.current = undefined })
+  }, [client, draftId, owner.areaId, owner.editorId, owner.sessionId])
+  const flushDraftOperations = useCallback(async () => {
+    if (flushingDraftOperations.current || client.getState() !== 'connected' || draftId === undefined) return
+    flushingDraftOperations.current = true
+    try {
+      while (pendingDraftOperations.current.length > 0 && client.getState() === 'connected') {
+        const pending = pendingDraftOperations.current[0]
+        if (pending === undefined || pending.draftId !== draftId) { pendingDraftOperations.current.shift(); continue }
+        const current = client.getSnapshot()?.drafts[pending.draftId]
+        if (current === undefined) break
+        const result = await client.command({
+          kind: 'draft.apply',
+          operation: { draftId: pending.draftId, baseRevision: current.revision, requestId: pending.requestId, participantId: client.participantId, operations: pending.operations },
+        })
+        if (!result.ok) {
+          pendingDraftOperations.current.shift()
+          const latest = client.getSnapshot()?.drafts[pending.draftId]
+          if (latest !== undefined && input !== undefined) {
+            applyingRemote.current = true
+            input.setDraft(latest.text)
+            lastLocalText.current = latest.text
+            queueMicrotask(() => { applyingRemote.current = false })
+          }
+          break
+        }
+        pendingDraftOperations.current.shift()
+      }
+    } finally {
+      flushingDraftOperations.current = false
+    }
+  }, [client, draftId, input])
+  useEffect(() => {
+    if (draftId === undefined) pendingDraftOperations.current = []
+    else pendingDraftOperations.current = pendingDraftOperations.current.filter(value => value.draftId === draftId)
+  }, [draftId])
+  useEffect(() => {
+    if (input === undefined || draft === undefined || draftId === undefined || composing.current || client.getState() !== 'connected') return
+    const sharedText = draft.text
+    if (lastLocalText.current === undefined) {
+      lastLocalText.current = draftText
+      if (draftText.length === 0 && sharedText.length > 0) {
+        applyingRemote.current = true
+        input.setDraft(sharedText)
+        lastLocalText.current = sharedText
+        queueMicrotask(() => { applyingRemote.current = false })
+      } else if (draftText.length > 0 && sharedText.length === 0) {
+        pendingDraftOperations.current.push({ draftId, requestId: `${Date.now()}-${Math.random()}`, operations: textDelta('', draftText) })
+        void flushDraftOperations()
+      }
       return
     }
-    let live = true
-    let pending = false
-    const read = async () => {
-      if (!live || pending) return
-      pending = true
-      try {
-        client.refreshRpc()
-        const result = await client.read(owner.workbenchId!, owner.sessionId!, owner.areaId!)
-        if (live) setRemotePresence(result.filter(value => value.participantId !== client.participantId))
-      } catch {
-        // A non-shared Host and a transient reconnect both fail closed. The
-        // official Conversation remains fully usable without this decoration.
-      } finally { pending = false }
+    if (applyingRemote.current) return
+    if (draftText === sharedText) {
+      lastLocalText.current = draftText
+      return
     }
-    void read()
-    const timer = window.setInterval(() => { void read() }, 800)
-    return () => { live = false; window.clearInterval(timer) }
-  }, [client, enabled, identityKey, owner.areaId, owner.sessionId, owner.workbenchId])
-
+    // A remote event arrived while the local editor had not changed. Apply it
+    // into the real DSH composer so every surface renders the same draft.
+    if (lastLocalText.current === draftText) {
+      applyingRemote.current = true
+      input.setDraft(sharedText)
+      lastLocalText.current = sharedText
+      queueMicrotask(() => { applyingRemote.current = false })
+      return
+    }
+    const previous = lastLocalText.current
+    const operations = textDelta(previous, draftText)
+    lastLocalText.current = draftText
+    pendingDraftOperations.current.push({ draftId, requestId: `${Date.now()}-${Math.random()}`, operations })
+    void flushDraftOperations()
+  }, [client, draft, draftId, draftText, flushDraftOperations, input])
   useEffect(() => {
-    if (!enabled || owner.workbenchId === undefined || owner.sessionId === undefined || owner.areaId === undefined) return
+    if (input === undefined || draft === undefined || draftId === undefined || client.getState() !== 'connected') return
+    const attachments = (inputSnapshot.attachmentIds ?? []).map(value => String(value))
+    const signature = JSON.stringify(attachments)
+    if (lastAttachments.current === signature) return
+    lastAttachments.current = signature
+    if (attachments.length === 0 && draft.attachments.length === 0) return
+    if (JSON.stringify(draft.attachments) === signature) return
+    void client.command({ kind: 'draft.set-attachments', draftId, attachments, baseRevision: draft.revision }).catch(() => {})
+  }, [client, draft, draftId, input, inputSnapshot.attachmentIds])
+  useEffect(() => {
+    if (draftId === undefined || draft === undefined || selection === undefined || client.getState() !== 'connected') return
+    const current = draft.selections[client.participantId]
+    if (current?.start === selection.start && current.end === selection.end) return
+    void client.command({ kind: 'draft.set-selection', draftId, selection, cursor: selection.end, baseRevision: draft.revision }).catch(() => {})
+  }, [client, draft, draftId, selection])
+  useEffect(() => {
+    if (owner.workbenchId === undefined || owner.areaId === undefined || owner.editorId === undefined) return
     const timer = window.setTimeout(() => {
-      void client.publish({
-        workbenchId: owner.workbenchId!, sessionId: owner.sessionId!, areaId: owner.areaId!,
-        typing, draftText, hasAttachments, revision,
-      }).catch(() => {})
-    }, 140)
-    return () => { window.clearTimeout(timer) }
-  }, [client, draftText, enabled, hasAttachments, owner.areaId, owner.sessionId, owner.workbenchId, revision, typing])
-
-  useEffect(() => {
-    if (!enabled || owner.workbenchId === undefined || owner.sessionId === undefined || owner.areaId === undefined) return
-    return () => { void client.clear(owner.workbenchId!, owner.sessionId!, owner.areaId!).catch(() => {}) }
-  }, [client, enabled, identityKey, owner.areaId, owner.sessionId, owner.workbenchId])
-
-  if (remotePresence.length === 0) return null
-  return <div
-    data-workbench-share-presence
-    role="status"
-    aria-live="polite"
-    style={{ flex: '0 0 auto', display: 'flex', flexDirection: 'column', gap: 4, padding: '6px 12px', borderBottom: '1px solid var(--dsw-alias-border-tertiary, rgba(127,127,127,.2))', color: 'var(--dsw-alias-label-secondary, currentColor)', fontSize: 12 }}
-  >
-    {remotePresence.map(presence => <div key={`${presence.participantId}:${presence.sessionId}:${presence.areaId}`} data-workbench-share-presence-participant={presence.participantId}>
-      <strong>{presence.role === 'host' ? '房主' : '访客'}{presence.typing ? '正在输入' : '未发送草稿'}</strong>
-      {presence.draftText.length > 0 ? <pre style={{ margin: '2px 0 0', maxHeight: 96, overflow: 'auto', whiteSpace: 'pre-wrap', font: 'inherit' }}>{presence.draftText}</pre> : null}
-      {presence.hasAttachments ? <span> · 含附件</span> : null}
-    </div>)}
+      client.publishPresence({
+        participantId: client.participantId,
+        displayName: role === 'owner' ? '\u623f\u4e3b' : '\u534f\u4f5c\u8005',
+        role,
+        ...(owner.areaId === undefined ? {} : { areaId: owner.areaId }),
+        ...(owner.editorId === undefined ? {} : { editorId: owner.editorId }),
+        ...(owner.sessionId === undefined ? {} : { sessionId: owner.sessionId }),
+        intent: runtime?.running === true || (conversation?.activeTargets.size ?? 0) > 0
+          ? 'running'
+          : runtime?.promptAttempted === true
+            ? 'sending'
+            : focusedRef.current || draftText.length > 0 ? 'editing' : 'viewing',
+        ...(draft?.draftId === undefined ? {} : { draftId: draft.draftId }),
+        connectionState: client.getState() === 'connected' ? 'connected' : 'reconnecting',
+        ...(selection === undefined ? {} : { cursor: selection.end, selection }),
+        updatedAt: Date.now(),
+      })
+    }, 120)
+    return () => window.clearTimeout(timer)
+  }, [client, conversation?.activeTargets.size, draft?.draftId, draftText.length, identityKey, owner.areaId, owner.editorId, owner.sessionId, owner.workbenchId, focused, role, runtime?.promptAttempted, runtime?.running, selection])
+  const remote = snapshot?.participants.filter(value => value.participantId !== client.participantId) ?? []
+  if (remote.length === 0) return null
+  return <div data-workbench-collaboration-presence role="status" aria-live="polite" style={{ flex: '0 0 auto', display: 'flex', flexDirection: 'column', gap: 4, padding: '6px 12px', borderBottom: '1px solid var(--dsw-alias-border-tertiary, rgba(127,127,127,.2))', color: 'var(--dsw-alias-label-secondary, currentColor)', fontSize: 12 }}>
+    {remote.map(presence => {
+      const location = [presence.areaId, presence.editorId, presence.sessionId].filter(Boolean).join(' / ')
+       return <div key={presence.participantId} data-workbench-collaboration-participant={presence.participantId}>
+         <strong>{presence.displayName || (presence.role === 'owner' ? '房主' : '协作者')} · {presence.connectionState === 'stale' ? '已失联' : presence.intent === 'editing' ? '正在编辑' : presence.intent === 'sending' ? '正在发送' : presence.intent === 'running' ? '正在执行任务' : presence.intent === 'recovering' ? '正在恢复' : '正在查看'}</strong>
+        {location ? <span> · {location}</span> : null}
+      </div>
+    })}
   </div>
 }
 
+function SharePresenceBar(props: {
+  ctx: Context
+  owner: NativeOwner
+  binding: SessionReference['binding']
+  scopeRef: { readonly current: HTMLDivElement | null }
+  session?: SessionSnapshot
+  conversation?: ConversationSnapshot
+}) {
+  if (props.owner.collaborationClient === undefined) return null
+  return <CollaborationPresenceBar {...props} client={props.owner.collaborationClient} />
+}
 function conversationPresentationOf(
   sessionId: string | undefined,
   session: SessionSnapshot | undefined,
@@ -228,7 +366,7 @@ export function createWorkbenchNativeConversationEditors(ctx: Context) {
         const input = conversationInputState(ctx, binding)?.getSnapshot()
         if (!input) return false
         const draft = typeof input?.draft === 'string' ? input.draft.trim() : ''
-        return !draft && !input?.attachmentIds?.length || globalThis.confirm('此对话还有未发送的文字或附件，确定关闭这个内页吗？')
+        return !draft && !input?.attachmentIds?.length || globalThis.confirm('此对话还有未发��的文字或附件，确定关闭这个内页吗？')
       } catch { return false }
     }), [owner.registerCloseGuard, binding])
   }
@@ -434,10 +572,10 @@ export function createWorkbenchNativeConversationEditors(ctx: Context) {
         if (mountedRef.current) setPlacement({
           phase: 'failed', workspaceId,
           message: code === 'area-already-bound'
-            ? '目标内页已发生变化，请重新打开新建对话入口。'
+            ? '\u76ee\u6807\u5185\u9875\u5df2\u53d1\u751f\u53d8\u5316\uff0c\u8bf7\u91cd\u65b0\u6253\u5f00\u65b0\u5efa\u5bf9\u8bdd\u5165\u53e3\u3002'
             : code === 'placement-stale'
-              ? '目标内页或项目已发生变化，请重试。'
-              : '无法准备此工作区对话，请重试。',
+              ? '\u76ee\u6807\u5185\u9875\u6216\u9879\u76ee\u5df2\u53d1\u751f\u53d8\u5316\uff0c\u8bf7\u91cd\u8bd5\u3002'
+              : '\u65e0\u6cd5\u51c6\u5907\u6b64\u5de5\u4f5c\u533a\u5bf9\u8bdd\uff0c\u8bf7\u91cd\u8bd5\u3002',
         })
         throw reason
       }).finally(() => {
@@ -513,7 +651,7 @@ export function createWorkbenchNativeConversationEditors(ctx: Context) {
       : <>{header}{content}</>
     const scopeRef = useRef<HTMLDivElement>(null)
     return <div ref={scopeRef} data-workbench-native-conversation={view} data-workbench-session-id={owner.sessionId} data-workbench-conversation-ready={presentation.phase !== 'settling'} style={{ display: 'flex', minHeight: 0, height: '100%', flexDirection: 'column' }}>
-      {view === 'chat' ? <SharePresenceBar ctx={ctx} owner={owner} binding={reference.binding} scopeRef={scopeRef} /> : null}
+      {view === 'chat' ? <SharePresenceBar ctx={ctx} owner={owner} binding={reference.binding} scopeRef={scopeRef} session={session as SessionSnapshot} conversation={conversation} /> : null}
       <WorkbenchPageTransition loading={presentation.phase === 'settling'} label={view === 'trajectory' ? '轨迹' : owner.instanceId === 'bay-agent-main' ? 'Bay Agent' : '对话'} icon={view === 'trajectory' ? 'trajectory' : 'message'}>{renderedContent}</WorkbenchPageTransition>
     </div>
   }
@@ -528,7 +666,7 @@ export function createWorkbenchNativeConversationEditors(ctx: Context) {
       setReference(undefined)
       setError('')
       if (!owner.sessionId || !owner.areaId || !owner.areaClaim) {
-        setError('缺少对话标识或容器归属。')
+        setError('\u7f3a\u5c11\u5bf9\u8bdd\u6807\u8bc6\u6216\u5bb9\u5668\u5f52\u5c5e')
         return
       }
       let live = true

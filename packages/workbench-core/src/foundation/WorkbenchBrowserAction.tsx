@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { IconBrowseOutlineMedium } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { WorkbenchWindowSnapshotV1 } from '../client/workbench-window-controller.ts'
 import { isElectronCarrier } from '../client/browser-window-controller.ts'
+import { projectWorkbenchBrowserLifecycleV1 } from '../client/workbench-browser-lifecycle.ts'
 
 /** A per-workbench tab action for opening or reclaiming its browser view. */
 export function WorkbenchBrowserAction({
@@ -25,31 +26,30 @@ export function WorkbenchBrowserAction({
   const request = windowSnapshot.requests?.find(row => row.workbenchId === workbenchId)
     ?? (windowSnapshot.request?.workbenchId === workbenchId ? windowSnapshot.request : undefined)
   const handoffStatus = request?.status
-  const openingInBrowser = handoffStatus === 'requested' || handoffStatus === 'redeemed'
-  const browserViewReady = handoffStatus === 'ready' || handoffStatus === 'failed' && request?.code === 'browser-view-heartbeat-timeout'
-  const reclaimPending = handoffStatus === 'reclaiming'
-  const hostPreparing = handoffStatus === 'preparing'
-  const isBusy = preparing || opening || reclaiming || openingInBrowser || reclaimPending || hostPreparing
+  const localPhase = preparing ? 'preparing' : opening ? 'opening' : reclaiming ? 'reclaiming' : 'idle'
+  const lifecycle = projectWorkbenchBrowserLifecycleV1(request, localPhase)
+  const browserViewReady = lifecycle.phase === 'ready' || lifecycle.phase === 'failed' && lifecycle.canReclaim
+  const isBusy = lifecycle.busy
   const label = browserViewReady
     ? `收回“${workbenchName}”到 DSH 客户端`
-    : reclaimPending ? `正在收回“${workbenchName}”…`
-      : openingInBrowser ? `正在浏览器中打开“${workbenchName}”…`
-        : preparing || hostPreparing ? `正在准备“${workbenchName}”…`
-          : opening ? `正在打开“${workbenchName}”…`
-            : !windowSnapshot.supported ? `DSH 浏览器窗口服务不可用：${workbenchName}`
-              : prepareFailed ? `重试在浏览器打开“${workbenchName}”`
-                : `在浏览器打开工作台“${workbenchName}”`
+    : lifecycle.phase === 'reclaiming' ? `正在收回“${workbenchName}”…`
+      : lifecycle.phase === 'opening' || lifecycle.phase === 'initializing' ? `正在浏览器中打开“${workbenchName}”…`
+        : lifecycle.phase === 'preparing' ? `正在准备“${workbenchName}”…`
+          : !windowSnapshot.supported ? `DSH 浏览器窗口服务不可用：${workbenchName}`
+            : prepareFailed ? `重试在浏览器打开“${workbenchName}”`
+              : `在浏览器打开工作台“${workbenchName}”`
   const state = browserViewReady ? 'ready'
-    : reclaimPending ? 'reclaiming'
-      : openingInBrowser ? 'requested'
-        : preparing || hostPreparing ? 'preparing'
-          : opening ? 'opening'
-            : prepareFailed ? 'failed'
-              : windowSnapshot.supported ? 'idle' : 'unsupported'
+    : lifecycle.phase === 'reclaiming' ? 'reclaiming'
+      : lifecycle.phase === 'initializing' ? 'initializing'
+        : lifecycle.phase === 'opening' ? 'requested'
+          : lifecycle.phase === 'preparing' ? 'preparing'
+            : lifecycle.phase === 'failed' || prepareFailed ? 'failed'
+              : lifecycle.phase === 'expired' ? 'expired'
+                : windowSnapshot.supported ? 'idle' : 'unsupported'
 
   const handleClick = () => {
     if (isBusy) return
-    if (browserViewReady) {
+    if (lifecycle.canReclaim) {
       if (onReclaim === undefined) return
       onTransition?.(workbenchId, 'reclaiming')
       setReclaiming(true)
@@ -87,7 +87,7 @@ export function WorkbenchBrowserAction({
     data-state={state}
     aria-label={label}
     title={label}
-    disabled={isBusy || (browserViewReady && onReclaim === undefined)}
+    disabled={isBusy || (lifecycle.canReclaim && onReclaim === undefined)}
     onClick={handleClick}
-  ><IconBrowseOutlineMedium size={16} />{showLabel ? <span>{browserViewReady ? '收回到 DSH 客户端' : '在浏览器打开'}</span> : null}</button>
+  ><IconBrowseOutlineMedium size={16} />{showLabel ? <span>{browserViewReady ? '收回到 DSH 客户端' : lifecycle.phase === 'reclaiming' ? '正在收回' : '在浏览器打开'}</span> : null}</button>
 }

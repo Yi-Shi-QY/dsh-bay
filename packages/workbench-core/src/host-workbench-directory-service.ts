@@ -18,7 +18,8 @@ export function installWorkbenchDirectoryHost(ctx: Context): (() => void) | unde
   const connection = ctx.get('connection', false), profile = ctx.get('profileContext', false), workspaces = ctx.get('workspaceRegistry', false)
   if (!connection?.fetch || !profile?.dir || !workspaces) return undefined
   const directory = new HostWorkbenchDirectory(profile.dir, workspaces, decodeWorkbenchSettingsV4(ctx.get('settings', false)?.describe().find(row => row.ns === 'workbench-layout')?.value))
-  const access = new HostWorkbenchAccess(directory)
+  const memory = new HostWorkbenchMemory(id => directory.rootPath(id), id => directory.getSnapshot().value.workbenches[id]!)
+  const access = new HostWorkbenchAccess(directory, memory)
   ctx.provide(WORKBENCH_DIRECTORY_SERVICE, directory)
   ctx.provide(WORKBENCH_ACCESS_SERVICE, access)
   const runtime = () => {
@@ -26,7 +27,6 @@ export function installWorkbenchDirectoryHost(ctx: Context): (() => void) | unde
     if (!value) throw new Error('会话服务正在启动，请稍后重试；工作台目录已保留。')
     return value
   }
-  const memory = new HostWorkbenchMemory(id => directory.rootPath(id), id => directory.getSnapshot().value.workbenches[id]!)
   const dispose = installWorkbenchDirectoryRoute(connection, directory, id => runtime().ensure(id), memory, input => runtime().createUserSession(input), access)
   return () => { dispose(); access.dispose() }
 }

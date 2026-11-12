@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import type { WorkbenchEditorBackgroundRuntimeV1 } from '../module-contract.ts'
 import type { WorkbenchEditorDeclarationV1 } from '../module-contract.ts'
 import type { WorkbenchResourceRouteResult, WorkbenchResourceSourceV1 } from './workbench-resource-opener.ts'
+import type { WorkbenchCollaborationClientV1 } from './workbench-collaboration-client.ts'
 
 /** Core-owned instance state and explicit Area binding, independent of DSH's current Session. */
 export interface WorkbenchEditorOwnerProps {
@@ -11,10 +12,12 @@ export interface WorkbenchEditorOwnerProps {
   readonly runtimeIdentity?: string
   registerCloseGuard?(guard: () => boolean | Promise<boolean>): () => void
   readonly instanceId: string
+  /** Catalog identity of the mounted editor, used for collaboration presence. */
+  readonly editorId?: string
   /** Runtime Workbench identity used by ephemeral LAN share presence. */
   readonly workbenchId?: string
-  /** Whether the Host share session is active for this runtime page. */
-  readonly sharePresenceEnabled?: boolean
+  /** Host authoritative shared-control channel for this Workbench surface. */
+  readonly collaborationClient?: WorkbenchCollaborationClientV1 | undefined
   /** Disposable display location; never use as a durable project key. */
   readonly areaId?: string
   /** Stable project identity, also supplied to project pages without a Session. */

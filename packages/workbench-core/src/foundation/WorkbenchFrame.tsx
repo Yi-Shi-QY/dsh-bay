@@ -3,7 +3,6 @@ import { WorkbenchReclaimProgress } from './WorkbenchReclaimProgress.tsx'
 import { WorkbenchImportDirectoryRequests } from './WorkbenchCompletePackagePanel.tsx'
 import { WorkbenchCollaborationApprovals, WorkbenchShareGrantControls } from './WorkbenchSharePermissions.tsx'
 import { workbenchAccess } from '../client/workbench-access.ts'
-import { REVIEW_GRANT } from '../workbench-access-contract.ts'
 import { RetainedEditorTarget, useFloatingWorkspace, FloatingWorkspaceUnread } from './FloatingWorkspaceContext.tsx'
 import type { FloatingWorkspaceRuntime } from '../client/floating-workspace-runtime.ts'
 import { floatingInstanceKey } from '../client/floating-workspace-runtime.ts'
@@ -195,12 +194,22 @@ import type { WorkbenchToolGatewayManagerV1 } from '../tool-gateway.ts'
 import type { WorkbenchToolUsageServiceV1 } from '../tool-usage.ts'
 import { WorkbenchToolGatewayDialog } from './WorkbenchToolGatewayDialog.tsx'
 import type { WorkbenchShareControllerV1, WorkbenchShareSnapshotV1 } from '../client/workbench-share-controller.ts'
-import { isWorkbenchShareGuestPage, readWorkbenchShareGuestNickname, updateWorkbenchShareGuestNickname } from '../client/workbench-share-guest.ts'
+import { DESKTOP_WORKBENCH_SURFACE_V1, type WorkbenchSurfaceContextV1, type WorkbenchSurfaceContextV2 } from '../client/workbench-surface-context.ts'
+import type { WorkbenchCollaborationClientV1 } from '../client/workbench-collaboration-client.ts'
+import type { SharedCanvasFocusV1, WorkbenchCollaborationSnapshotV1 } from '../workbench-collaboration-contract.ts'
 import type { BayAgentControllerV1 } from './workbench-bay-agent-work.ts'
 
 const EMPTY_WORKBENCH_SHARE_SNAPSHOT: WorkbenchShareSnapshotV1 = Object.freeze({
   supported: false, sessions: Object.freeze([]), links: Object.freeze({}),
 })
+
+function sharedLayoutOf(value: unknown): WorkbenchLayoutDocument | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
+  const candidate = value as { version?: unknown; root?: unknown; activeGroupId?: unknown }
+  return candidate.version === 2 && typeof candidate.activeGroupId === 'string' && typeof candidate.root === 'object' && candidate.root !== null
+    ? value as WorkbenchLayoutDocument
+    : undefined
+}
 
 type WorkbenchSelectionTrace = {
   readonly id: string
@@ -261,14 +270,15 @@ export type WorkbenchFrameProps =
      toolGateway?: WorkbenchToolGatewayManagerV1
     /** Optional read-only DSH Session usage projection for the gateway drawer. */
     toolUsageService?: WorkbenchToolUsageServiceV1
-    /** Browser carrier mode pins this Frame to one Workbench and hides the DSH shell. */
-    browserView?: boolean
-    browserWorkbenchId?: string
+    /** Rendering surface; browser surfaces remain pinned to one Host workbench. */
+    surfaceContext?: WorkbenchSurfaceContextV1 | WorkbenchSurfaceContextV2
+    /** Host-authoritative collaboration channel for shared-control surfaces. */
+    collaborationClient?: WorkbenchCollaborationClientV1 | undefined
     /** Browser view initiates reclaim with its own Host-issued window identity. */
     requestBrowserReclaim?: (workbenchId: string) => Promise<boolean>
     /** Optional host diagnostics sink. Metrics are runtime-only and never persisted. */
     runtimeMetrics?: WorkbenchRuntimeMetricsSinkV1
-    /** Host-only LAN share management; guest pages do not receive this adapter. */
+    /** Host-only LAN share management; shared-control participants do not receive this adapter. */
     shareController?: WorkbenchShareControllerV1
     /** User preference for Conversation resource routing in Workbench mode. */
     conversationResourcePolicy?: WorkbenchConversationInteractionPolicyV1 | undefined
@@ -777,6 +787,31 @@ function bindingOfActive(document: WorkbenchLayoutDocument): SessionBindingV1 | 
   return tab?.binding ?? (tab?.sessionId === undefined ? undefined : { sessionId: tab.sessionId })
 }
 
+function focusOfLayout(document: WorkbenchLayoutDocument): SharedCanvasFocusV1 | undefined {
+  const group = groupsOf(document.root).find(row => row.id === document.activeGroupId)
+  const tab = group === undefined ? undefined : activeTab(group)
+  if (group === undefined || tab === undefined) return undefined
+  return { areaId: group.id, editorId: tab.editorId, ...(tab.sessionId === undefined ? {} : { sessionId: tab.sessionId }) }
+}
+
+function CollaborationParticipantStrip({ snapshot, currentParticipantId }: {
+  readonly snapshot: WorkbenchCollaborationSnapshotV1 | undefined
+  readonly currentParticipantId?: string | undefined
+}) {
+  const participants = snapshot?.participants.filter(row => row.participantId !== currentParticipantId) ?? []
+  if (participants.length === 0) return null
+  const intentLabel = (intent: string) => intent === 'editing' ? '正在编辑' : intent === 'sending' ? '正在发送' : intent === 'running' ? '正在执行任务' : intent === 'recovering' ? '正在恢复' : '正在查看'
+  return <div data-workbench-collaboration-participants role="status" aria-live="polite" style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', marginTop: 4, fontSize: 12, color: 'var(--dsw-alias-label-secondary, #62676d)' }}>
+    {participants.map(participant => {
+      const location = [participant.areaId, participant.editorId, participant.sessionId].filter(Boolean).join(' / ')
+      const stale = participant.connectionState === 'stale'
+      return <span key={participant.participantId} data-workbench-collaboration-participant={participant.participantId} data-connection-state={participant.connectionState}>
+        {participant.displayName || (participant.role === 'owner' ? '房主' : '参与者')} · {stale ? '已失联' : intentLabel(participant.intent)}{location ? ` · ${location}` : ''}
+      </span>
+    })}
+  </div>
+}
+
 function accountForBinding(
   binding: SessionBindingV1,
 ): WorkspaceAccountKey {
@@ -913,6 +948,9 @@ function withoutRecordKey<T>(
 }
 
 export function WorkbenchFrame(props: WorkbenchFrameProps) {
+  const surfaceContext = props.surfaceContext ?? DESKTOP_WORKBENCH_SURFACE_V1
+  const isBrowserSurface = surfaceContext.kind !== 'desktop'
+  const surfaceWorkbenchId = surfaceContext.kind === 'browser-owner' || surfaceContext.kind === 'lan-participant' ? surfaceContext.workbenchId : undefined
   const resizeCanvasRef = useRef<HTMLDivElement>(null)
   const floatingPinPending = useRef(false)
   const {
@@ -922,7 +960,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
     connectWorkspace, createWorkspaceSession, createWorkspace, sidebarHostActions, openOfficialSession, runtimeMetrics,
     conversationResourcePolicy,
   } = props
-  const surfaceView = props.browserView === true ? 'workbench' : (props.surfaceView ?? 'workbench')
+  const surfaceView = isBrowserSurface ? 'workbench' : (props.surfaceView ?? 'workbench')
   const subscribeExtensionRegistry = useCallback(
     (listener: () => void) => props.extensionRegistry?.subscribe(listener) ?? (() => {}), [props.extensionRegistry],
   )
@@ -941,6 +979,22 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
     subscribeSettingsScope, getSettingsScopeSnapshot, getSettingsScopeSnapshot,
   )
   const workbenchDirectory = props.workbenchDirectory ?? EMPTY_WORKBENCH_DIRECTORY
+  // Both the browser owner and LAN participants render the same Host-owned
+  // collaboration canvas.  The owner keeps share-management controls through
+  // the surface policy, but its layout and shared draft state still flow via
+  // the collaboration session so every surface observes one truth.
+  const collaborationControlled = (surfaceContext.kind === 'lan-participant' || surfaceContext.kind === 'browser-owner')
+    && props.collaborationClient !== undefined
+  const subscribeCollaboration = useCallback(
+    (listener: () => void) => props.collaborationClient?.subscribe(() => { listener() }) ?? (() => {}),
+    [props.collaborationClient],
+  )
+  const getCollaborationSnapshot = useCallback(
+    () => props.collaborationClient?.getSnapshot(), [props.collaborationClient],
+  )
+  const collaborationSnapshot = useSyncExternalStore(
+    subscribeCollaboration, getCollaborationSnapshot, getCollaborationSnapshot,
+  )
   const subscribeWorkbenchDirectory = useCallback(
     (listener: () => void) => workbenchDirectory.subscribe(listener), [workbenchDirectory],
   )
@@ -986,34 +1040,24 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
   const workbenchShareSnapshot = useSyncExternalStore(
     subscribeWorkbenchShare, getWorkbenchShareSnapshot, getWorkbenchShareSnapshot,
   )
-  const shareGuest = isWorkbenchShareGuestPage()
   const accessSnapshot = useSyncExternalStore(workbenchAccess.subscribe, workbenchAccess.getSnapshot, workbenchAccess.getSnapshot)
-  const canEditLayout = !shareGuest || accessSnapshot?.capabilities.includes('layout') === true
+  const canEditLayout = accessSnapshot?.capabilities.includes('layout') !== false
   const [shareBusy, setShareBusy] = useState(false)
   const [shareNotice, setShareNotice] = useState<string>()
-  const [guestNickname, setGuestNickname] = useState<string>()
-  const [guestNicknameDraft, setGuestNicknameDraft] = useState('')
-  const [guestNicknameEditing, setGuestNicknameEditing] = useState(false)
-  const [guestNicknameBusy, setGuestNicknameBusy] = useState(false)
+  const [showBrowserRootPath, setShowBrowserRootPath] = useState(false)
   useEffect(() => {
-    if (!shareGuest) return
-    void readWorkbenchShareGuestNickname().then(value => {
-      if (value !== undefined) { setGuestNickname(value); setGuestNicknameDraft(value) }
-    })
-  }, [shareGuest])
-  useEffect(() => {
-    const browserShareWorkbenchId = props.browserWorkbenchId
-    if (shareGuest || props.browserView !== true || browserShareWorkbenchId === undefined || shareController === undefined) return
+    const surfaceShareWorkbenchId = surfaceWorkbenchId
+    if (isBrowserSurface !== true || surfaceShareWorkbenchId === undefined || shareController === undefined) return
     let disposed = false
     const refresh = () => {
-      if (!disposed) void shareController.refresh(browserShareWorkbenchId).catch(() => {})
+      if (!disposed) void shareController.refresh(surfaceShareWorkbenchId).catch(() => {})
     }
     refresh()
     const timer = window.setInterval(refresh, 1000)
     return () => { disposed = true; window.clearInterval(timer) }
-  }, [props.browserView, props.browserWorkbenchId, shareController, shareGuest])
+  }, [isBrowserSurface, surfaceWorkbenchId, shareController])
   const browserOwnedWorkbenchIds = useMemo(() => {
-    if (props.browserView === true) return new Set<string>()
+    if (isBrowserSurface === true) return new Set<string>()
     const requests = [
       ...(workbenchWindowSnapshot.requests ?? []),
       ...(workbenchWindowSnapshot.request === undefined ? [] : [workbenchWindowSnapshot.request]),
@@ -1021,21 +1065,21 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
     return new Set(requests
       .filter(row => ['preparing', 'prepared', 'requested', 'redeemed', 'ready', 'reclaiming'].includes(row.status))
       .map(row => row.workbenchId))
-  }, [props.browserView, workbenchWindowSnapshot.request, workbenchWindowSnapshot.requests])
+  }, [isBrowserSurface, workbenchWindowSnapshot.request, workbenchWindowSnapshot.requests])
   const isBrowserOwnedWorkbench = useCallback(
-    (workbenchId: string) => props.browserView !== true && browserOwnedWorkbenchIds.has(workbenchId),
-    [browserOwnedWorkbenchIds, props.browserView],
+    (workbenchId: string) => isBrowserSurface !== true && browserOwnedWorkbenchIds.has(workbenchId),
+    [browserOwnedWorkbenchIds, isBrowserSurface],
   )
   const browserOwnedWorkbench = isBrowserOwnedWorkbench(workbenchDirectorySnapshot.activeWorkbenchId ?? '')
   const loadedWorkbenchIds = workbenchDirectorySnapshot.openWorkbenchIds ?? workbenchDirectorySnapshot.rows.map(row => row.workbenchId)
-  const visibleWorkbenchIds = props.browserView === true && props.browserWorkbenchId !== undefined
-    ? loadedWorkbenchIds.filter(workbenchId => workbenchId === props.browserWorkbenchId)
+  const visibleWorkbenchIds = isBrowserSurface === true && surfaceWorkbenchId !== undefined
+    ? loadedWorkbenchIds.filter(workbenchId => workbenchId === surfaceWorkbenchId)
     : loadedWorkbenchIds
   const openWorkbenchRows = visibleWorkbenchIds
     .map(workbenchId => workbenchDirectorySnapshot.rows.find(row => row.workbenchId === workbenchId))
     .filter((row): row is NonNullable<typeof row> => row !== undefined)
-  const browserWorkbenchName = props.browserView === true && props.browserWorkbenchId !== undefined
-    ? workbenchDirectorySnapshot.rows.find(row => row.workbenchId === props.browserWorkbenchId)?.name
+  const browserWorkbenchName = isBrowserSurface === true && surfaceWorkbenchId !== undefined
+    ? workbenchDirectorySnapshot.rows.find(row => row.workbenchId === surfaceWorkbenchId)?.name
     : undefined
   const preciseAccountsRef = useRef(new Map<SessionId, WorkspaceAccountKey>())
   const rosterAccount = accountFor(current, workspaces)
@@ -1046,12 +1090,14 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
   const [sidebarExpanded, setSidebarExpanded] = useState(true)
   const [narrowSidebarExpanded, setNarrowSidebarExpanded] = useState(false)
   const [layout, setLayout] = useState<WorkbenchLayoutDocument>(() => {
+    const shared = sharedLayoutOf(collaborationSnapshot?.sharedCanvas.layout)
+    if (collaborationControlled && shared !== undefined) return shared
     const persisted = settings.getSnapshot().value?.layouts[account]
     return persisted === undefined ? defaultLayout(projectNeutral ? undefined : current, account) : migrateOuterShellEditors(persisted)
   })
   const [frameTransition, setFrameTransition] = useState<WorkbenchFrameTransition>()
   const displayedWorkbenchId = frameTransition?.workbenchId ?? workbenchDirectorySnapshot.activeWorkbenchId
-  const selectedWorkbenchId = props.browserWorkbenchId ?? workbenchDirectorySnapshot.activeWorkbenchId
+  const selectedWorkbenchId = surfaceWorkbenchId ?? workbenchDirectorySnapshot.activeWorkbenchId
   useEffect(() => {
     if (selectedWorkbenchId !== undefined) props.bayAgent?.setWorkbenchId(selectedWorkbenchId)
   }, [props.bayAgent, selectedWorkbenchId])
@@ -1066,14 +1112,14 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
     && persistedLayoutLocked !== layoutLockOverride.locked
   useEffect(() => {
     if (selectedWorkbenchId !== undefined && layoutLockOverride?.workbenchId === selectedWorkbenchId
-      && persistedLayoutLocked === layoutLockOverride.locked) setLayoutLockOverride(undefined)
+      && persistedLayoutLocked === layoutLockOverride?.locked) setLayoutLockOverride(undefined)
   }, [layoutLockOverride, persistedLayoutLocked, selectedWorkbenchId])
   const selectedLayout = settingsSnapshot.value?.layouts.ungrouped
   const selectionLayoutReady = frameTransition?.kind === 'selection'
     && selectedWorkbenchId === frameTransition.workbenchId
     && selectedLayout !== undefined
     && JSON.stringify(migrateOuterShellEditors(layout)) === JSON.stringify(migrateOuterShellEditors(selectedLayout))
-  const placementWorkbenchId = props.browserWorkbenchId
+  const placementWorkbenchId = surfaceWorkbenchId
     ?? (frameTransition?.kind === 'selection' && !selectionLayoutReady
       ? frameTransition.fromWorkbenchId
       : selectedWorkbenchId ?? 'legacy-frame')
@@ -1185,6 +1231,8 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
   // may hydrate its real value after first exposing a default snapshot with
   // the same revision, and that same-revision hydration must remain visible.
   const lastSavedRevisionRef = useRef<number>()
+  const sharedLayoutRevisionRef = useRef<number>()
+  const remoteFocusKeyRef = useRef<string>()
   const conflictRef = useRef(conflict)
   const invalidLayoutRef = useRef(invalidLayout)
   const deferredOpenRef = useRef<{
@@ -1221,6 +1269,75 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
   conflictRef.current = conflict
   invalidLayoutRef.current = invalidLayout
 
+  useEffect(() => {
+    if (!collaborationControlled || collaborationSnapshot === undefined) return
+    const incoming = sharedLayoutOf(collaborationSnapshot.sharedCanvas.layout)
+    if (incoming === undefined || sharedLayoutRevisionRef.current === collaborationSnapshot.canvasRevision) return
+    sharedLayoutRevisionRef.current = collaborationSnapshot.canvasRevision
+    if (JSON.stringify(incoming) === JSON.stringify(documentRef.current)) return
+    documentRef.current = incoming
+    lastSavedRef.current = incoming
+    lastSavedRevisionRef.current = undefined
+    setLayout(incoming)
+    setPending([])
+    setPast([])
+    setFuture([])
+    setConflict(undefined)
+    setSaveState('saved')
+  }, [collaborationControlled, collaborationSnapshot])
+
+  // Focus is a shared canvas fact, while the layout tree remains the durable
+  // source for the active Area and tab. Apply a remote focus locally without
+  // issuing a second layout write, then publish local tab changes as focus
+  // commands so every participant follows the same page.
+  useEffect(() => {
+    if (!collaborationControlled || collaborationSnapshot?.sharedCanvas.focus === undefined) return
+    const incoming = collaborationSnapshot.sharedCanvas.focus
+    const group = groupsOf(documentRef.current.root).find(row => row.id === incoming.areaId)
+    const tab = group?.tabs.find(row => row.editorId === incoming.editorId && (incoming.sessionId === undefined || row.sessionId === incoming.sessionId))
+    if (group === undefined || tab === undefined) return
+    const current = focusOfLayout(documentRef.current)
+    if (current?.areaId === incoming.areaId && current.editorId === incoming.editorId && current.sessionId === incoming.sessionId) return
+    const next = applyLayoutCommand(documentRef.current, { type: 'activate', groupId: group.id, tabId: tab.id })
+    remoteFocusKeyRef.current = JSON.stringify(incoming)
+    documentRef.current = next
+    setLayout(next)
+    setPending([])
+    setSaveState('saved')
+  }, [collaborationControlled, collaborationSnapshot?.canvasRevision, collaborationSnapshot?.sharedCanvas.focus])
+
+  useEffect(() => {
+    if (!collaborationControlled || props.collaborationClient === undefined || collaborationSnapshot === undefined) return
+    const focus = focusOfLayout(layout)
+    if (focus === undefined) return
+    const key = JSON.stringify(focus)
+    if (remoteFocusKeyRef.current === key) { remoteFocusKeyRef.current = undefined; return }
+    const shared = collaborationSnapshot.sharedCanvas.focus
+    if (shared?.areaId === focus.areaId && shared.editorId === focus.editorId && shared.sessionId === focus.sessionId) return
+    void props.collaborationClient.command({ kind: 'canvas.set-focus', focus }, collaborationSnapshot.workbenchRevision).catch(() => {})
+  }, [collaborationControlled, collaborationSnapshot, layout, props.collaborationClient])
+
+  useEffect(() => {
+    if (surfaceContext.kind !== 'browser-owner' || props.collaborationClient === undefined) return
+    let timer: number | undefined
+    const publishViewport = () => {
+      if (timer !== undefined) window.clearTimeout(timer)
+      timer = window.setTimeout(() => {
+        const viewport = {
+          width: Math.max(320, Math.min(10_000, Math.round(window.innerWidth))),
+          height: Math.max(240, Math.min(10_000, Math.round(window.innerHeight))),
+          scaleMode: 'contain' as const,
+        }
+        const current = collaborationSnapshot?.sharedCanvas.viewport
+        if (current?.width === viewport.width && current.height === viewport.height && current.scaleMode === viewport.scaleMode) return
+        void props.collaborationClient?.command({ kind: 'canvas.set-viewport', viewport }, collaborationSnapshot?.workbenchRevision).catch(() => {})
+      }, 120)
+    }
+    publishViewport()
+    window.addEventListener('resize', publishViewport)
+    return () => { window.removeEventListener('resize', publishViewport); if (timer !== undefined) window.clearTimeout(timer) }
+  }, [collaborationSnapshot?.sharedCanvas.viewport, collaborationSnapshot?.workbenchRevision, props.collaborationClient, surfaceContext.kind])
+
   const collapseProjection = useMemo(
     () => deriveCollapseProjection(layout, collapseRuntimeState),
     [collapseRuntimeState, layout],
@@ -1246,7 +1363,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
     return runtimeMetrics === undefined ? write() : runtimeMetrics.measureLayoutSave(write)
   }, [settings, runtimeMetrics])
 
-  const settingsWritable = settingsSnapshot.status === 'ready'
+  const settingsWritable = !collaborationControlled && settingsSnapshot.status === 'ready'
     && settingsSnapshot.writable && settingsSnapshot.mode === 'host'
     && settingsSnapshot.revision !== undefined
   const scheduleAutosaveRetry = useCallback(() => {
@@ -1337,16 +1454,16 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
 
   const originalDocumentTitleRef = useRef<string>()
   useEffect(() => {
-    if (props.browserView !== true) return
+    if (isBrowserSurface !== true) return
     originalDocumentTitleRef.current = document.title
     return () => {
       if (originalDocumentTitleRef.current !== undefined) document.title = originalDocumentTitleRef.current
       originalDocumentTitleRef.current = undefined
     }
-  }, [props.browserView])
+  }, [isBrowserSurface])
   useEffect(() => {
-    if (props.browserView === true) document.title = browserWorkbenchName?.trim() || 'Workbench'
-  }, [browserWorkbenchName, props.browserView])
+    if (isBrowserSurface === true) document.title = browserWorkbenchName?.trim() || 'Workbench'
+  }, [browserWorkbenchName, isBrowserSurface])
 
   useEffect(() => {
     if (workbenchMenuOpenId === undefined) return
@@ -1413,7 +1530,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
       const localDirty = documentRef.current !== lastSavedRef.current
         && JSON.stringify(documentRef.current) !== JSON.stringify(lastSavedRef.current)
       if (remote === undefined || pendingRef.current.length !== 0
-        || conflictRef.current !== undefined || localDirty && !shareGuest) return
+        || conflictRef.current !== undefined || localDirty) return
       const sameOrOlderRevision = settingsSnapshot.revision !== undefined
         && lastSavedRevisionRef.current !== undefined
         && settingsSnapshot.revision <= lastSavedRevisionRef.current
@@ -1421,23 +1538,14 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
       if (sameOrOlderRevision) return
       const cleanedRemote = migrateOuterShellEditors(remote)
       lastSavedRef.current = cleanedRemote
-      let visible = cleanedRemote
-      if (shareGuest) {
-        const selections = groupsOf(documentRef.current.root)
-        for (const group of groupsOf(cleanedRemote.root)) {
-          const selected = selections.find(row => row.id === group.id)?.activeTabId
-          if (selected && group.tabs.some(tab => tab.id === selected)) visible = applyLayoutCommand(visible, { type: 'activate', groupId: group.id, tabId: selected })
-        }
-        if (groupsOf(visible.root).some(group => group.id === documentRef.current.activeGroupId)) visible = { ...visible, activeGroupId: documentRef.current.activeGroupId }
-      }
-      setLayout(visible)
+      setLayout(cleanedRemote)
       setSaveState('saved')
     }
     // Hydration can finish between the first render and this passive effect.
     // Reconcile once before subscribing so that transition cannot be missed.
     reconcileSettings()
     return settings.subscribe(reconcileSettings)
-  }, [settings, shareGuest])
+  }, [settings])
 
   useEffect(() => {
     if (accountRef.current === account) return
@@ -1523,6 +1631,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
 
   useEffect(() => {
     if (surfaceView === 'home') return
+    if (collaborationControlled) return
     if (pending.length === 0 || conflict !== undefined
       || saveInFlightRef.current !== undefined || flushInFlightRef.current !== undefined) return
     if (savePausedRef.current || !settingsWritable) {
@@ -1589,7 +1698,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
       window.clearTimeout(timer)
       if (saveTimerRef.current === timer) saveTimerRef.current = undefined
     }
-  }, [account, conflict, current, pending, persistenceTick, projectNeutral, settings, patchLayout, scheduleAutosaveRetry, settingsWritable, surfaceView])
+  }, [account, collaborationControlled, conflict, current, pending, persistenceTick, projectNeutral, settings, patchLayout, scheduleAutosaveRetry, settingsWritable, surfaceView])
 
   const reloadRemote = useCallback(() => {
     const remote = conflictRef.current?.remote
@@ -1653,11 +1762,6 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
   const guardedCommands = useRef(new WeakSet<object>())
   const pendingDestructiveCommands = useRef(new Set<string>())
   const commit = useCallback<Commit>((command) => {
-    if (shareGuest && command.type === 'activate') {
-      const next = applyLayoutCommand(documentRef.current, command)
-      documentRef.current = next; setLayout(next)
-      return true
-    }
     if (!canEditLayout) { setStateDiagnostic('当前分享未授权修改布局。'); return false }
     if (floatingPinPending.current) return false
     const currentWorkbenchId = props.floatingRuntime?.visibleWorkbenchId
@@ -1680,6 +1784,33 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
     if (!validateWorkbenchDocumentV3(migrateDocumentV2ToV3(candidate))) {
       setStateDiagnostic('此操作无法生成有效布局，已保留原工作台和内页。请检查目标区域项目和此内页来源后重试。')
       return false
+    }
+    if (collaborationControlled) {
+      const client = props.collaborationClient
+      if (client === undefined) return false
+      const rollback = () => {
+        if (documentRef.current !== candidate) return
+        documentRef.current = before
+        setLayout(before)
+        setPast(history => history.slice(0, -1))
+        setFuture([])
+        setPending([])
+        setSaveState('offline')
+        setStateDiagnostic('协作布局提交失败，已恢复到 Host 最后确认的布局。')
+      }
+      const ratioSplitId = command.type === 'set-ratio' ? command.splitId : undefined
+      void (async () => {
+        let leaseId: string | undefined
+        if (ratioSplitId !== undefined) {
+          const lease = await client.command({ kind: 'layout.acquire-lease', targetId: `split:${ratioSplitId}` }, collaborationSnapshot?.workbenchRevision)
+          const value = lease.ok && lease.value && typeof lease.value === 'object' ? lease.value as { leaseId?: unknown; ok?: unknown } : undefined
+          if (!lease.ok || value?.ok !== true || typeof value.leaseId !== 'string') { rollback(); return }
+          leaseId = value.leaseId
+        }
+        const result = await client.command({ kind: 'canvas.set-layout', layout: candidate, ...(leaseId === undefined ? {} : { leaseId }) }, collaborationSnapshot?.workbenchRevision)
+        if (leaseId !== undefined && ratioSplitId !== undefined) void client.command({ kind: 'layout.release-lease', targetId: `split:${ratioSplitId}`, leaseId }).catch(() => {})
+        if (!result.ok) rollback()
+      })().catch(() => { rollback() })
     }
     const nextTabs = tabsOf(candidate.root)
     const displaced = tabsOf(before.root).filter(old => {
@@ -1709,18 +1840,20 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
         setFuture([])
       }
       setPending(() => {
+        if (collaborationControlled) return []
         const nextPending: LayoutCommand[] = [{ type: 'replace-layout', document: next }]
         pendingRef.current = nextPending
         return nextPending
       })
       return next
     })
+    if (collaborationControlled) setSaveState('saved')
     for (const tab of displaced) {
       if (props.floatingRuntime?.find(tab.id, currentWorkbenchId)) props.floatingRuntime.forget(tab.id, currentWorkbenchId)
       else closeWorkbenchNative(tab.id)
     }
     return true
-  }, [browserOwnedWorkbench, layoutLockPending, layoutLocked, props.floatingRuntime, shareGuest, canEditLayout])
+  }, [browserOwnedWorkbench, collaborationControlled, collaborationSnapshot?.workbenchRevision, layoutLockPending, layoutLocked, props.collaborationClient, props.floatingRuntime, canEditLayout])
 
   const replaceVisibleDocument = useCallback((next: WorkbenchLayoutDocument) => {
     const previous = documentRef.current
@@ -2136,7 +2269,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
   const markerProjectionChanged = Object.values(markerProjections).some(projection => projection.changed)
   const markerOverrideActive = Object.values(markerOverrides).some(rows => Object.keys(rows).length !== 0)
   useEffect(() => {
-    if (props.browserView || !markerProjectionChanged || markerOverrideActive
+    if (isBrowserSurface || !markerProjectionChanged || markerOverrideActive
       || settingsSnapshot.status !== 'ready' || ! settingsSnapshot.writable
       || settingsSnapshot.revision === undefined) return
     const attempt = `all:${String(settingsSnapshot.revision)}:${markerSignature}`
@@ -2146,7 +2279,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
       operation: 'set', path: ['sessionMarkers'],
       value: allWorkspaceSessionMarkers, expectedRevision: settingsSnapshot.revision,
     })
-  }, [allWorkspaceSessionMarkers, markerOverrideActive, markerProjectionChanged, markerSignature, settings, settingsSnapshot, props.browserView])
+  }, [allWorkspaceSessionMarkers, markerOverrideActive, markerProjectionChanged, markerSignature, settings, settingsSnapshot, isBrowserSurface])
   const updateSessionMarker = useCallback((
     requestedWorkspaceId: string | undefined,
     sessionId: string,
@@ -2158,7 +2291,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
       ...current,
       [workspaceId]: { ...current[workspaceId], [sessionId]: marker },
     }))
-    if (props.browserView) return
+    if (isBrowserSurface) return
     const snapshot = settings.getSnapshot()
     if (snapshot.status !== 'ready' || ! snapshot.writable || snapshot.revision === undefined) {
       setStateDiagnostic('对话标记尚未保存；请重新连接后重试。')
@@ -2175,7 +2308,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
       })
       setStateDiagnostic('对话标记保存冲突；已重新载入远端标记。')
     })
-  }, [markerWorkspaceId, settings, props.browserView])
+  }, [markerWorkspaceId, settings, isBrowserSurface])
   const workspaceTitle = activeWorkspace?.title ?? '未分组'
   const sessionTitle = current === undefined ? undefined : sessionRows[current]?.displayTitle
   const flushCurrentWorkbench = useCallback((): Promise<boolean> => {
@@ -2365,7 +2498,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
     setStateDiagnostic(undefined)
   }, [frameTransition, props.onShowWorkbench, workbenchDirectory, surfaceView, props.beforeHomeLeave])
   const reorderWorkbench = useCallback(async (workbenchId: string, targetIndex: number) => {
-    if (props.browserView === true || workbenchReordering || workbenchDirectory.reorder === undefined) return
+    if (isBrowserSurface === true || workbenchReordering || workbenchDirectory.reorder === undefined) return
     setWorkbenchReordering(true)
     try {
       const result = await workbenchDirectory.reorder(workbenchId, targetIndex)
@@ -2377,7 +2510,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
     } finally {
       setWorkbenchReordering(false)
     }
-  }, [props.browserView, workbenchDirectory, workbenchReordering])
+  }, [isBrowserSurface, workbenchDirectory, workbenchReordering])
   const openTemplateDialog = useCallback((targetWorkbenchId?: string, returnFocus?: HTMLElement) => {
     const snapshot = workbenchDirectory.getSnapshot()
     const workbenchId = targetWorkbenchId ?? snapshot.activeWorkbenchId
@@ -2505,21 +2638,36 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
     try {
       if (workbenchId === workbenchDirectory.getSnapshot().activeWorkbenchId
         && !await flushCurrentWorkbench()) return
-      const result = await workbenchDirectory.rename(workbenchId, name)
-      if (result.status !== 'committed') {
-        const message = result.status === 'rejected' && result.reason === 'duplicate-name'
-          ? `已存在名为“${name}”的工作台。`
-          : '无法重命名工作台；设置已在其他页面改变或当前连接不可用。'
-        setWorkbenchNameError(message)
-        setStateDiagnostic(message)
-        return
+      if (collaborationControlled && props.collaborationClient !== undefined
+        && (surfaceContext.kind === 'browser-owner' || surfaceContext.kind === 'lan-participant')
+        && surfaceContext.workbenchId === workbenchId) {
+        const command = await props.collaborationClient.command({
+          kind: 'workbench.command', operation: 'workbench.rename',
+          payload: { name },
+        }, collaborationSnapshot?.workbenchRevision)
+        if (!command.ok) {
+          const message = command.message || 'Unable to rename the Workbench while collaboration state is changing.'
+          setWorkbenchNameError(message)
+          setStateDiagnostic(message)
+          return
+        }
+      } else {
+        const result = await workbenchDirectory.rename(workbenchId, name)
+        if (result.status !== 'committed') {
+          const message = result.status === 'rejected' && result.reason === 'duplicate-name'
+            ? `A Workbench named "${name}" already exists.`
+            : 'Unable to rename the Workbench; the connection may have changed.'
+          setWorkbenchNameError(message)
+          setStateDiagnostic(message)
+          return
+        }
       }
       setRenamingWorkbenchId(undefined)
       setStateDiagnostic(undefined)
     } finally {
       setWorkbenchRenaming(false)
     }
-  }, [flushCurrentWorkbench, renamingWorkbenchId, workbenchDirectory, workbenchNameDraft, workbenchRenaming])
+  }, [collaborationControlled, collaborationSnapshot?.workbenchRevision, flushCurrentWorkbench, props.collaborationClient, renamingWorkbenchId, surfaceContext.kind, workbenchDirectory, workbenchNameDraft, workbenchRenaming])
   const unloadWorkbench = useCallback(async (targetWorkbenchId?: string) => {
     if (workbenchClosing) return
     const snapshot = workbenchDirectory.getSnapshot()
@@ -2574,8 +2722,8 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
     }
   }, [windowController, workbenchDirectory])
   const reclaimWorkbenchWindow = useCallback(async (workbenchId: string, options?: { force?: boolean }) => {
-    if (props.browserView === true) {
-      if (workbenchId !== props.browserWorkbenchId || props.requestBrowserReclaim === undefined) {
+    if (isBrowserSurface === true) {
+      if (workbenchId !== surfaceWorkbenchId || props.requestBrowserReclaim === undefined) {
         setStateDiagnostic('无法确认此浏览器工作台的收回身份；请返回 DSH 客户端处理。')
         return
       }
@@ -2609,7 +2757,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
       setStateDiagnostic('收回请求仍在确认中；浏览器页面保持锁定，请稍后重试。')
       return false
     } finally { setReclaimingBrowserWorkbench(false) }
-  }, [props.browserView, props.browserWorkbenchId, props.requestBrowserReclaim, shareController, workbenchShareSnapshot.sessions, windowController])
+  }, [isBrowserSurface, surfaceWorkbenchId, props.requestBrowserReclaim, shareController, workbenchShareSnapshot.sessions, windowController])
   const reportBrowserActionTransition = useCallback((workbenchId: string, phase: 'preparing' | 'opening' | 'reclaiming' | 'idle') => {
     setBrowserActionTransition(current => {
       if (phase === 'idle') return current?.workbenchId === workbenchId ? undefined : current
@@ -2617,7 +2765,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
     })
   }, [])
   useEffect(() => {
-    const workbenchId = props.browserWorkbenchId ?? workbenchDirectorySnapshot.activeWorkbenchId
+    const workbenchId = surfaceWorkbenchId ?? workbenchDirectorySnapshot.activeWorkbenchId
     const request = workbenchWindowSnapshot.requests?.find(row => row.workbenchId === workbenchId)
       ?? (workbenchWindowSnapshot.request?.workbenchId === workbenchId ? workbenchWindowSnapshot.request : undefined)
     if (request === undefined) {
@@ -2631,17 +2779,17 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
         ...(request.code === undefined ? {} : { code: request.code }) })
     }
     setStateDiagnostic(undefined)
-  }, [workbenchWindowSnapshot.requests, workbenchWindowSnapshot.request, workbenchDirectorySnapshot.activeWorkbenchId, props.browserWorkbenchId])
+  }, [workbenchWindowSnapshot.requests, workbenchWindowSnapshot.request, workbenchDirectorySnapshot.activeWorkbenchId, surfaceWorkbenchId])
   useEffect(() => {
-    if (props.browserView !== true || props.browserWorkbenchId === undefined) return
+    if (isBrowserSurface !== true || surfaceWorkbenchId === undefined) return
     const onReclaim = (event: Event) => {
       const state = (event as CustomEvent<{ state?: unknown }>).detail?.state
-      if (state === 'requested') setBrowserHandoff({ workbenchId: props.browserWorkbenchId!, status: 'reclaiming' })
-      else if (state === 'reclaimed') setBrowserHandoff({ workbenchId: props.browserWorkbenchId!, status: 'reclaimed' })
+      if (state === 'requested') setBrowserHandoff({ workbenchId: surfaceWorkbenchId!, status: 'reclaiming' })
+      else if (state === 'reclaimed') setBrowserHandoff({ workbenchId: surfaceWorkbenchId!, status: 'reclaimed' })
     }
     window.addEventListener('workbench-browser-reclaim', onReclaim)
     return () => window.removeEventListener('workbench-browser-reclaim', onReclaim)
-  }, [props.browserView, props.browserWorkbenchId])
+  }, [isBrowserSurface, surfaceWorkbenchId])
   const onWorkbenchTabKeyDown = useCallback((
     event: KeyboardEvent<HTMLButtonElement>, workbenchId: string, workbenchName: string,
   ) => {
@@ -2671,17 +2819,17 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
   const saveLabel = saveState === 'saved' ? '布局已保存'
     : saveState === 'saving' ? '正在保存布局…'
       : saveState === 'offline' ? '布局尚未保存' : '布局存在冲突'
-  const handoffWorkbenchId = props.browserWorkbenchId ?? displayedWorkbenchId
+  const handoffWorkbenchId = surfaceWorkbenchId ?? displayedWorkbenchId
   const browserHandoffRequest = workbenchWindowSnapshot.requests?.find(
     row => row.workbenchId === handoffWorkbenchId,
   ) ?? (browserHandoff?.workbenchId === handoffWorkbenchId ? browserHandoff : undefined)
-  const activeBrowserOwned = props.browserView !== true
+  const activeBrowserOwned = isBrowserSurface !== true
     && (browserHandoffRequest?.status === 'ready' || browserHandoffRequest?.status === 'reclaiming'
       || (browserHandoffRequest?.status === 'failed' && (browserHandoffRequest.code === 'browser-view-heartbeat-timeout' || browserHandoffRequest.code === 'browser-view-reclaim-timeout')))
   const reclaimWindowId = browserHandoffRequest && 'windowId' in browserHandoffRequest ? browserHandoffRequest.windowId : undefined
   const reclaimProgress = browserHandoffRequest && 'reclaimProgress' in browserHandoffRequest ? browserHandoffRequest.reclaimProgress : undefined
   useEffect(() => {
-    if (props.browserView || browserHandoffRequest?.status !== 'reclaimed' || !reclaimWindowId || reclaimProgress?.phase !== 'checking' || surfaceView !== 'workbench') return
+    if (isBrowserSurface || browserHandoffRequest?.status !== 'reclaimed' || !reclaimWindowId || reclaimProgress?.phase !== 'checking' || surfaceView !== 'workbench') return
     const { workbenchId } = browserHandoffRequest
     const windowId = reclaimWindowId
     let finished = false
@@ -2716,8 +2864,8 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
     const frame = requestAnimationFrame(inspect)
     const timeout = setTimeout(() => finish('控制权已收回，部分对话尚未恢复输入，请在对应内页重新连接。'), 12_000)
     return () => { observer.disconnect(); cancelAnimationFrame(frame); clearTimeout(timeout) }
-  }, [browserHandoffRequest?.status, reclaimWindowId, reclaimProgress?.phase, frameTransition, surfaceView, props.browserView, windowController])
-  const browserOpening = props.browserView !== true
+  }, [browserHandoffRequest?.status, reclaimWindowId, reclaimProgress?.phase, frameTransition, surfaceView, isBrowserSurface, windowController])
+  const browserOpening = isBrowserSurface !== true
     && ['preparing', 'prepared', 'requested', 'redeemed'].includes(browserHandoffRequest?.status ?? '')
   const browserActionPhase = browserActionTransition?.workbenchId === handoffWorkbenchId
     ? browserActionTransition?.phase : undefined
@@ -2725,22 +2873,22 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
     ? browserHandoffRequest.runtimeMetrics : undefined
   const browserWorkbenchMetrics = browserHandoffRequest === undefined ? undefined
     : workbenchShareSnapshot.sessions.find(session => session.workbenchId === browserHandoffRequest.workbenchId)?.workbenchMetrics ?? browserRuntimeMetrics
-  const browserShareActive = props.browserWorkbenchId !== undefined && (
-    workbenchShareSnapshot.links[props.browserWorkbenchId] !== undefined
-      || workbenchShareSnapshot.sessions.some(session => session.workbenchId === props.browserWorkbenchId)
+  const browserShareActive = surfaceWorkbenchId !== undefined && (
+    workbenchShareSnapshot.links[surfaceWorkbenchId] !== undefined
+      || workbenchShareSnapshot.sessions.some(session => session.workbenchId === surfaceWorkbenchId)
   )
   const layoutActionsEnabled = canEditLayout && frameTransition === undefined
     && !browserOpening
     && browserActionPhase === undefined
     && !browserOwnedWorkbench
-    && !(props.browserView === true && browserHandoffRequest?.status === 'reclaiming')
+    && !(isBrowserSurface === true && browserHandoffRequest?.status === 'reclaiming')
   const resizeEnabled = layoutActionsEnabled && !layoutLocked
   const browserHandoffLabel = browserHandoffRequest?.status === 'closed'
-    ? '浏览器工作台已关闭，可继续在 DSH 客户端使用。'
+    ? '浏览器已关闭。浏览器页面关闭后，工作台已恢复到 DSH 客户端。'
     : browserHandoffRequest?.status === 'reclaimed'
-      ? '工作台已收回到 DSH 客户端。'
+      ? '已收回。工作台控制权已交还给 DSH 客户端。'
     : browserHandoffRequest?.status === 'ready'
-      ? '当前工作台正在浏览器中打开。'
+      ? '浏览器已连接。当前工作台正在浏览器中使用。'
       : browserHandoffRequest?.status === 'reclaiming'
         ? '正在收回工作台，请等待浏览器页面确认。'
       : browserHandoffRequest?.status === 'requested'
@@ -2752,7 +2900,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
         : browserHandoffRequest?.status === 'expired'
           ? '浏览器打开链接已过期，可在 DSH 客户端重新打开。'
           : undefined
-  const embeddedShell = embeddedDesktop || props.browserView === true
+  const embeddedShell = embeddedDesktop || isBrowserSurface === true
 
   return (
     <div
@@ -2762,6 +2910,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
         '--workbench-area-header-size': `${AREA_HEADER_SIZE}px`,
       } as CSSProperties}
       data-workbench
+      data-workbench-surface={surfaceContext.kind}
       data-sidebar-collapsed={sidebarCollapsed || undefined}
       onContextMenuCapture={splitPlacement === undefined ? undefined : (event) => {
         event.preventDefault()
@@ -2788,27 +2937,23 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
           hostActions: sidebarHostActions,
         })}
       </aside> : null}
-      <main className={css.workspaceShell} data-workbench-workspace data-workbench-browser-view={props.browserView || undefined}>
-        {!shareGuest && props.browserView !== true && workbenchDirectory.pickParentDirectory ? <WorkbenchImportDirectoryRequests pickParentDirectory={workbenchDirectory.pickParentDirectory} /> : null}
-        {!shareGuest && selectedWorkbenchId && !activeBrowserOwned ? <WorkbenchCollaborationApprovals workbenchId={selectedWorkbenchId} /> : null}
+      <main className={css.workspaceShell} data-workbench-workspace data-workbench-browser-view={isBrowserSurface || undefined}>
+        {isBrowserSurface !== true && workbenchDirectory.pickParentDirectory ? <WorkbenchImportDirectoryRequests pickParentDirectory={workbenchDirectory.pickParentDirectory} /> : null}
+        {selectedWorkbenchId && !activeBrowserOwned ? <WorkbenchCollaborationApprovals workbenchId={selectedWorkbenchId} /> : null}
 
-        {props.browserView === true ? (
+        {isBrowserSurface === true ? (
           <header className={`${css.workspaceBar} ${css.browserWorkspaceBar}`} data-workbench-browser-toolbar>
             <div className={css.browserWorkspaceIdentity}>
               <span className={css.browserWorkspaceKicker}>工作台</span>
               <strong>{browserWorkbenchName ?? '当前工作台'}</strong>
+              {surfaceWorkbenchId !== undefined && workbenchDirectory.getRootPath?.(surfaceWorkbenchId) !== undefined ? <>
+                <button type="button" onClick={() => setShowBrowserRootPath(value => !value)} aria-label="查看工作台文件夹路径">
+                  查看文件夹路径
+                </button>
+                {showBrowserRootPath ? <span role="status">{workbenchDirectory.getRootPath(surfaceWorkbenchId)}</span> : null}
+              </> : null}
               {browserHandoffLabel === undefined ? null : <span className={css.browserWorkspaceStatus} role="status" aria-live="polite">{browserHandoffLabel}</span>}
-              {shareGuest ? <div data-workbench-guest-nickname style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4, fontSize: 12, color: 'var(--dsw-alias-label-secondary, #62676d)' }}>
-                <span>访客：{guestNickname ?? '加载中'}</span>
-                {guestNicknameEditing ? <>
-                  <input value={guestNicknameDraft} maxLength={32} disabled={guestNicknameBusy} onChange={event => setGuestNicknameDraft(event.currentTarget.value)} style={{ width: 120, height: 24, boxSizing: 'border-box' }} />
-                  <button type="button" disabled={guestNicknameBusy || guestNicknameDraft.trim().length === 0} onClick={() => {
-                    setGuestNicknameBusy(true)
-                    void updateWorkbenchShareGuestNickname(guestNicknameDraft.trim()).then(ok => { if (ok) { setGuestNickname(guestNicknameDraft.trim()); setGuestNicknameEditing(false) } }).finally(() => setGuestNicknameBusy(false))
-                  }}>保存</button>
-                  <button type="button" disabled={guestNicknameBusy} onClick={() => { setGuestNicknameDraft(guestNickname ?? ''); setGuestNicknameEditing(false) }}>取消</button>
-                </> : <button type="button" onClick={() => setGuestNicknameEditing(true)}>改名</button>}
-              </div> : null}
+              <CollaborationParticipantStrip snapshot={collaborationSnapshot} currentParticipantId={props.collaborationClient?.participantId} />
             </div>
             <div className={`${css.workspaceActions} ${css.browserWorkspaceActions}`} data-workbench-layout-actions>
               <span
@@ -2829,6 +2974,16 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
                 aria-pressed={layoutLocked}
                 data-workbench-layout-lock={layoutLocked ? 'locked' : 'unlocked'}
               ><WorkbenchLayoutLockIcon locked={layoutLocked} /></button>}
+              {props.collaborationClient !== undefined ? <button
+                type="button"
+                className={css.browserWorkspaceIconButton}
+                disabled={props.collaborationClient.participantId !== 'owner' || browserHandoffRequest?.status === 'reclaiming'}
+                onClick={() => { void props.collaborationClient?.command({ kind: 'canvas.set-focus-lock', locked: !collaborationSnapshot?.sharedCanvas.fixedByOwner }).catch(() => {}) }}
+                aria-label={collaborationSnapshot?.sharedCanvas.fixedByOwner ? '解锁共享焦点' : '固定共享焦点'}
+                title={collaborationSnapshot?.sharedCanvas.fixedByOwner ? '房主已固定共享焦点，点击解锁' : '固定当前共享焦点'}
+                aria-pressed={collaborationSnapshot?.sharedCanvas.fixedByOwner === true}
+                data-workbench-focus-lock={collaborationSnapshot?.sharedCanvas.fixedByOwner ? 'locked' : 'unlocked'}
+              >{collaborationSnapshot?.sharedCanvas.fixedByOwner ? '解锁焦点' : '固定焦点'}</button> : null}
               <div className={css.browserWorkspaceActionGroup} role="group" aria-label="历史布局操作">
                 <button
                   type="button"
@@ -2848,7 +3003,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
                 ><RedoLayoutIcon /></button>
               </div>
               <span className={css.browserWorkspaceActionDivider} role="separator" aria-orientation="vertical" />
-              {!shareGuest ? <div className={css.browserWorkspaceActionGroup} role="group" aria-label="工作台操作">
+              <div className={css.browserWorkspaceActionGroup} role="group" aria-label="工作台操作">
                 <button
                   type="button"
                   className={css.browserWorkspaceIconButton}
@@ -2865,9 +3020,9 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
                   aria-label="工作台设置"
                   title="工作台设置"
                 ><IconSettingsOutlineMedium size={17} /></button>}
-              </div> : null}
-              {!shareGuest ? <span className={css.browserWorkspaceActionDivider} role="separator" aria-orientation="vertical" /> : null}
-              {props.shareController !== undefined && !shareGuest && props.browserWorkbenchId !== undefined ? <>
+              </div>
+              <span className={css.browserWorkspaceActionDivider} role="separator" aria-orientation="vertical" />
+              {props.shareController !== undefined && surfaceWorkbenchId !== undefined ? <>
                 <div className={css.browserWorkspaceActionGroup} role="group" aria-label="工作台局域网分享">
                   <button
                     type="button"
@@ -2877,7 +3032,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
                     title={shareNotice ?? (browserShareActive ? '复制局域网分享链接' : '开始局域网分享')}
                     onClick={() => {
                       setShareBusy(true); setShareNotice(undefined)
-                      void props.shareController!.start(props.browserWorkbenchId!).then(async result => {
+                      void props.shareController!.start(surfaceWorkbenchId!).then(async result => {
                         await navigator.clipboard?.writeText(result.url)
                         setShareNotice('分享链接已复制；访客按本次授权范围参与工作台')
                       }).catch(error => setShareNotice(error instanceof Error ? error.message : '启动共享失败')).finally(() => setShareBusy(false))
@@ -2891,25 +3046,25 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
                     title="停止局域网共享"
                     onClick={() => {
                       setShareBusy(true); setShareNotice(undefined)
-                      void props.shareController!.stop(props.browserWorkbenchId!).then(() => setShareNotice('已停止局域网共享')).catch(error => setShareNotice(error instanceof Error ? error.message : '停止共享失败')).finally(() => setShareBusy(false))
+                      void props.shareController!.stop(surfaceWorkbenchId!).then(() => setShareNotice('已停止局域网共享')).catch(error => setShareNotice(error instanceof Error ? error.message : '停止共享失败')).finally(() => setShareBusy(false))
                     }}
                   ><IconCloseOutlineMedium size={17} /></button>}
-                  {workbenchShareSnapshot.sessions.filter(session => session.workbenchId === props.browserWorkbenchId).map(session => <WorkbenchShareGrantControls key={session.workbenchId} controller={props.shareController!} session={session} />)}
+                  {workbenchShareSnapshot.sessions.filter(session => session.workbenchId === surfaceWorkbenchId).map(session => <WorkbenchShareGrantControls key={session.workbenchId} controller={props.shareController!} session={session} />)}
                 </div>
                 <span className={css.browserWorkspaceActionDivider} role="separator" aria-orientation="vertical" />
               </> : null}
-              {!shareGuest ? <button
+              <button
                 type="button"
                 className={`${css.browserWorkspaceIconButton} ${css.browserWorkspaceReclaim}`}
                 onClick={() => { if (handoffWorkbenchId !== undefined) void reclaimWorkbenchWindow(handoffWorkbenchId) }}
-                disabled={handoffWorkbenchId === undefined || reclaimingBrowserWorkbench || (props.browserView === true
+                disabled={handoffWorkbenchId === undefined || reclaimingBrowserWorkbench || (isBrowserSurface === true
                   ? props.requestBrowserReclaim === undefined || browserHandoff?.status === 'reclaiming' || browserHandoff?.status === 'reclaimed'
                   : browserHandoffRequest?.status !== 'ready' && browserHandoffRequest?.status !== 'reclaiming')}
                 aria-label="收回到 DSH 客户端"
                 title={reclaimingBrowserWorkbench ? '正在收回到 DSH 客户端' : '收回到 DSH 客户端'}
                 aria-busy={reclaimingBrowserWorkbench}
                 data-state={reclaimingBrowserWorkbench ? 'reclaiming' : undefined}
-              ><ReturnToDesktopIcon /></button> : null}
+              ><ReturnToDesktopIcon /></button>
             </div>
           </header>
         ) : <header className={css.workspaceBar}>
@@ -2950,10 +3105,9 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
                       data-drag-over={dragOverWorkbenchId === row.workbenchId && draggedWorkbenchId !== row.workbenchId || undefined}
                       data-workbench-tab={row.workbenchId}
                       role="presentation"
-                      draggable={workbenchDirectory.reorder !== undefined
-                        && !renaming && props.browserView !== true && !workbenchReordering}
+                      draggable={false}
                       onDragStart={(event) => {
-                        if (renaming || props.browserView === true || workbenchDirectory.reorder === undefined
+                        if (renaming || workbenchDirectory.reorder === undefined
                           || (event.target instanceof Element && event.target.closest('[data-workbench-menu-trigger]') !== null)) {
                           event.preventDefault()
                           return
@@ -2969,7 +3123,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
                       }}
                       onDragOver={(event) => {
                         if (draggedWorkbenchId === undefined || draggedWorkbenchId === row.workbenchId
-                          || props.browserView === true || workbenchDirectory.reorder === undefined) return
+                          || workbenchDirectory.reorder === undefined) return
                         event.preventDefault()
                         event.dataTransfer.dropEffect = 'move'
                         setDragOverWorkbenchId(row.workbenchId)
@@ -3229,15 +3383,15 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
               aria-label="重做布局更改"
               title="重做布局更改"
             ><RedoLayoutIcon /></button>
-            {!shareGuest && !projectNeutral && embeddedDesktop && desktopControls !== undefined ? <button
+            {!projectNeutral && embeddedDesktop && desktopControls !== undefined ? <button
               type="button"
               className={css.desktopControl}
               onClick={() => desktopControls.openSettings()}
               aria-label="工作台设置"
               title="工作台设置"
             >设置</button> : null}
-            {!shareGuest && props.floatingRuntime && selectedWorkbenchId && surfaceView === 'workbench' ? <FloatingWorkspaceToolbarButton runtime={props.floatingRuntime} workbenchId={selectedWorkbenchId} canvasRef={resizeCanvasRef} className={css.workbenchSettingsButton} disabled={activeBrowserOwned} /> : null}
-            {!shareGuest && projectNeutral && desktopControls !== undefined ? <button
+            {props.floatingRuntime && selectedWorkbenchId && surfaceView === 'workbench' ? <FloatingWorkspaceToolbarButton runtime={props.floatingRuntime} workbenchId={selectedWorkbenchId} canvasRef={resizeCanvasRef} className={css.workbenchSettingsButton} disabled={activeBrowserOwned} /> : null}
+            {projectNeutral && desktopControls !== undefined ? <button
               type="button"
               className={css.workbenchSettingsButton}
               onClick={() => desktopControls.openSettings()}
@@ -3247,16 +3401,16 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
           </div>
         </header>}
         {frameTransition !== undefined || browserOpening || (browserActionPhase !== undefined && browserActionPhase !== 'reclaiming')
-          || (props.browserView === true && browserHandoffRequest?.status === 'reclaiming') ? (
+          || (isBrowserSurface === true && browserHandoffRequest?.status === 'reclaiming') ? (
           <div className={css.transitionWait} role="status" aria-live="polite" aria-busy="true" data-workbench-transition-wait>
             <section className={css.transitionWaitPanel}>
               <span className={css.transitionWaitSpinner} aria-hidden="true" />
               <h2>{frameTransition !== undefined
                 ? `正在载入${workbenchDirectorySnapshot.rows.find(row => row.workbenchId === frameTransition.workbenchId)?.name ?? '工作台'}`
-                : props.browserView === true ? '正在收回到 DSH 客户端' : browserActionPhase === 'preparing' || browserHandoffRequest?.status === 'preparing' || browserHandoffRequest?.status === 'prepared' ? '正在准备浏览器窗口' : browserActionPhase === 'reclaiming' ? '正在收回工作台' : '正在打开工作台页面'}</h2>
+                : isBrowserSurface === true ? '正在收回到 DSH 客户端' : browserActionPhase === 'preparing' || browserHandoffRequest?.status === 'preparing' || browserHandoffRequest?.status === 'prepared' ? '正在准备浏览器窗口' : browserActionPhase === 'reclaiming' ? '正在收回工作台' : '正在打开工作台页面'}</h2>
               <p>{frameTransition !== undefined
                 ? '正在读取布局并恢复区域内容…'
-                : props.browserView === true
+                : isBrowserSurface === true
                   ? '页面已暂停操作，正在保存布局并确认交接。'
                   : browserActionPhase === 'preparing' || browserHandoffRequest?.status === 'preparing' || browserHandoffRequest?.status === 'prepared'
                     ? '正在保存当前布局并申请一次性浏览器连接。'
@@ -3271,6 +3425,9 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
           ref={resizeCanvasRef}
           className={css.canvas}
           data-workbench-canvas
+          data-workbench-logical-width={collaborationSnapshot?.sharedCanvas.viewport.width}
+          data-workbench-logical-height={collaborationSnapshot?.sharedCanvas.viewport.height}
+          data-workbench-scale-mode={collaborationSnapshot?.sharedCanvas.viewport.scaleMode}
           data-layout-locked={layoutLocked ? 'true' : undefined}
           data-session-accent-frames={props.showSessionAccentFrames === false ? 'hidden' : undefined}
           {...(frameTransition !== undefined || browserOpening || (browserActionPhase !== undefined && browserActionPhase !== 'reclaiming') ? { inert: '' } : {})}
@@ -3283,7 +3440,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
             frame={props} layout={layout} policy={conversationResourcePolicy} sessionMarkers={allWorkspaceSessionMarkers}
             selectedAreaBinding={activePageSessionBinding(groupsOf(layout.root).find(group => group.id === layout.activeGroupId), workspaces, projectNeutral, account)}
             commit={commit} pin={pinFloatingTab} {...(props.bayAgent === undefined ? {} : { bayAgent: props.bayAgent })} /> : null}
-          {createPreset && props.browserView !== true ? <WorkbenchCreateDialog directory={workbenchDirectory} presetId={createPreset} {...(props.generateContextDraft === undefined ? {} : { generateDraft: props.generateContextDraft })}
+          {createPreset && isBrowserSurface !== true ? <WorkbenchCreateDialog directory={workbenchDirectory} presetId={createPreset} {...(props.generateContextDraft === undefined ? {} : { generateDraft: props.generateContextDraft })}
             onClose={() => { setCreatePreset(undefined); requestAnimationFrame(() => createWorkbenchButtonRef.current?.focus()) }}
             onCreated={() => { props.onShowWorkbench?.(); navigationReservationsRef.current.clear(); setStateDiagnostic(undefined) }} /> : null}
           {projectDialog ? <AreaProjectDialog directory={workbenchDirectory} {...projectDialog} onClose={() => setProjectDialog(undefined)} /> : null}
@@ -3338,9 +3495,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
               editAreaBackground: (areaId: string) => { setContextDialog({ workbenchId: placementWorkbenchId, areaId }) },
             })}
             workbenchId={placementWorkbenchId}
-            sharePresenceEnabled={shareGuest || props.browserView === true
-              || workbenchShareSnapshot.links[placementWorkbenchId] !== undefined
-              || workbenchShareSnapshot.sessions.some(session => session.workbenchId === placementWorkbenchId)}
+            collaborationClient={props.collaborationClient}
             node={layout.root} document={layout} commit={commit} renderSlot={renderSlot}
             runtimeMetrics={runtimeMetrics}
             groupOrdinals={groupOrdinals}
@@ -3556,7 +3711,7 @@ interface LayoutViewProps {
   editAreaBackground?: (areaId: string) => void
   /** Runtime identity; never part of a persisted Area or editor state. */
   workbenchId: string
-  sharePresenceEnabled: boolean
+  collaborationClient?: WorkbenchCollaborationClientV1 | undefined
   runtimeMetrics?: WorkbenchRuntimeMetricsSinkV1 | undefined
   groupOrdinals: ReadonlyMap<string, number>
   editorIndex: WorkbenchEditorIndex
@@ -5173,7 +5328,7 @@ function SessionBindingChip({
 
 function AreaView(props: LayoutViewProps & { group: GroupNode }) {
   const {
-    workbenchId, sharePresenceEnabled, group, document, commit, renderSlot, editors, currentSession, account, workspaces, reportStateFailure,
+    workbenchId, collaborationClient, group, document, commit, renderSlot, editors, currentSession, account, workspaces, reportStateFailure,
     projectNeutral,
     sessionRows, sessionMarkers, sessionMarkersByWorkspace, sessionIds, workspaceTitle, archivedSessionIds,
     updateSessionMarker, openExternalSession, openOfficialSession, placeConversation, completePreparedConversation, bindSession,
@@ -6391,7 +6546,7 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
         ) : (
           <AreaEditorTarget id={active.id}><MemoizedEditor
             workbenchId={workbenchId}
-            sharePresenceEnabled={sharePresenceEnabled}
+            collaborationClient={collaborationClient}
             projection={areaContentProjection!}
             commands={areaContentCommands!}
             tab={active} renderSlot={renderSlot}
@@ -6647,7 +6802,7 @@ function MountedEditorOutlet({ metrics, children }: {
 
 export interface EditorPropsV1 {
   workbenchId: string
-  sharePresenceEnabled: boolean
+  collaborationClient?: WorkbenchCollaborationClientV1 | undefined
   projection: AreaContentProjectionV1
   commands: AreaContentCommandFacadeV1
   tab: TabDocument
@@ -6668,7 +6823,7 @@ export interface EditorPropsV1 {
 }
 
 function Editor({
-  workbenchId, sharePresenceEnabled, projection, commands, tab: suppliedTab, renderSlot, editorAvailable, editors, extensionAccess, editor, sessionUnavailable,
+  workbenchId, collaborationClient, projection, commands, tab: suppliedTab, renderSlot, editorAvailable, editors, extensionAccess, editor, sessionUnavailable,
   areaClaim, lifecycle, runtimeMetrics,
 }: EditorPropsV1) {
   const floating = useFloatingWorkspace()
@@ -6698,7 +6853,7 @@ function Editor({
     ...(managed ? { runtimeIdentity: floatingInstanceKey(workbenchId, tab.id), registerCloseGuard: (guard: () => boolean | Promise<boolean>) => floating!.registerCloseGuard(tab.id, guard, workbenchId) } : {}),
     instanceId: tab.id,
     workbenchId,
-    sharePresenceEnabled,
+    collaborationClient,
     areaId: projection.areaId,
     ...(projection.projectId ? { projectId: projection.projectId } : {}),
     areaClaim,

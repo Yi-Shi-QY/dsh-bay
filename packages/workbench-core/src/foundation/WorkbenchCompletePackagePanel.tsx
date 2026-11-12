@@ -9,6 +9,10 @@ import { WorkbenchImportFlow, type WorkbenchImportTransfer } from './WorkbenchIm
 import { WorkbenchCompleteJob } from './WorkbenchCompleteJob.tsx'
 import css from './WorkbenchSettings.module.css'
 import sharing from './WorkbenchSharing.module.css'
+import type { CompletePlatform } from '../workbench-complete-contract.ts'
+import { createWorkbenchManagerRestartBridge } from '../client/workbench-manager-restart.ts'
+import { migrateCompletePageStates } from './complete-page-state.ts'
+import type { ModuleInstanceDocument } from './document-v3.ts'
 
 const storageKey = (id: string) => 'bay.complete-transfer.v1.' + id
 function savedTransfer(id: string): WorkbenchImportTransfer {
@@ -38,6 +42,7 @@ function CompletePackagePanel({ workbenchId, mode = 'import', sourceControl, sum
   const [jobs, setJobs] = useState<CompletePackageJobView[]>([])
   const [error, setError] = useState<string>()
   const [busy, setBusy] = useState(false)
+  const [targetPlatform, setTargetPlatform] = useState<CompletePlatform>('win32')
   const pending = useRef(false)
   const uploadAbort = useRef<AbortController>()
   const exportRequestId = useRef('export-' + browserSafeUuid())
@@ -116,8 +121,24 @@ function CompletePackagePanel({ workbenchId, mode = 'import', sourceControl, sum
     onImport?.()
   })
   const jobActions = {
+    browser,
+    onMapExtensions: (job: CompletePackageJobView) => { void run(async () => { rememberJob(await client.request<CompletePackageJobView>({ action: 'map-v5-extensions', id: job.id })) }) },
+    onConfirmExtensions: (job: CompletePackageJobView) => { void run(async () => { rememberJob(await client.request<CompletePackageJobView>({ action: 'confirm-extensions', id: job.id, digest: job.extensionPlanDigest, confirmed: true })) }) },
+    onRestart: (job: CompletePackageJobView) => { void run(async () => {
+      const bridge = createWorkbenchManagerRestartBridge()
+      if (!bridge || !job.restartTransactionId) throw new Error('当前启动方式不支持一键重启。请保存其他工作，手动重启 DSH 后继续原作业。')
+      const operation = await bridge.requestRestart(job.restartTransactionId)
+      await bridge.waitForRestart({ ...operation, transactionId: job.restartTransactionId })
+      rememberJob(await client.request<CompletePackageJobView>({ action: 'resume', id: job.id }))
+    }) },
     onOpen: !browser && onOpenWorkbench ? (id: string) => { void run(async () => { await onOpenWorkbench(id) }) } : undefined,
-    onResume: (job: CompletePackageJobView) => { void run(async () => { rememberJob(await client.request<CompletePackageJobView>({ action: 'resume', id: job.id })) }) },
+    onResume: (job: CompletePackageJobView) => { void run(async () => {
+      if (job.stage === 'awaiting-page-state') {
+        const input = await client.request<{ pages: ModuleInstanceDocument[]; digest: string }>({ action: 'page-restore-input', id: job.id })
+        const pageStates = migrateCompletePageStates(input.pages, editors ?? [], 'import')
+        rememberJob(await client.request<CompletePackageJobView>({ action: 'restore-pages', id: job.id, digest: input.digest, pageStates }))
+      } else rememberJob(await client.request<CompletePackageJobView>({ action: 'resume', id: job.id }))
+    }) },
     onCancel: (job: CompletePackageJobView) => { void run(async () => { rememberJob(await client.request<CompletePackageJobView>({ action: 'cancel', id: job.id })) }) },
     onCorrectLocation: correctLocation,
     onDownload: (job: CompletePackageJobView) => { void run(() => client.download(job.id)) },
@@ -128,8 +149,15 @@ function CompletePackagePanel({ workbenchId, mode = 'import', sourceControl, sum
     {mode === 'export' ? <div className={summary ? sharing.workspace : undefined}><section className={sharing.formPanel}>
       <div className={sharing.formIntro}><h3>导出完整工作台</h3><p>把项目与工作进展一起打包，便于备份或在另一台机器继续。</p></div>
       <fieldset className={sharing.sourceControl} disabled={disabled || busy}>{sourceControl}</fieldset>
+      <label className={sharing.field}>目标系统<select value={targetPlatform} disabled={disabled || busy} onChange={event => { setTargetPlatform(event.target.value as CompletePlatform); exportRequestId.current = 'export-' + browserSafeUuid() }}><option value="win32">Windows</option><option value="darwin">macOS</option><option value="linux">Linux</option></select></label>
+      <p className={sharing.hint}>按目标系统检查文件名、链接与扩展兼容性。接收端仍按实际系统重新检查，完整包可用于其他兼容系统。</p>
       <ul className={sharing.coverage} aria-label="完整包包含内容"><li><IconFolderOpenOutlineMedium size={16} />项目文件与目录</li><li><IconNewChatOutlineMedium size={16} />对话历史与附件</li><li><IconDatabaseOutlineMedium size={16} />工作背景与记忆</li><li><IconBranchOutlineMedium size={16} />任务关系与进度</li></ul>
-      <div className={sharing.actionBar}><button type="button" className={css.primaryButton} disabled={disabled || busy || !workbenchId} onClick={() => { void run(async () => { const job = await client.request<CompletePackageJobView>({ action: 'start-export', workbenchId, requestId: exportRequestId.current }); exportRequestId.current = 'export-' + browserSafeUuid(); rememberJob(job) }) }}><IconArchiveOutlineMedium size={16} />生成完整包</button><span>完成后在下方下载</span></div>
+      <div className={sharing.actionBar}><button type="button" className={css.primaryButton} disabled={disabled || busy || !workbenchId} onClick={() => { void run(async () => {
+        const input = await client.request<{ revision: number; pages: ModuleInstanceDocument[] }>({ action: 'export-page-input', workbenchId })
+        const pageStates = migrateCompletePageStates(input.pages ?? [], editors ?? [], 'export')
+        const job = await client.request<CompletePackageJobView>({ action: 'start-export', workbenchId, targetPlatform, definitionRevision: input.revision, pageStates, requestId: exportRequestId.current })
+        exportRequestId.current = 'export-' + browserSafeUuid(); rememberJob(job)
+      }) }}><IconArchiveOutlineMedium size={16} />生成完整包</button><span>完成后在下方下载</span></div>
     </section>{summary}</div> : null}
     {mode === 'import' ? <WorkbenchImportFlow transfer={transfer} job={activeJob} busy={busy} browser={browser} disabled={disabled || browser && !workbenchId} {...(editors ? { editors } : {})} onFile={chooseFile} onChange={patch => setTransfer(current => ({ ...current, ...patch }))} onSelectParent={selectParent} onStart={startImport} onPause={() => uploadAbort.current?.abort(new Error('已暂停，可重新选择同一文件继续。'))} onNew={() => { setTransfer({ folderName: '' }); setError(undefined) }} jobActions={jobActions} /> : null}
     {error ? <p className={sharing.error} role="alert"><IconWarningOutlineMedium size={16} />{error}</p> : null}

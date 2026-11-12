@@ -31,12 +31,14 @@ import { WORKBENCH_DIRECTORY_SERVICE } from './workbench-directory-contract.ts'
 import { HostWorkbenchMemory } from './host-workbench-memory.ts'
 import type { WorkbenchMemoryWrite } from './workbench-memory-contract.ts'
 import { installWorkbenchCompleteRoute } from './host-workbench-complete.ts'
+import { WORKBENCH_COMPLETE_EXTENSIONS, type CompleteExtensions } from './host-complete-extensions.ts'
+import { WORKBENCH_COMPLETE_MIGRATIONS, type CompleteMigrationRegistry } from './host-complete-migrations.ts'
 import { WORKBENCH_SESSION_RUNTIME } from './host-workbench-directory-service.ts'
 import { WORKBENCH_ACCESS_SERVICE } from './workbench-access-contract.ts'
 import { WorkbenchAccessError } from './host-workbench-access.ts'
 import { currentWorkbenchExecutionOrigin, withWorkbenchExecutionOrigin } from './host-workbench-native-access.ts'
 
-declare module '@deepseek-ai/dsh-llm' { interface MessageSourceMap { 'bay-agent': { kind: 'bay-agent'; form: 'relay'; principal?: { kind: 'bay-workbench'; actor: 'lan-guest' | 'browser-owner'; accessId: string; workbenchId: string; inheritedAccessIds?: readonly string[] } } } }
+declare module '@deepseek-ai/dsh-llm' { interface MessageSourceMap { 'bay-agent': { kind: 'bay-agent'; form: 'relay'; principal?: { kind: 'bay-workbench'; actor: 'lan-guest' | 'browser-owner'; accessId: string; workbenchId: string; participantId?: string; collaborationId?: string; displayName?: string; inheritedAccessIds?: readonly string[] } } } }
 
 const object = (value: unknown): Record<string, unknown> => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Expected object')
@@ -218,6 +220,17 @@ export class BayAgentHost {
     })
     this.controllers.set(id, controller)
     return controller
+  }
+  subscribeTaskChanges(workbenchId: string, listener: (tasks: readonly unknown[]) => void): () => void {
+    const controller = this.controller(workbenchId)
+    let previous = JSON.stringify(controller.getSnapshot().workItems)
+    return controller.subscribe(() => {
+      const tasks = controller.getSnapshot().workItems
+      const signature = JSON.stringify(tasks)
+      if (signature === previous) return
+      previous = signature
+      listener(tasks)
+    })
   }
   private async refreshModeCapabilities() {
     this.modes = await this.availableWorkerModes()
@@ -574,8 +587,16 @@ export function installBayAgentHost(ctx: Context): (() => void) | undefined {
   const directory = ctx.get(WORKBENCH_DIRECTORY_SERVICE, false)
   const access = ctx.get(WORKBENCH_ACCESS_SERVICE, false)
   const host = new BayAgentHost(ctx, settings, sessions, profile.dir, presets, directory)
+  access?.setTaskRuntime({
+    snapshot: id => host.store.load(id).workItems,
+    request: (id, input) => host.request({ workbenchId: id, ...input }),
+    subscribe: (workbenchId, listener) => host.subscribeTaskChanges(workbenchId, listener),
+  })
   ctx.provide(WORKBENCH_SESSION_RUNTIME, host)
-  const disposeComplete = directory && workspaces ? installWorkbenchCompleteRoute(connection, { profile: profile.dir, directory, persistence: ctx.sessionPersistence, attachments: ctx.get('attachments', false) as never, sessions, workspaces, orchestration: host.store, ...(access ? { access } : {}) }) : undefined
+  const completeMigrations = ctx.get(WORKBENCH_COMPLETE_MIGRATIONS, false) as CompleteMigrationRegistry | undefined
+  const disposeComplete = directory && workspaces ? installWorkbenchCompleteRoute(connection, { profile: profile.dir, directory, persistence: ctx.sessionPersistence, attachments: ctx.get('attachments', false) as never, sessions, workspaces, orchestration: host.store,
+    extensions: () => ctx.get(WORKBENCH_COMPLETE_EXTENSIONS, false) as CompleteExtensions | undefined,
+    ...(completeMigrations ? { migrations: completeMigrations } : {}), ...(access ? { access } : {}) }) : undefined
   const readJson = async (request: Request) => {
     const reader = request.body?.getReader(); if (!reader) throw new Error('body required')
     const chunks: Uint8Array[] = []; let size = 0
@@ -594,34 +615,15 @@ export function installBayAgentHost(ctx: Context): (() => void) | undefined {
       const areaId = typeof object(input.input ?? {}).areaId === 'string' ? String(object(input.input).areaId) : host.store.load(workbenchId).workItems.find(item => item.workItemId === input.id)?.areaId
       if (access && actor) {
         access.authorize(actor, input.action === 'snapshot' || input.action === 'ensure' ? 'view' : 'tasks', { workbenchId, ...(areaId ? { areaId } : {}) })
-        if (actor.actor === 'lan-guest' && input.action === 'ensure') input.action = 'snapshot'
-        if (actor.actor === 'lan-guest' && actor.grant?.areaIds && !areaId && input.action !== 'snapshot') throw new WorkbenchAccessError('area-required', '此操作缺少已授权的区域。')
       }
-      const execute = () => actor?.actor === 'lan-guest' ? withWorkbenchExecutionOrigin({ accessId: actor.accessId, workbenchId, actor: actor.actor }, () => host.request(input)) : host.request(input)
+      const execute = () => actor?.actor === 'lan-guest'
+        ? withWorkbenchExecutionOrigin({ accessId: actor.accessId, workbenchId, actor: actor.actor,
+            ...(actor.participantId === undefined ? {} : { participantId: actor.participantId }),
+            ...(actor.collaborationId === undefined ? {} : { collaborationId: actor.collaborationId }),
+            ...(actor.displayName === undefined ? {} : { displayName: actor.displayName }) }, () => host.request(input))
+        : host.request(input)
       const snapshot = access && actor && input.action !== 'snapshot' && input.action !== 'ensure'
         ? await access.run(actor, 'tasks', { workbenchId, ...(areaId ? { areaId } : {}) }, execute) : await execute()
-      if (actor?.actor === 'lan-guest' && actor.grant?.areaIds) {
-        const allowed = new Set(actor.grant.areaIds), view = snapshot.snapshot
-        const inArea = (row: { areaId: string }) => allowed.has(row.areaId)
-        view.areas = view.areas.filter(inArea)
-        view.workItems = view.workItems.filter(inArea)
-        view.assignments = view.assignments.filter(inArea)
-        view.attention = view.attention.filter(inArea)
-        delete view.sessionId; delete view.bayAgentSessionId
-        if (view.orchestration) {
-          const items = new Set(view.workItems.map(row => row.workItemId)), assignments = new Set(view.assignments.map(row => row.assignmentId))
-          const relevant = (row: { workItemId?: string; assignmentId?: string }) => !!(row.workItemId && items.has(row.workItemId) || row.assignmentId && assignments.has(row.assignmentId))
-          const projection = view.orchestration
-          projection.activeWorkItems = projection.activeWorkItems.filter(inArea)
-          projection.activeAssignments = projection.activeAssignments.filter(inArea)
-          projection.openAttention = projection.openAttention.filter(inArea)
-          projection.recentReports = projection.recentReports.filter(relevant)
-          projection.recentBlockers = projection.recentBlockers.filter(relevant)
-          projection.recentDecisions = []
-          projection.recentEvents = projection.recentEvents.filter(event => relevant(event.payload))
-          delete projection.checkpoint
-        }
-      }
       return Response.json(snapshot, { headers: { 'cache-control': 'no-store' } })
     } catch (error) { return Response.json({ error: String(error) }, { status: error instanceof WorkbenchAccessError ? error.status : 400, headers: { 'cache-control': 'no-store' } }) }
   } })
@@ -637,5 +639,5 @@ export function installBayAgentHost(ctx: Context): (() => void) | undefined {
       return Response.json({ draft }, { headers: { 'cache-control': 'no-store' } })
     } catch (error) { return Response.json({ error: String(error) }, { status: 400, headers: { 'cache-control': 'no-store' } }) }
   } })
-  return () => { disposeComplete?.(); disposeDraft(); disposeAgent(); host.dispose() }
+  return () => { access?.setTaskRuntime(undefined); disposeComplete?.(); disposeDraft(); disposeAgent(); host.dispose() }
 }

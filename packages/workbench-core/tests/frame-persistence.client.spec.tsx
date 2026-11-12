@@ -11,6 +11,7 @@ import { migrateDocumentV2ToV3 } from '../src/foundation/document-v3.ts'
 import type { WorkbenchLayoutDocument } from '../src/foundation/model.ts'
 import { createWorkbenchRuntimeMetrics } from '../src/foundation/workbench-runtime-metrics.ts'
 import type { WorkbenchWindowControllerV1 } from '../src/client/workbench-window-controller.ts'
+import type { WorkbenchSurfaceContextV1 } from '../src/client/workbench-surface-context.ts'
 import type { WorkbenchShareControllerV1 } from '../src/client/workbench-share-controller.ts'
 import type { ConversationTabStatusSource, ConversationTabStatus } from '../src/client/conversation-tab-status.ts'
 
@@ -24,8 +25,7 @@ function setup(
   desktopControls?: { openSettings: () => void },
   browserContext?: {
     onImportWorkbench?: () => void
-    browserView?: boolean
-    browserWorkbenchId?: string
+    surfaceContext?: WorkbenchSurfaceContextV1
     requestBrowserReclaim?: (workbenchId: string) => Promise<boolean>
     shareController?: WorkbenchShareControllerV1
   },
@@ -181,6 +181,7 @@ function setup(
     useWorkspaces: (select: (state: unknown) => unknown) => select(workspaces),
     bindLayout: () => () => {}, bindNavigation: () => () => {}, selectSession: vi.fn(),
     settings, runtimeMetrics: metrics,
+    surfaceContext: browserContext?.surfaceContext ?? { kind: 'desktop' },
     conversationStatus,
     ...(interactionPolicy === undefined ? {} : { conversationResourcePolicy: interactionPolicy }),
     showSessionAccentFrames,
@@ -188,6 +189,7 @@ function setup(
     ...(windowController === undefined ? {} : { windowController }),
     workbenchDirectory: {
       getSnapshot: () => directorySnapshot,
+      getRootPath: (workbenchId: string) => workbenchId === 'one' ? 'C:\\Users\\Test\\Workbenches\\Workbench A' : undefined,
       getDocument: (workbenchId: string) => {
         const document = documents.get(workbenchId)
         return document === undefined ? undefined : structuredClone(document)
@@ -736,8 +738,9 @@ describe('Frame layout persistence', () => {
   it('pins a browser view to one Workbench and removes global creation controls', async () => {
     const originalTitle = document.title
     const h = setup(async () => ({ status: 'committed', revision: 2 }), undefined, undefined, undefined, undefined, {
-      browserView: true, browserWorkbenchId: 'one',
+      surfaceContext: { kind: 'browser-owner', workbenchId: 'one' },
     })
+    expect(h.view.container.querySelector('[data-workbench-surface="browser-owner"]')).not.toBeNull()
     expect(h.view.container.querySelector('[data-workbench-tabs]')).toBeNull()
     expect(h.view.queryByRole('tab', { name: 'Workbench A' })).toBeNull()
     expect(h.view.queryByRole('tab', { name: 'Workbench B' })).toBeNull()
@@ -746,10 +749,23 @@ describe('Frame layout persistence', () => {
     expect(h.view.container.querySelector('[data-workbench-shell-sidebar]')).toBeNull()
     expect(h.view.container.querySelector('[data-workbench-canvas]')).not.toBeNull()
     expect(document.title).toBe('Workbench A')
+    expect(h.view.getByText('布局已保存')).toBeTruthy()
+    fireEvent.click(h.view.getByRole('button', { name: '查看工作台文件夹路径' }))
+    expect(h.view.getByText('C:\\Users\\Test\\Workbenches\\Workbench A')).toBeTruthy()
     h.rename('one', '复核工作台')
     expect(document.title).toBe('复核工作台')
     h.view.unmount()
     expect(document.title).toBe(originalTitle)
+  })
+
+  it('renders LAN participants on the shared-control Workbench surface', () => {
+    const h = setup(async () => ({ status: 'committed', revision: 2 }), undefined, undefined, undefined, undefined, {
+      surfaceContext: { kind: 'lan-participant', workbenchId: 'one', collaborationId: 'collab', participantId: 'participant' },
+    })
+    expect(h.view.container.querySelector('[data-workbench-surface="lan-participant"]')).not.toBeNull()
+    expect(h.view.container.querySelector('[data-workbench-browser-toolbar]')).not.toBeNull()
+    expect(h.view.container.querySelector('[data-workbench-canvas]')).not.toBeNull()
+    h.view.unmount()
   })
 
   it('provides browser Workbench actions for undo, save, settings, and reclaim', async () => {
@@ -770,7 +786,7 @@ describe('Frame layout persistence', () => {
     }
     const h = setup(async () => ({ status: 'committed', revision: 2 }), undefined, undefined,
       windowController, { openSettings }, {
-        browserView: true, browserWorkbenchId: 'one',
+        surfaceContext: { kind: 'browser-owner', workbenchId: 'one' },
         requestBrowserReclaim: vi.fn(async () => true),
       })
     expect(h.view.container.querySelector('[data-workbench-browser-toolbar]')).not.toBeNull()
@@ -798,7 +814,7 @@ describe('Frame layout persistence', () => {
       return true
     })
     const h = setup(async () => ({ status: 'committed', revision: 2 }), undefined, undefined,
-      undefined, undefined, { browserView: true, browserWorkbenchId: 'one', requestBrowserReclaim })
+      undefined, undefined, { surfaceContext: { kind: 'browser-owner', workbenchId: 'one' }, requestBrowserReclaim })
     const reclaim = h.view.getByRole('button', { name: '收回到 DSH 客户端' }) as HTMLButtonElement
     expect(reclaim.disabled).toBe(false)
     fireEvent.click(reclaim)
@@ -829,7 +845,7 @@ describe('Frame layout persistence', () => {
     }
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
     const h = setup(async () => ({ status: 'committed', revision: 2 }), undefined, undefined,
-      undefined, undefined, { browserView: true, browserWorkbenchId: 'one', requestBrowserReclaim, shareController })
+      undefined, undefined, { surfaceContext: { kind: 'browser-owner', workbenchId: 'one' }, requestBrowserReclaim, shareController })
     expect(h.view.queryByRole('button', { name: '开始局域网分享' })).toBeNull()
     expect(h.view.getByRole('button', { name: '复制局域网分享链接' })).toBeTruthy()
     fireEvent.click(h.view.getByRole('button', { name: '收回到 DSH 客户端' }))
@@ -1014,7 +1030,7 @@ describe('Frame layout persistence', () => {
     }
     const h = setup(async () => ({ status: 'committed', revision: 2 }), undefined, ['测试内页'], controller)
     await waitFor(() => expect(h.view.container.querySelector('[data-workbench-browser-handoff="ready"]')?.textContent)
-      .toBe('当前工作台正在浏览器中打开。'))
+      .toBe('浏览器已连接。当前工作台正在浏览器中使用。'))
     expect(h.view.container.querySelector('[data-workbench-diagnostic]')).toBeNull()
     const controlPage = h.view.container.querySelector<HTMLElement>('[data-workbench-browser-control-page]')
     const handoffLock = controlPage
@@ -1025,7 +1041,7 @@ describe('Frame layout persistence', () => {
     fireEvent.click(h.view.getByRole('button', { name: '收回到 DSH 客户端' }))
     await waitFor(() => expect(reclaim).toHaveBeenCalledOnce())
     await waitFor(() => expect(h.view.container.querySelector('[data-workbench-browser-handoff="reclaimed"]')?.textContent)
-      .toBe('工作台已收回到 DSH 客户端。'))
+      .toBe('已收回。工作台控制权已交还给 DSH 客户端。'))
     expect(h.view.container.querySelector('[data-workbench-diagnostic]')).toBeNull()
     expect(h.view.container.querySelector('[data-workbench-browser-control-page]')).toBeNull()
     act(() => {
@@ -1033,13 +1049,13 @@ describe('Frame layout persistence', () => {
       for (const listener of listeners) listener()
     })
     await waitFor(() => expect(h.view.container.querySelector('[data-workbench-browser-handoff="closed"]')?.textContent)
-      .toBe('浏览器工作台已关闭，可继续在 DSH 客户端使用。'))
+      .toBe('浏览器已关闭。浏览器页面关闭后，工作台已恢复到 DSH 客户端。'))
     act(() => {
       windowSnapshot = { supported: true, windows: [], request: { workbenchId: 'one', status: 'prepared' } }
       for (const listener of listeners) listener()
     })
     expect(h.view.container.querySelector('[data-workbench-browser-handoff="closed"]')?.textContent)
-      .toBe('浏览器工作台已关闭，可继续在 DSH 客户端使用。')
+      .toBe('浏览器已关闭。浏览器页面关闭后，工作台已恢复到 DSH 客户端。')
     expect(h.settings.patch).not.toHaveBeenCalled()
   })
 

@@ -60,7 +60,7 @@ describe('Core Host entry service injection', () => {
 
     expect(connection.rpc.intercept).toHaveBeenCalledWith('/api', expect.any(Function), expect.any(Function))
     expect(typeof rpcHandler).toBe('function')
-    expect(connection.fetch.register).toHaveBeenCalledTimes(8)
+    expect(connection.fetch.register).toHaveBeenCalledTimes(7)
     await fixture.dispose()
   })
 })

@@ -4,11 +4,11 @@ DSH Bay is a multi-area workbench for DSH projects, native conversations, inner-
 
 ## Compatibility and installation
 
-This private candidate is **`dsh-bay@0.2.2-alpha.18.0`**, targeting **DSH `0.2.2-rc.1`**. The package name and client module ID are `dsh-bay`; the internal module ID is `workbench.core`.
+This private candidate is **`dsh-bay@0.2.2-alpha.18.1`**, targeting **DSH `0.2.2-rc.1`**. The package name and client module ID are `dsh-bay`; the internal module ID is `workbench.core`.
 
-Install the supplied `dsh-bay-0.2.2-alpha.18.0.tgz` through DSH's native Plugin Manager and follow its restart instructions. The repository's local build output is `releases/alpha18.0-rc1-private/`; public registry publication is not recorded for this candidate.
+Install the supplied `dsh-bay-0.2.2-alpha.18.1.tgz` through DSH's native Plugin Manager and follow its restart instructions. The repository's local build output is `releases/alpha18.1-rc1-private/`; public registry publication is not recorded for this candidate.
 
-Disable the legacy `@dsh-workbench/core` package before enabling `dsh-bay` in the same Profile. Package renaming does not imply migration of 17.x workbenches or old complete-package formats; those are unsupported by the 18.0 directory workflow.
+Disable the legacy `@dsh-workbench/core` package before enabling `dsh-bay` in the same Profile. Package renaming does not imply migration of 17.x workbenches or old complete-package formats; those are unsupported by the 18.x directory workflow.
 
 ## The 18.0 model
 

@@ -219,7 +219,7 @@ describe('Host browser Workbench window controller', () => {
     controller.dispose()
   })
 
-  it('keeps shared guest views outside the owner active view lease', async () => {
+  it('keeps shared participant views outside the owner active view lease', async () => {
     const controller = createHostBrowserWindowController({
       origin: 'http://127.0.0.1:4200',
       authenticatedUrl: url => { const target = new URL(url); target.searchParams.set('token', 'dsh-test-token'); return target.href },
@@ -266,7 +266,7 @@ describe('Host browser Workbench window controller', () => {
     expect(response.status).toBe(400)
     await dispose?.()
     expect(unregisterRpc).toHaveBeenCalledOnce()
-    expect(unregisterFetch).toHaveBeenCalledTimes(8)
+    expect(unregisterFetch).toHaveBeenCalledTimes(7)
   })
 
   it('registers desktop WebServer RPC routes with Connection response envelopes', async () => {

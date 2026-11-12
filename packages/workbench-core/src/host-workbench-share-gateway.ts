@@ -6,10 +6,13 @@ import { randomUUID } from 'node:crypto'
 import { Readable } from 'node:stream'
 import { once } from 'node:events'
 import type { HostWorkbenchAccess } from './host-workbench-access.ts'
-import { WORKBENCH_ACCESS_HEADER, COLLABORATION_GRANT, type WorkbenchGrant, type WorkbenchAccessContext } from './workbench-access-contract.ts'
+import { WORKBENCH_ACCESS_HEADER, SHARED_CONTROL_GRANT, type WorkbenchGrant, type WorkbenchAccessContext } from './workbench-access-contract.ts'
 import { URL } from 'node:url'
 import { guestDistributionDenied } from './host-distribution-guest-guard.ts'
 import type { WorkbenchShareSessionManagerV1, WorkbenchShareSessionV1, WorkbenchShareViewLeaseV1 } from './host-workbench-share-session.ts'
+import type { WorkbenchCollaborationManagerV1 } from './host-workbench-collaboration.ts'
+import type { ParticipantPresenceV1, WorkbenchCollaborationEventV1, WorkbenchCommandEnvelopeV1 } from './workbench-collaboration-contract.ts'
+import { WebSocketServer, type WebSocket } from 'ws'
 
 const SHARE_COOKIE = 'dsh-workbench-share'
 const MAX_PROXY_BODY = 300 * 1024 * 1024
@@ -34,8 +37,8 @@ export interface WorkbenchShareGatewayOptionsV1 {
   readonly guestHttp?: (request: Request, context: WorkbenchAccessContext) => Promise<Response>
   readonly guestUpgrade?: (request: IncomingMessage, socket: Duplex, head: Buffer, context: WorkbenchAccessContext) => void
   readonly revokeGuest?: (accessId: string) => void
-  readonly guestPresence?: (payload: unknown, context: WorkbenchAccessContext) => Promise<unknown>
-  readonly guestDocument?: (context: WorkbenchAccessContext) => Promise<string>
+  /** Dedicated shared-control channel; the legacy projected-presence endpoint is not used here. */
+  readonly collaboration?: WorkbenchCollaborationManagerV1
   readonly upstreamOrigin: string
   readonly manager: WorkbenchShareSessionManagerV1
   readonly prepareView: (workbenchId: string) => Promise<PreparedViewV1>
@@ -190,9 +193,9 @@ function responseHeaders(response: IncomingMessage, upstream: URL, gatewayOrigin
   return output
 }
 
-function injectView(html: string, view: NativeViewV1): string {
+function injectView(html: string, view: NativeViewV1, collaboration?: { readonly collaborationId: string; readonly participantId: string }): string {
   const marker = `<script>globalThis.__WORKBENCH_WINDOW_VIEW__=${JSON.stringify(view)};</script>`
-    + '<script>globalThis.__WORKBENCH_SHARE_GUEST__=true;</script>'
+    + (collaboration === undefined ? '' : `<script>globalThis.__WORKBENCH_COLLABORATION__=${JSON.stringify(collaboration)};</script>`)
     + '<script>history.replaceState(null,"","/workbench");</script>'
   return html.replace(/<\/head>/iu, `${marker}</head>`)
 }
@@ -214,12 +217,14 @@ export async function createWorkbenchShareGateway(options: WorkbenchShareGateway
   const upstream = new URL(options.upstreamOrigin)
   if (upstream.protocol !== 'http:' || !loopbackHost(upstream.hostname)) throw new Error('workbench-share-upstream-must-be-loopback')
   const server = createServer((request, response) => { void handleHttp(request, response).catch(() => { if (!response.headersSent) { writeSecurityHeaders(response); response.writeHead(502); response.end('upstream unavailable') } else response.destroy() }) })
+  const collaborationWss = new WebSocketServer({ noServer: true })
   const gateway = await new Promise<{ port: number }>((resolve, reject) => {
     server.once('error', reject)
     server.listen(0, host, () => { server.off('error', reject); const address = server.address(); if (address === null || typeof address === 'string') { reject(new Error('workbench-share-bind-failed')); return } resolve({ port: address.port }) })
   })
   const sessions = options.manager
   const guestSockets = new Map<string, Set<Duplex>>()
+  const collaborationSockets = new Map<string, Set<WebSocket>>()
   const metrics = new Map<string, {
     httpRequests: number
     httpErrors: number
@@ -287,7 +292,9 @@ export async function createWorkbenchShareGateway(options: WorkbenchShareGateway
       }
       created.lease.nativeView = { windowId: redeemed.windowId, closeToken: redeemed.closeToken }
       if (options.access) {
-        const token = options.access.registerGuest(created.lease.leaseId, session.workbenchId, session.grant, () => session.leases.has(created.lease.leaseId) && sessions.getSession(session.workbenchId) === session)
+        const collaborationId = options.collaboration?.get(session.workbenchId)?.snapshot().collaborationId
+        const token = options.access.registerGuest(created.lease.leaseId, session.workbenchId, session.grant, () => session.leases.has(created.lease.leaseId) && sessions.getSession(session.workbenchId) === session,
+          { ...(collaborationId === undefined ? {} : { collaborationId }), displayName: created.lease.nickname })
         created.lease.accessToken = token
         await options.closeView(redeemed.closeToken)
         created.lease.nativeView = { windowId: randomUUID(), closeToken: token }
@@ -304,22 +311,6 @@ export async function createWorkbenchShareGateway(options: WorkbenchShareGateway
     if (request.method !== 'GET' && request.method !== 'HEAD' && request.method !== 'POST') { writeSecurityHeaders(response); response.writeHead(405); response.end(); return }
     const url = new URL(request.url ?? '/', `http://${host}:${String(gateway.port)}`)
     if (request.headers.host !== url.host || request.headers.origin !== undefined && request.headers.origin !== url.origin) { writeSecurityHeaders(response); response.writeHead(403); response.end('workbench origin denied'); return }
-    if (url.pathname === '/api/workbench-share/lifecycle') {
-      if (request.method !== 'GET' && request.method !== 'HEAD') { writeSecurityHeaders(response); response.writeHead(405); response.end(); return }
-      const rawCookie = cookieValue(request)
-      const state = rawCookie === undefined ? undefined : sessions.findCookieState(rawCookie)
-      if (state?.status === 'active') {
-        const payload = JSON.stringify({ state: 'active', workbenchId: state.session.workbenchId })
-        writeSecurityHeaders(response, { 'content-type': 'application/json; charset=utf-8', 'content-length': String(Buffer.byteLength(payload)) })
-        response.writeHead(200); response.end(request.method === 'HEAD' ? undefined : payload); return
-      }
-      if (state?.status === 'stopped' || state?.status === 'kicked') {
-        const payload = JSON.stringify({ code: `workbench-share-${state.status}`, state: state.status })
-        writeSecurityHeaders(response, { 'content-type': 'application/json; charset=utf-8', 'x-dsh-share-state': state.status, 'content-length': String(Buffer.byteLength(payload)) })
-        response.writeHead(410); response.end(request.method === 'HEAD' ? undefined : payload); return
-      }
-      writeSecurityHeaders(response); response.writeHead(401); response.end('workbench share authorization required'); return
-    }
     if (url.pathname === '/workbench' && url.searchParams.has('share')) {
       if (request.method !== 'GET' || url.searchParams.getAll('share').length !== 1 || [...url.searchParams.keys()].some(key => key !== 'share')) { writeSecurityHeaders(response); response.writeHead(400); response.end(); return }
       const session = sessions.findByToken(url.searchParams.get('share')!)
@@ -378,36 +369,6 @@ export async function createWorkbenchShareGateway(options: WorkbenchShareGateway
         response.end(JSON.stringify({ type: 'server-response', rpcId: envelope.rpcId, result: { ok: true, value: { status: 'ready' } } })); return
       } catch { writeSecurityHeaders(response); response.writeHead(403); response.end('guest view denied'); return }
     }
-    if (url.pathname === '/api/workbench-share/guest-profile' && request.method === 'GET') {
-      const payload = JSON.stringify({ nickname: lease.nickname })
-      writeSecurityHeaders(response, { 'content-type': 'application/json; charset=utf-8', 'content-length': String(Buffer.byteLength(payload)) })
-      response.writeHead(200); response.end(payload); finishRequest(); return
-    }
-    if (url.pathname === '/api/workbench-share/guest-profile' && request.method === 'POST') {
-      try {
-        const body = JSON.parse((await readResponseBody(request, 8 * 1024)).toString('utf8')) as { nickname?: unknown }
-        if (!validNickname(body.nickname)) { recordRequestError(session.workbenchId); writeSecurityHeaders(response); response.writeHead(400); response.end('invalid nickname'); finishRequest(); return }
-        sessions.setNickname(session.workbenchId, lease.leaseId, body.nickname.trim())
-        const payload = JSON.stringify({ nickname: lease.nickname })
-        writeSecurityHeaders(response, { 'content-type': 'application/json; charset=utf-8', 'content-length': String(Buffer.byteLength(payload)) })
-        response.writeHead(200); response.end(payload); finishRequest(); return
-      } catch {
-        recordRequestError(session.workbenchId); writeSecurityHeaders(response); response.writeHead(400); response.end('invalid guest profile'); finishRequest(); return
-      }
-    }
-    if (url.pathname === '/api/workbench-share/heartbeat' && request.method === 'POST') {
-      try {
-        const body = JSON.parse((await readResponseBody(request, 4 * 1024)).toString('utf8')) as { rttMs?: unknown }
-        if (typeof body.rttMs !== 'number' || !Number.isFinite(body.rttMs) || body.rttMs < 0 || body.rttMs > 60_000) {
-          recordRequestError(session.workbenchId); writeSecurityHeaders(response); response.writeHead(400); response.end('invalid heartbeat'); finishRequest(); return
-        }
-        sessions.updateGuest(lease, { rttMs: Math.round(body.rttMs), lastSeenAt: Date.now() })
-        writeSecurityHeaders(response, { 'content-type': 'application/json; charset=utf-8' })
-        response.writeHead(204); response.end(); finishRequest(); return
-      } catch {
-        recordRequestError(session.workbenchId); writeSecurityHeaders(response); response.writeHead(400); response.end('invalid heartbeat'); finishRequest(); return
-      }
-    }
     if (url.pathname === '/workbench' && (url.search === '' || url.search === '?')) {
       let native = leaseNativeView(lease)
       let documentHtml: string | undefined
@@ -427,8 +388,8 @@ export async function createWorkbenchShareGateway(options: WorkbenchShareGateway
         const upstreamResponse = await requestUpstream(new URL('/workbench', upstream), request, ownerCookie ?? '')
         documentHtml = upstreamResponse.body.toString('utf8')
       }
-      if (options.guestDocument && options.access) documentHtml = await options.guestDocument(options.access.getContext(lease.leaseId))
-      const html = injectView(documentHtml, native!)
+      const collaborationId = options.collaboration?.get(lease.workbenchId)?.snapshot().collaborationId
+      const html = injectView(documentHtml, native!, collaborationId === undefined ? undefined : { collaborationId, participantId: lease.leaseId })
       writeSecurityHeaders(response, { 'content-type': 'text/html; charset=utf-8', 'content-length': String(Buffer.byteLength(html)) })
       response.writeHead(200); response.end(request.method === 'HEAD' ? undefined : html); finishRequest(); return
     }
@@ -442,14 +403,6 @@ export async function createWorkbenchShareGateway(options: WorkbenchShareGateway
         }
       } catch { /* malformed beacon is treated like a closed view */ }
       writeSecurityHeaders(response); response.writeHead(204); response.end(); finishRequest(); return
-    }
-    if (url.pathname === '/api/workbench-share/presence' && request.method === 'POST' && options.guestPresence && options.access) {
-      try {
-        const envelope = JSON.parse((await readResponseBody(request, 24 * 1024)).toString('utf8'))
-        const result = await options.guestPresence(envelope.payload, options.access.getContext(lease.leaseId))
-        writeSecurityHeaders(response, { 'content-type': 'application/json' }); response.writeHead(200)
-        response.end(JSON.stringify({ type: 'server-response', rpcId: envelope.rpcId, result })); return
-      } catch { response.writeHead(403); response.end('presence denied'); return }
     }
     if (url.pathname.startsWith('/api/workbench-share/')) {
       writeSecurityHeaders(response); response.writeHead(403); response.end('share management is host-only'); return
@@ -483,15 +436,113 @@ export async function createWorkbenchShareGateway(options: WorkbenchShareGateway
     finishRequest()
   }
 
+  const sendCollaboration = (socket: WebSocket, type: string, payload: unknown): void => {
+    if (socket.readyState !== 1) return
+    socket.send(JSON.stringify({ type, payload }))
+  }
+
+  const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value)
+
+  const handleCollaborationSocket = (socket: WebSocket, found: { readonly lease: WorkbenchShareViewLeaseV1; readonly session: WorkbenchShareSessionV1 }): void => {
+    const collaboration = options.collaboration?.get(found.session.workbenchId)
+    if (collaboration === undefined) { sendCollaboration(socket, 'server.collaboration-ended', { reason: 'collaboration-unavailable' }); socket.close(1008); return }
+    let connected = false
+    let disposed = false
+    const sockets = collaborationSockets.get(found.lease.leaseId) ?? new Set<WebSocket>()
+    sockets.add(socket)
+    collaborationSockets.set(found.lease.leaseId, sockets)
+    const unsubscribe = collaboration.subscribe(event => sendCollaboration(socket, 'server.event', event))
+    socket.on('message', data => {
+      let message: unknown
+      try { message = JSON.parse(data.toString()) } catch { sendCollaboration(socket, 'server.command-result', { ok: false, requestId: '', code: 'invalid-operation', message: 'invalid collaboration message', workbenchRevision: collaboration.snapshot().workbenchRevision, canvasRevision: collaboration.snapshot().canvasRevision }); return }
+      if (!isRecord(message) || typeof message.type !== 'string' || !isRecord(message.payload)) return
+      // A share stop, kick, or grant revocation removes the lease while an
+      // already-upgraded WebSocket can still be physically open. Recheck the
+      // lease before every collaboration message so that socket cannot keep
+      // issuing commands after access has ended.
+      if (!found.session.leases.has(found.lease.leaseId)) {
+        sendCollaboration(socket, 'server.collaboration-ended', { reason: 'share-access-revoked' })
+        socket.close(1008)
+        return
+      }
+      if (message.type === 'client.hello') {
+        const payload = message.payload
+        if (payload.collaborationId !== collaboration.snapshot().collaborationId || payload.workbenchId !== found.session.workbenchId || payload.participantId !== found.lease.leaseId) {
+          sendCollaboration(socket, 'server.collaboration-ended', { reason: 'collaboration-scope-denied' }); socket.close(1008); return
+        }
+        const joined = collaboration.connect({
+          collaborationId: collaboration.snapshot().collaborationId,
+          workbenchId: found.session.workbenchId,
+          participantId: found.lease.leaseId,
+          displayName: found.lease.nickname,
+          role: 'participant',
+          ...(typeof payload.lastEventId === 'string' ? { lastEventId: payload.lastEventId } : {}),
+          ...(typeof payload.lastWorkbenchRevision === 'number' ? { lastWorkbenchRevision: payload.lastWorkbenchRevision } : {}),
+          ...(typeof payload.lastCanvasRevision === 'number' ? { lastCanvasRevision: payload.lastCanvasRevision } : {}),
+        })
+        if ('error' in joined) { sendCollaboration(socket, 'server.collaboration-ended', joined); socket.close(1008); return }
+        connected = true
+        sendCollaboration(socket, 'server.snapshot', joined)
+        if (typeof payload.lastEventId === 'string') {
+          const replay = collaboration.eventsSince(payload.lastEventId)
+          if (replay !== undefined) for (const event of replay) sendCollaboration(socket, 'server.event', event)
+          else sendCollaboration(socket, 'server.resync-required', collaboration.snapshot())
+        }
+        return
+      }
+      if (!connected) { sendCollaboration(socket, 'server.collaboration-ended', { reason: 'collaboration-handshake-required' }); socket.close(1008); return }
+      if (message.type === 'client.command') {
+        const input = message.payload as unknown as WorkbenchCommandEnvelopeV1
+        void collaboration.command({ ...input, collaborationId: collaboration.snapshot().collaborationId, workbenchId: found.session.workbenchId, participantId: found.lease.leaseId }).then(result => sendCollaboration(socket, 'server.command-result', result))
+        return
+      }
+      if (message.type === 'client.presence') {
+        const input = message.payload as unknown as ParticipantPresenceV1
+        collaboration.publishPresence({ ...input, participantId: found.lease.leaseId, displayName: found.lease.nickname, role: 'participant', connectionState: 'connected', updatedAt: Date.now() })
+        return
+      }
+      if (message.type === 'client.resync') sendCollaboration(socket, 'server.snapshot', collaboration.snapshot())
+    })
+    // Keep the collaboration carrier alive independently from the legacy
+    // remote.mux heartbeat. A stale lease is closed before it can submit a
+    // command, even if the browser keeps the TCP connection half-open.
+    const heartbeat = setInterval(() => {
+      if (disposed) return
+      if (!found.session.leases.has(found.lease.leaseId)) {
+        sendCollaboration(socket, 'server.collaboration-ended', { reason: 'share-access-revoked' })
+        socket.close(1008, 'Share access revoked')
+        return
+      }
+      if (socket.readyState === 1) socket.ping()
+    }, 15_000)
+    heartbeat.unref?.()
+    const dispose = () => {
+      if (disposed) return
+      disposed = true
+      clearInterval(heartbeat)
+      unsubscribe()
+      sockets.delete(socket)
+      if (sockets.size === 0) collaborationSockets.delete(found.lease.leaseId)
+      if (connected) collaboration.disconnect(found.lease.leaseId)
+    }
+    socket.once('close', dispose)
+    socket.once('error', dispose)
+  }
+
   server.on('upgrade', (request, clientSocket, head) => {
     const requestUrl = new URL(request.url ?? '/', `http://${host}:${String(gateway.port)}`)
     if (request.headers.host !== requestUrl.host || request.headers.origin !== undefined && request.headers.origin !== requestUrl.origin) { clientSocket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n'); return }
+    const rawCookie = cookieValue(request)
+    const found = rawCookie === undefined ? undefined : sessions.findLease(rawCookie)
+    if (requestUrl.pathname === '/api/workbench-collaboration' && request.headers.upgrade?.toLowerCase() === 'websocket') {
+      if (found === undefined || options.collaboration === undefined) { clientSocket.end('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n'); return }
+      collaborationWss.handleUpgrade(request, clientSocket, head, socket => handleCollaborationSocket(socket, found))
+      return
+    }
     if (requestUrl.pathname !== '/api/remote.mux' || request.headers.upgrade?.toLowerCase() !== 'websocket') {
       clientSocket.end('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n')
       return
     }
-    const rawCookie = cookieValue(request)
-    const found = rawCookie === undefined ? undefined : sessions.findLease(rawCookie)
     if (found === undefined) { clientSocket.end('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n'); return }
     const socketMetrics = metricsFor(found.session.workbenchId)
     const wasConnected = found.lease.websocketState === 'connected'
@@ -524,15 +575,21 @@ export async function createWorkbenchShareGateway(options: WorkbenchShareGateway
       options.access?.revoke(lease.leaseId); options.revokeGuest?.(lease.leaseId)
       for (const socket of guestSockets.get(lease.leaseId) ?? []) socket.destroy()
       guestSockets.delete(lease.leaseId)
+      for (const socket of collaborationSockets.get(lease.leaseId) ?? []) {
+        sendCollaboration(socket, 'server.collaboration-ended', { reason: 'share-stopped' })
+        socket.close(1000, 'Collaboration ended')
+      }
+      collaborationSockets.delete(lease.leaseId)
       if (lease.nativeView !== undefined) await options.closeView(lease.nativeView.closeToken).catch(() => {})
     }
     sessions.stop(workbenchId)
+    await options.collaboration?.stop(workbenchId)
     shareUrls.delete(workbenchId)
     metrics.delete(workbenchId)
   }
   return {
     host, port: gateway.port, origin: `http://${host}:${String(gateway.port)}`,
-    async startShare(workbenchId, grant = COLLABORATION_GRANT) {
+    async startShare(workbenchId, grant = SHARED_CONTROL_GRANT) {
       const existing = sessions.getSession(workbenchId)
       if (existing !== undefined) {
         const current = shareUrls.get(workbenchId)
@@ -540,6 +597,7 @@ export async function createWorkbenchShareGateway(options: WorkbenchShareGateway
       }
       const started = sessions.start(workbenchId, host, gateway.port, '', grant)
       if (!started.ok || started.token === undefined) throw new Error(started.error ?? 'workbench-share-start-failed')
+      if (options.collaboration !== undefined) await options.collaboration.start(workbenchId, 'owner')
       const url = `http://${host}:${String(gateway.port)}/workbench?share=${encodeURIComponent(started.token)}`
       shareUrls.set(workbenchId, url)
       return { status: 'started', url }
@@ -550,6 +608,10 @@ export async function createWorkbenchShareGateway(options: WorkbenchShareGateway
       for (const lease of session.leases.values()) {
         if (lease.accessToken) options.access?.reduceGuest(lease.leaseId, session.grant)
         for (const socket of guestSockets.get(lease.leaseId) ?? []) socket.destroy()
+        for (const socket of collaborationSockets.get(lease.leaseId) ?? []) {
+          sendCollaboration(socket, 'server.collaboration-ended', { reason: 'share-access-revoked' })
+          socket.close(1008, 'Workbench access changed')
+        }
       }
     },
     async kickGuest(workbenchId, leaseId) {
@@ -557,8 +619,14 @@ export async function createWorkbenchShareGateway(options: WorkbenchShareGateway
       const lease = sessions.revokeLease(workbenchId, leaseId, 'kicked')
       if (session === undefined || lease === undefined) return false
       options.access?.revoke(lease.leaseId); options.revokeGuest?.(lease.leaseId)
+      options.collaboration?.get(workbenchId)?.disconnect(lease.leaseId)
       for (const socket of guestSockets.get(lease.leaseId) ?? []) socket.destroy()
       guestSockets.delete(lease.leaseId)
+      for (const socket of collaborationSockets.get(lease.leaseId) ?? []) {
+        sendCollaboration(socket, 'server.collaboration-ended', { reason: 'participant-kicked' })
+        socket.close(1008, 'Participant kicked')
+      }
+      collaborationSockets.delete(lease.leaseId)
       if (lease.nativeView !== undefined) await options.closeView(lease.nativeView.closeToken).catch(() => {})
       return true
     },
@@ -580,6 +648,8 @@ export async function createWorkbenchShareGateway(options: WorkbenchShareGateway
         gatewayClosed = true
         while (proxyQueue.length > 0) proxyQueue.shift()!.resolve(false)
         for (const session of sessions.getSnapshot()) await stopShare(session.workbenchId)
+        await options.collaboration?.dispose()
+        collaborationWss.close()
         sessions.dispose(); metrics.clear()
         await new Promise<void>(resolve => server.close(() => resolve()))
       })()

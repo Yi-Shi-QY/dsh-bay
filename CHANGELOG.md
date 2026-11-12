@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.2.2-alpha.18.1 — private staging
+
+- Added explicit desktop and browser-owner workbench surfaces with a shared
+  browser takeover and reclaim lifecycle; kept DSH RC1 as the host authority.
+- Added complete Workbench V6 export/import with extension locks, offline
+  artifacts, preflight and staged recovery.
+- Kept existing 18.0 extension declarations and V4/layout packages usable on
+  the compatible 18.x line without changing the workbench folder format.
+- Added recovery coverage for browser lifecycle, native Session portability,
+  complete packages and previous 18.x package compatibility.
+- Removed the retired guest projection/presence path and checkpointed the
+  shared-control Host session, WebSocket, canvas and draft infrastructure.
+  LAN collaboration remains in development and has not passed end-to-end
+  acceptance; the single-workbench browser path stays independently usable.
+
 ## 0.2.2-alpha.18.0 — private staging
 
 - Added directory-backed Workbenches, persistent Projects, project-local
