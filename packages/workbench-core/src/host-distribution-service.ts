@@ -1,5 +1,5 @@
 import { generateKeyPairSync, createPrivateKey, createPublicKey, sign, createHash } from 'node:crypto'
-import { readFile, mkdir, writeFile, readdir } from 'node:fs/promises'
+import { readFile, mkdir, writeFile, readdir, realpath } from 'node:fs/promises'
 import { join, isAbsolute, resolve as resolvePath } from 'node:path'
 import { credentialKey, type CredentialProvider } from '@deepseek-ai/dsh-credentials'
 import { withFileLock } from '@deepseek-ai/dsh-atomic-write'
@@ -17,7 +17,9 @@ import { canonicalJson } from './foundation/workbench-sharing.ts'
 import { restorePortableWorkbenchContext } from './foundation/workbench-context-portability.ts'
 import { createDistributionInstaller, DistributionInstallError, type DistributionNativeManager } from './host-distribution-installer.ts'
 import { atomicDistributionJson, artifactHash, prepareDistributionArtifact, inspectDistributionArtifact, readRuntimeFiles, runtimeDigest } from './host-distribution-artifacts.ts'
-import { CORE_PORTABLE_EDITORS, type DistributionImportStatus } from './distribution-contract.ts'
+import { CORE_PORTABLE_EDITORS, type DistributionImportStatus, type DistributionImportDestination } from './distribution-contract.ts'
+import type { HostWorkbenchDirectory } from './host-workbench-directory.ts'
+import type { HostWorkbenchAccess } from './host-workbench-access.ts'
 import { WORKBENCH_CORE_VERSION, WORKBENCH_DSH_GENERATION, WORKBENCH_PACKAGE_NAME, isWorkbenchCorePackageName } from './release-compatibility.ts'
 import type { WorkbenchSettingsV4 } from './foundation/persistence.ts'
 import { decodeWorkbenchSettingsV4 } from './foundation/persistence.ts'
@@ -32,11 +34,14 @@ interface Transaction extends DistributionImportStatus {
   cancelRequested?: boolean
   enabledByTransaction?: string[]
   selectionDigest?: string
+  destination?: DistributionImportDestination
 }
 export interface HostDistributionOptions {
   profile: ProfileContext; native: DistributionNativeManager; settings: SettingsProvider; credentials?: CredentialProvider | undefined
   resolve(name: string): string | undefined; peerAvailable(name: string, range: string): boolean
   fetchArtifact?(dependency: WorkbenchPackageDependencyV4): Promise<Uint8Array>
+  directory?: HostWorkbenchDirectory | undefined
+  access?: Pick<HostWorkbenchAccess, 'run'> | undefined
 }
 const txId = /^distribution-[a-f0-9-]{36}$/u
 const hash = /^[a-f0-9]{64}$/u
@@ -45,6 +50,14 @@ export function createHostDistributionService(options: HostDistributionOptions) 
   const root = join(options.profile.dir,'.dsh-workbench','distribution-v4')
   const installer = createDistributionInstaller(options)
   const profileId = artifactHash(options.profile.dir)
+  const settingsSnapshot = () => {
+    if (options.directory) return options.directory.getSnapshot()
+    const descriptor = options.settings.describe().find(d => d.ns === 'workbench-layout')
+    if (!descriptor) throw new Error('工作台设置服务未连接。')
+    const value = descriptor.value === undefined ? undefined : decodeWorkbenchSettingsV4(descriptor.value)
+    if (descriptor.value !== undefined && !value) throw new Error('已有设置无法解析，未覆盖诊断数据。')
+    return { value, revision: descriptor.revision }
+  }
   const inFlight = new Map<string, Promise<DistributionImportStatus>>()
   const aborts = new Map<string, AbortController>()
   const artifactPath = (digest: string) => { if (!hash.test(digest)) throw new Error('无效制品摘要。'); return join(root,'artifacts',`${digest}.tgz`) }
@@ -57,7 +70,7 @@ export function createHostDistributionService(options: HostDistributionOptions) 
   const save = (row: Transaction) => atomicDistributionJson(transactionPath(row.transactionId),row)
   const stagedPath=(id:string,d:WorkbenchPackageDependencyV4)=>{transactionPath(id);return join(root,'staged',id,d.archiveSha256+'.tgz')}
   const publicRow = (row: Transaction): DistributionImportStatus => {
-    const { profileId:_p, consentDigest:_c, approvedAt:_a, previousEnabled:_e, mutation:_m, pid:_pid, settingsRevision:_r, pendingStates:_s, pendingChecks:_checks, pendingRecovery:_recovery, cancelRequested:_cancel, enabledByTransaction:_enabled, selectionDigest:_selection, ...value } = row
+    const { profileId:_p, consentDigest:_c, approvedAt:_a, previousEnabled:_e, mutation:_m, pid:_pid, settingsRevision:_r, pendingStates:_s, pendingChecks:_checks, pendingRecovery:_recovery, cancelRequested:_cancel, enabledByTransaction:_enabled, selectionDigest:_selection, destination:_destination, ...value } = row
     return structuredClone(value)
   }
   const storeArtifact = async (bytes: Uint8Array, dependency: WorkbenchPackageDependencyV4) => {
@@ -114,7 +127,7 @@ export function createHostDistributionService(options: HostDistributionOptions) 
     await atomicDistributionJson(join(root,'publisher.json'),{ credentialId:key, keyId, publicKey })
     return { publisher:{ displayName:'工作台发布者', keyId, publicKey }, sign:async (bytes:Uint8Array) => sign(null,bytes,privateKey).toString('base64') }
   }
-  const approvedDigest = (row: Transaction) => artifactHash(canonicalJson({ profileId, archive:row.archiveSha256, transactionId:row.transactionId, dependencies:row.dependencies, permissions:row.dependencies.flatMap(d=>d.permissions) }))
+  const approvedDigest = (row: Transaction) => artifactHash(canonicalJson({ profileId, archive:row.archiveSha256, transactionId:row.transactionId, dependencies:row.dependencies, permissions:row.dependencies.flatMap(d=>d.permissions), ...(row.destination ? { destination: row.destination } : {}) }))
   const pendingCheck=(page:ModuleInstanceDocument)=>artifactHash(canonicalJson({moduleInstanceId:page.moduleInstanceId,editorId:page.editorId,editorScope:page.editorScope,state:page.state,pendingDistribution:page.pendingDistribution}))
   const previewFor = async (row:Transaction) => {
     const bytes = await readFile(join(root,'packages',`${row.archiveSha256}.wbpkg`))
@@ -124,14 +137,20 @@ export function createHostDistributionService(options: HostDistributionOptions) 
   }
   const preflight = async (row:Transaction): Promise<string[]> => {
     const blockers:string[]=[]
+    const bundles = await options.native.listBundles()
+    const modules = row.layout?.modules.filter(module => module.packageName && !isWorkbenchCorePackageName(module.packageName)) ?? []
+    row.localExtensions = [...new Map(modules.map(module => [module.packageName + '@' + module.version, module])).values()].map(module => {
+      const installed = bundles.find(bundle => bundle.name === module.packageName && bundle.installed)
+      return { packageName: module.packageName!, ...(module.version ? { requiredVersion: module.version } : {}), ...(installed?.version ? { installedVersion: installed.version } : {}), installed: !!installed }
+    })
     for (const d of row.dependencies) { try { await installer.check(d) } catch(e) { blockers.push((e as Error).message) } }
     return blockers
   }
   const reconcileCommit=async(row:Transaction)=>{
-    const descriptor=options.settings.describe().find(d=>d.ns==='workbench-layout')
-    const record=decodeWorkbenchSettingsV4(descriptor?.value)?.workbenches[row.workbenchId]
+    const record=settingsSnapshot().value?.workbenches[row.workbenchId]
     if(!record)return false
     if(record.offlineOrigin?.archiveSha256!==row.archiveSha256)throw new Error('导入目标已被其他工作台占用。')
+    if (options.directory && (!row.destination || options.directory.rootPath(row.workbenchId) !== join(row.destination.parentPath, row.destination.folderName))) throw new Error('导入目标文件夹与原事务不一致。')
     row.state=row.pendingPageIds?.length||areasOf(record.document.root).some(a=>a.moduleHistory.some(p=>p.pendingBinding))?'needs-input':'ready'
     await save(row);return true
   }
@@ -172,6 +191,7 @@ export function createHostDistributionService(options: HostDistributionOptions) 
   const resume = (id:string) => serialized(id,async()=>{
     const row=await load(id)
     if(finished.has(row.state))return publicRow(row)
+    if (options.directory && !row.destination) throw new Error('请重新确认模板导入位置；旧 Settings 导入事务不能在此继续。')
     if(await reconcileCommit(row))return publicRow(row)
     if(row.consentDigest!==approvedDigest(row))throw new Error('请先确认本次包的来源、权限、安装和工作台授权。')
     try{await reconcile(row)}catch(e){row.state='recovery-required';row.blockers=[(e as Error).message];await save(row);return publicRow(row)}
@@ -288,17 +308,29 @@ export function createHostDistributionService(options: HostDistributionOptions) 
       if((await history()).length>=1024)throw new Error('导入记录已达 1024 条限制，请先备份并整理 Host 分发记录。')
       await mkdir(join(root,'packages'),{recursive:true});await writeFile(join(root,'packages',`${p.digest}.wbpkg`),bytes,{mode:0o600})
       const row:Transaction={transactionId:`distribution-${crypto.randomUUID()}`,archiveSha256:p.digest,workbenchId:`workbench-${crypto.randomUUID()}`,name:p.layout.name,createdAt:Date.now(),mode:p.manifest.mode,
-        ...(p.manifest.publisher?{keyId:p.manifest.publisher.keyId}:{}),state:'checked',dependencies:p.manifest.dependencies,installed:[],reused:[],blockers:[],profileId,previousEnabled:{},layout:p.layout}
+        ...(p.manifest.publisher?{keyId:p.manifest.publisher.keyId}:{}),state:'checked',dependencies:p.manifest.dependencies,installed:[],reused:[],blockers:[],profileId,previousEnabled:{},layout:p.layout, ...(options.directory ? { directoryRequired: true } : {})}
       if(p.manifest.mode==='offline-embedded')for(const d of row.dependencies){const checked=await inspectDistributionArtifact(p.files.find(f=>f.path===d.archivePath)!.content,options.peerAvailable);if(!sameDistributionArtifact(checked.dependency,d))throw new Error('内嵌制品身份不一致。')}
       row.blockers=await preflight(row)
       row.plannedReuse=[]
       for(const d of row.dependencies){try{if((await installer.check(d)).present)row.plannedReuse.push(d.packageName)}catch{/* conflict is already listed */}}
       await save(row);return publicRow(row)
     },
-    async consent(id:string,digest:string){
+    async consent(id:string,digest:string,destination?:DistributionImportDestination){
       await serialized(id,async()=>{
       const row=await load(id);if(row.archiveSha256!==digest||finished.has(row.state))throw new Error('授权与当前包不一致。')
-      await previewFor(row);row.blockers=await preflight(row);if(row.blockers.length)throw new Error(row.blockers.join('；'))
+      if (options.directory) {
+        if (row.consentDigest) {
+          if (destination && canonicalJson({ ...destination, parentPath: await realpath(destination.parentPath) }) !== canonicalJson(row.destination)) throw new Error('导入已经开始，不能更换目标位置。')
+          if (!row.destination) throw new Error('旧 Settings 导入事务不能在目录工作台中继续，请重新选择模板包。')
+        } else {
+          if (!destination || typeof destination.parentPath !== 'string' || typeof destination.folderName !== 'string') throw new Error('请先选择新工作台的父文件夹和文件夹名称。')
+          const parentPath = await realpath(destination.parentPath)
+          await options.directory.checkCreateLocation(parentPath, destination.folderName)
+          row.destination = { parentPath, folderName: destination.folderName }
+          row.targetDisplayPath = join(parentPath, destination.folderName)
+        }
+      }
+      await previewFor(row);row.blockers=await preflight(row);if(row.blockers.length){await save(row);throw new Error(row.blockers.join('；'))}
       row.consentDigest=approvedDigest(row);row.approvedAt=Date.now();row.state='installing';await save(row);return publicRow(row)
       }); return resume(id)
     },
@@ -332,8 +364,8 @@ export function createHostDistributionService(options: HostDistributionOptions) 
         for(const page of targets){const declaration=w.editors?.find(e=>e.editorId===page.editorId&&e.scope===page.editorScope);if(declaration&&workbenchEditorStateFailureV1(page.state,declaration as WorkbenchEditorDeclarationV1))throw new Error('恢复配置不符合已验证扩展的状态约束。')}
         if(!c||c.apiVersion!==1||c.allowed!==true||c.contractFingerprint!==fingerprint||canonicalJson([...c.editorIds].sort())!==canonicalJson([...w.editorIds].sort()))throw new Error('实际注册的扩展契约与已确认的包声明不一致。')
       }
-      const descriptor=options.settings.describe().find(d=>d.ns==='workbench-layout');if(!descriptor)throw new Error('工作台设置服务未连接。')
-      const value=descriptor.value===undefined?undefined:decodeWorkbenchSettingsV4(descriptor.value);if(descriptor.value!==undefined&&!value)throw new Error('已有设置无法解析，未覆盖诊断数据。')
+      const { value, revision } = settingsSnapshot()
+      if (options.directory && (actual.some(area => area.moduleHistory.some(page => page.binding)) || !row.destination)) throw new Error('模板须在新文件夹中创建，项目和会话请在导入后重新绑定。')
       if(row.mode==='layout-only'){
         const available=await identities()
         for(let i=0;i<sources.length;i++){
@@ -368,14 +400,15 @@ export function createHostDistributionService(options: HostDistributionOptions) 
         const next:WorkbenchSettingsV4={...value??{version:4,activeWorkbenchId:row.workbenchId,openWorkbenchIds:[],layoutTemplates:{},invalidWorkbenches:{},sessionMarkers:{}},workbenches:{...value?.workbenches,[row.workbenchId]:{...record,packageOrigin}},extensionConsents:{...value?.extensionConsents,...consents}}
         // Persist target mapping before CAS; retries can reconcile a committed document.
         await save(row)
-        await options.settings.mutate('workbench-layout',[{op:'set',path:[],value:next}],descriptor.revision)
+        if (options.directory) {
+          await options.directory.create({ requestId: row.transactionId, ...row.destination!, record: { ...record, packageOrigin }, open: false, extensionConsents: consents })
+        } else await options.settings.mutate('workbench-layout',[{op:'set',path:[],value:next}],revision)
       }
       row.state=pendingPageIds.length||actual.some(a=>a.moduleHistory.some(p=>p.pendingBinding))?'needs-input':'ready';row.blockers=[];await save(row);return publicRow(row)
     })},
     restorePending(id:string,document:WorkbenchDocumentV3,expectedDocument:WorkbenchDocumentV3,restoredPageIds:string[]){return serialized(id,async()=>{
       const row=await load(id)
-      const descriptor=options.settings.describe().find(d=>d.ns==='workbench-layout')
-      const value=decodeWorkbenchSettingsV4(descriptor?.value),workbench=value?.workbenches[row.workbenchId]
+      const { value, revision } = settingsSnapshot(),workbench=value?.workbenches[row.workbenchId]
       if(row.pendingRecovery&&workbench){
         const currentHash=artifactHash(canonicalJson(workbench.document))
         if(currentHash===row.pendingRecovery.committedHash){
@@ -388,7 +421,7 @@ export function createHostDistributionService(options: HostDistributionOptions) 
       }
       if(row.state==='ready')return publicRow(row)
       if(row.state!=='needs-input'||!row.pendingPageIds?.length||!Array.isArray(restoredPageIds)||!restoredPageIds.length||restoredPageIds.some(p=>!row.pendingPageIds!.includes(p)))throw new Error('没有可继续恢复的配置。')
-      if(!descriptor||!value||!workbench||canonicalJson(workbench.document)!==canonicalJson(expectedDocument))throw new Error('工作台已在另一窗口变化，请刷新后恢复配置。')
+      if(!value||!workbench||canonicalJson(workbench.document)!==canonicalJson(expectedDocument))throw new Error('工作台已在另一窗口变化，请刷新后恢复配置。')
       const preview=await previewFor(row),available=await identities(),source=areasOf(preview.layout.document.root).flatMap(a=>a.moduleHistory)
       const next=structuredClone(workbench.document),pages=areasOf(next.root).flatMap(a=>a.moduleHistory),proposed=areasOf(document.root).flatMap(a=>a.moduleHistory)
       for(const sourceId of restoredPageIds){
@@ -405,7 +438,11 @@ export function createHostDistributionService(options: HostDistributionOptions) 
       }
       if(!validateWorkbenchDocumentV3(next))throw new Error('恢复配置结构无效。')
       row.pendingRecovery={pageIds:[...restoredPageIds],expectedHash:artifactHash(canonicalJson(workbench.document)),committedHash:artifactHash(canonicalJson(next))};await save(row)
-      await options.settings.mutate('workbench-layout',[{op:'set',path:[],value:{...value,workbenches:{...value.workbenches,[row.workbenchId]:{...workbench,document:next,updatedAt:Date.now()}}}}],descriptor.revision)
+      if (options.directory) {
+        const write = () => options.directory!.patch({ operation: 'set', path: ['workbenches', row.workbenchId], value: { ...workbench, document: next, updatedAt: Date.now() }, expectedRevision: revision })
+        const result = options.access ? await options.access.run({ actor: 'desktop', accessId: 'desktop' }, 'layout', { workbenchId: row.workbenchId }, write) : await write()
+        if (result.status !== 'committed') throw new Error('工作台已变化，本次配置恢复未覆盖现有内容。')
+      } else await options.settings.mutate('workbench-layout',[{op:'set',path:[],value:{...value,workbenches:{...value.workbenches,[row.workbenchId]:{...workbench,document:next,updatedAt:Date.now()}}}}],revision)
       delete row.pendingRecovery
       row.pendingPageIds=row.pendingPageIds.filter(p=>!restoredPageIds.includes(p));row.state=row.pendingPageIds.length||pages.some(p=>p.pendingBinding)?'needs-input':'ready';await save(row);return publicRow(row)
     })},

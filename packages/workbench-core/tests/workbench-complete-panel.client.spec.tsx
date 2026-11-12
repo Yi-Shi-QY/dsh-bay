@@ -126,14 +126,85 @@ it('uses the selected workbench for complete export and retains it when switchin
   fireEvent.change(view.getByLabelText('完整包来源工作台'), { target: { value: 'b' } })
   fireEvent.click(view.getByRole('button', { name: '生成完整包' }))
   await waitFor(() => expect(client.request).toHaveBeenCalledWith(expect.objectContaining({ action: 'start-export', workbenchId: 'b' })))
-  fireEvent.click(view.getByRole('button', { name: '布局与扩展', exact: true }))
+  fireEvent.click(view.getByRole('button', { name: '工作台模板包', exact: true }))
   expect((view.getByLabelText('分享来源工作台') as HTMLSelectElement).value).toBe('b')
-  fireEvent.click(view.getByRole('button', { name: '保存布局并生成分享包' }))
-  await waitFor(() => expect(prepareExport).toHaveBeenCalledWith('b', 'layout-only', false))
+  fireEvent.click(view.getByRole('button', { name: '保存布局并生成模板包' }))
+  await waitFor(() => expect(prepareExport).toHaveBeenCalledWith('b', 'layout-only', false, false))
   expect(await view.findByText('fixture-preview-unavailable')).toBeTruthy()
 })
 
-it('keeps an upload alive across operation tabs without exposing the unsupported layout importer', async () => {
+function packageFile(bytes: number[], name: string) {
+  const data = new Uint8Array(bytes)
+  const file = new File([data], name)
+  // jsdom's File lacks the browser Blob.arrayBuffer implementation.
+  Object.defineProperties(file, {
+    arrayBuffer: { value: async () => data.buffer },
+    slice: { value: (start: number, end: number) => ({ arrayBuffer: async () => data.slice(start, end).buffer }) },
+  })
+  return file
+}
+
+function unifiedTemplateFixture(openOptions = { shareMode: 'import' }) {
+  client.request.mockResolvedValue([])
+  const row = { transactionId: 'template', archiveSha256: 'a'.repeat(64), workbenchId: 'received', name: '研发模板', createdAt: 1, mode: 'layout-only', state: 'checked', dependencies: [], installed: [], reused: [], blockers: [], directoryRequired: true }
+  const service = { inspect: vi.fn(async () => row), history: vi.fn(async () => [row]), confirm: vi.fn(async () => ({ ...row, state: 'ready' })) }
+  const pick = vi.fn(async () => 'D:\\Workbenches'), open = vi.fn()
+  const view = render(<WorkbenchSharingPage {...{
+    value: settingsFixture(), editors: [], openOptions,
+    workbenchDirectory: { completeRequest: vi.fn(), pickParentDirectory: pick }, distributionPackage: service, onOpenWorkbench: open,
+    useSessions: (select: (value: object) => unknown) => select({ ids: [], byId: {} }),
+  } as never} />)
+  return { view, service, row, pick, open }
+}
+
+it('routes ZIP content to the template importer and requires a new folder before confirmation', async () => {
+  const { view, service, pick, open, row } = unifiedTemplateFixture()
+  const bytes = [0x50, 0x4b, 3, 4]
+  fireEvent.change(view.getByLabelText('选择要导入的工作台包'), { target: { files: [packageFile(bytes, 'template.wbpkg')] } })
+  await view.findByLabelText('模板文件夹名称')
+  expect(service.inspect).toHaveBeenCalledWith(new Uint8Array(bytes))
+  expect(client.upload).not.toHaveBeenCalled()
+  fireEvent.click(view.getByRole('checkbox'))
+  expect(view.getByRole('button', { name: '确认导入' }).hasAttribute('disabled')).toBe(true)
+  fireEvent.click(view.getByRole('button', { name: '选择目标父目录' }))
+  await waitFor(() => expect(view.getByRole('button', { name: '确认导入' }).hasAttribute('disabled')).toBe(false))
+  fireEvent.change(view.getByLabelText('模板文件夹名称'), { target: { value: 'new-template' } })
+  fireEvent.click(view.getByRole('button', { name: '确认导入' }))
+  await waitFor(() => expect(service.confirm).toHaveBeenCalledWith(row, {}, { parentPath: 'D:\\Workbenches', folderName: 'new-template' }))
+  await view.findByRole('button', { name: '打开导入的工作台' })
+  expect(pick).toHaveBeenCalledOnce(); expect(open).not.toHaveBeenCalled()
+})
+
+it('rejects diagnostic JSON without calling either importer', async () => {
+  const { view, service } = unifiedTemplateFixture()
+  fireEvent.change(view.getByLabelText('选择要导入的工作台包'), { target: { files: [packageFile([123, 34, 97, 34], 'settings.json')] } })
+  expect(await view.findByRole('alert')).toBeTruthy()
+  expect(service.inspect).not.toHaveBeenCalled(); expect(client.upload).not.toHaveBeenCalled()
+})
+
+it('continues template history in the template workflow even when complete export is selected', async () => {
+  const { view, service } = unifiedTemplateFixture({ shareMode: 'history' })
+  fireEvent.click(await view.findByRole('button', { name: '查看与继续' }))
+  expect(view.getByLabelText('模板文件夹名称')).toBeTruthy()
+  expect(view.queryByRole('button', { name: '导入并保持暂停' })).toBeNull()
+  expect(service.inspect).not.toHaveBeenCalled()
+})
+
+it('keeps a pending template inspection when switching to history and back', async () => {
+  const { view, service, row } = unifiedTemplateFixture()
+  let finish!: (value: typeof row) => void
+  service.inspect.mockImplementation(() => new Promise(resolve => { finish = resolve }))
+  fireEvent.change(view.getByLabelText('选择要导入的工作台包'), { target: { files: [packageFile([0x50, 0x4b, 3, 4], 'template.zip')] } })
+  await waitFor(() => expect(service.inspect).toHaveBeenCalledOnce())
+  expect(view.getByLabelText('选择要导入的工作台包').hasAttribute('disabled')).toBe(true)
+  fireEvent.click(view.getByRole('button', { name: '导入记录', exact: true }))
+  await act(async () => { finish(row) })
+  fireEvent.click(view.getByRole('button', { name: '导入工作台', exact: true }))
+  expect(view.getByLabelText('模板文件夹名称')).toBeTruthy()
+  expect(service.inspect).toHaveBeenCalledOnce()
+})
+
+it('detects complete packages by content and keeps uploads alive across operation tabs', async () => {
   client.request.mockResolvedValue([])
   let finish!: (value: unknown) => void
   let uploadSignal: AbortSignal | undefined
@@ -147,9 +218,10 @@ it('keeps an upload alive across operation tabs without exposing the unsupported
     workbenchDirectory: { completeRequest: vi.fn() }, distributionPackage: { history: vi.fn(async () => []) },
     useSessions: (select: (value: object) => unknown) => select({ ids: [], byId: {} }),
   } as never} />)
-  fireEvent.change(view.getByLabelText('接收完整包'), { target: { files: [new File(['data'], 'received.tgz')] } })
-  expect(view.getByRole('progressbar', { name: '完整包上传进度' }).getAttribute('value')).toBe('50')
-  expect(view.queryByRole('button', { name: '布局与扩展', exact: true })).toBeNull()
+  fireEvent.change(view.getByLabelText('选择要导入的工作台包'), { target: { files: [packageFile([0x1f, 0x8b, 8, 0], 'received.tgz')] } })
+  await waitFor(() => expect(view.getByRole('progressbar', { name: '完整包上传进度' }).getAttribute('value')).toBe('50'))
+  expect(view.getByLabelText('选择要导入的工作台包').hasAttribute('disabled')).toBe(true)
+  expect(view.queryByRole('button', { name: '工作台模板包', exact: true })).toBeNull()
   fireEvent.click(view.getByRole('button', { name: '导入记录', exact: true }))
   expect(uploadSignal?.aborted).toBe(false)
   await act(async () => { finish({ upload: { id: 'upload', name: 'received.tgz', size: 20, received: 20, state: 'ready' }, preflight: { valid: true, workbenchId: 'received', sessionCount: 2 } }) })

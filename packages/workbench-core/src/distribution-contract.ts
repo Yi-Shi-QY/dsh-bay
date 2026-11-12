@@ -5,7 +5,8 @@ import type { RestoredPortableWorkbenchContextV1 } from './foundation/workbench-
 import type { PortableBayAgentOrchestrationV1 } from './foundation/workbench-bay-agent-work.ts'
 import type { WorkbenchExtensionConsentV1 } from './workbench-extension-access.ts'
 export const DISTRIBUTION_ROUTE = '/api/workbench/distribution/v4'
-export const CORE_PORTABLE_EDITORS = ['workbench.conversation.start','workbench.conversation','workbench.agent-trajectory','workbench.workspace-files','workbench.document-preview','workbench.browser','workbench.terminal','workbench.plan','workbench.changes-review','workbench.subagent-chat','workbench.schedule-task','workbench.guide'] as const
+export const CORE_PORTABLE_EDITORS = ['workbench.project-overview','workbench.conversation.start','workbench.conversation','workbench.agent-trajectory','workbench.workspace-files','workbench.document-preview','workbench.browser','workbench.terminal','workbench.plan','workbench.changes-review','workbench.subagent-chat','workbench.schedule-task','workbench.guide'] as const
+export interface DistributionImportDestination { parentPath: string; folderName: string }
 export interface DistributionImportStatus {
   transactionId: string; archiveSha256: string; workbenchId: string; name: string; createdAt: number
   mode: WorkbenchPackageModeV4; keyId?: string
@@ -15,12 +16,15 @@ export interface DistributionImportStatus {
   layout?: PortableLayoutV2
   pendingPageIds?: string[]
   pendingTargets?: Record<string,string>
+  targetDisplayPath?: string
+  directoryRequired?: boolean
+  localExtensions?: { packageName: string; requiredVersion?: string; installedVersion?: string; installed: boolean }[]
 }
 export interface DistributionClientV4 {
   preparePending(id:string):Promise<void>
   prepare(input: { layout: PortableLayoutV2; mode: WorkbenchPackageModeV4; prepareArtifacts: boolean; derivedFrom?: WorkbenchPackageManifestV4['derivedFrom'] }): Promise<Uint8Array>
   inspect(bytes: Uint8Array): Promise<DistributionImportStatus>
-  consent(id: string, digest: string): Promise<DistributionImportStatus>
+  consent(id: string, digest: string, destination?: DistributionImportDestination): Promise<DistributionImportStatus>
   resume(id: string): Promise<DistributionImportStatus>
   complete(id: string, document: WorkbenchDocumentV3, consents: Record<string, WorkbenchExtensionConsentV1>, pendingPageIds?: string[], context?: RestoredPortableWorkbenchContextV1, orchestration?: PortableBayAgentOrchestrationV1): Promise<DistributionImportStatus>
   restorePending(id: string, document: WorkbenchDocumentV3, expectedDocument: WorkbenchDocumentV3, restoredPageIds: string[]): Promise<DistributionImportStatus>
@@ -52,7 +56,7 @@ export function createDistributionClient(fetcher: typeof fetch = fetch): Distrib
     preparePending:transactionId=>request('prepare-pending',{transactionId}),
     async prepare(input) { const value = await request<string>('export', input); return Uint8Array.from(atob(value), c => c.charCodeAt(0)) },
     inspect: bytes => request('inspect', { archive: base64(bytes) }),
-    consent: (transactionId, archiveSha256) => request('consent', { transactionId, archiveSha256, confirmed: true }),
+    consent: (transactionId, archiveSha256, destination) => request('consent', { transactionId, archiveSha256, confirmed: true, ...(destination ? { destination } : {}) }),
     resume: transactionId => request('resume', { transactionId }),
     complete: (transactionId, document, consents, pendingPageIds = [], context) => request('complete', { transactionId, document, consents, pendingPageIds, ...(context === undefined ? {} : { context }) }),
     restorePending: (transactionId, document, expectedDocument, restoredPageIds) => request('restore-pending', { transactionId, document, expectedDocument, restoredPageIds }),

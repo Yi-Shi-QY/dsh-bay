@@ -31,11 +31,14 @@ interface CompletePanelProps {
   pickParentDirectory?: () => Promise<string | undefined>
   onOpenWorkbench?: ((id: string) => void | Promise<unknown>) | undefined
   onImport?: (() => void) | undefined
+  importSelection?: { id: number; file: File } | undefined
+  unifiedPicker?: boolean
+  onImportBusyChange?: ((busy: boolean) => void) | undefined
 }
 export function WorkbenchCompletePackagePanel(props: CompletePanelProps) {
   return <CompletePackagePanel key={props.browser ? props.workbenchId : 'desktop'} {...props} />
 }
-function CompletePackagePanel({ workbenchId, mode = 'import', sourceControl, summary, browser = false, disabled = false, editors, pickParentDirectory, onOpenWorkbench, onImport }: CompletePanelProps) {
+function CompletePackagePanel({ workbenchId, mode = 'import', sourceControl, summary, browser = false, disabled = false, editors, pickParentDirectory, onOpenWorkbench, onImport, importSelection, unifiedPicker, onImportBusyChange }: CompletePanelProps) {
   const scope = browser ? workbenchId : ''
   const client = useMemo(() => createWorkbenchCompleteClient(), [])
   const [transfer, setTransfer] = useState<WorkbenchImportTransfer>(() => savedTransfer(scope))
@@ -44,6 +47,8 @@ function CompletePackagePanel({ workbenchId, mode = 'import', sourceControl, sum
   const [busy, setBusy] = useState(false)
   const [targetPlatform, setTargetPlatform] = useState<CompletePlatform>('win32')
   const pending = useRef(false)
+  const handledSelection = useRef<number>()
+  useEffect(() => { onImportBusyChange?.(busy) }, [busy, onImportBusyChange])
   const uploadAbort = useRef<AbortController>()
   const exportRequestId = useRef('export-' + browserSafeUuid())
   const mounted = useRef(true)
@@ -95,6 +100,11 @@ function CompletePackagePanel({ workbenchId, mode = 'import', sourceControl, sum
     const result = await client.upload(file, { workbenchId: scope, requestId }, upload => { if (mounted.current) setTransfer(current => ({ ...current, upload })) }, abort.signal)
     if (mounted.current) setTransfer({ ...result, uploadRequest, name: result.preflight.overview?.name ?? '', folderName: suggestedWorkbenchFolder(result.preflight.overview?.name ?? result.preflight.workbenchId) })
   })
+  useEffect(() => {
+    if (!importSelection || handledSelection.current === importSelection.id) return
+    handledSelection.current = importSelection.id
+    chooseFile(importSelection.file)
+  }, [importSelection])
   const selectParent = () => void run(async () => {
     const selection = await client.request<CompletePackageDirectoryRequest>({ action: 'directory-request', uploadId: transfer.upload!.id, requestId: 'directory-' + browserSafeUuid() })
     setTransfer(current => ({ ...current, selection }))
@@ -159,7 +169,7 @@ function CompletePackagePanel({ workbenchId, mode = 'import', sourceControl, sum
         exportRequestId.current = 'export-' + browserSafeUuid(); rememberJob(job)
       }) }}><IconArchiveOutlineMedium size={16} />生成完整包</button><span>完成后在下方下载</span></div>
     </section>{summary}</div> : null}
-    {mode === 'import' ? <WorkbenchImportFlow transfer={transfer} job={activeJob} busy={busy} browser={browser} disabled={disabled || browser && !workbenchId} {...(editors ? { editors } : {})} onFile={chooseFile} onChange={patch => setTransfer(current => ({ ...current, ...patch }))} onSelectParent={selectParent} onStart={startImport} onPause={() => uploadAbort.current?.abort(new Error('已暂停，可重新选择同一文件继续。'))} onNew={() => { setTransfer({ folderName: '' }); setError(undefined) }} jobActions={jobActions} /> : null}
+    {mode === 'import' ? <WorkbenchImportFlow transfer={transfer} job={activeJob} busy={busy} browser={browser} disabled={disabled || browser && !workbenchId} unifiedPicker={unifiedPicker === true} {...(editors ? { editors } : {})} onFile={chooseFile} onChange={patch => setTransfer(current => ({ ...current, ...patch }))} onSelectParent={selectParent} onStart={startImport} onPause={() => uploadAbort.current?.abort(new Error('已暂停，可重新选择同一文件继续。'))} onNew={() => { setTransfer({ folderName: '' }); setError(undefined) }} jobActions={jobActions} /> : null}
     {error ? <p className={sharing.error} role="alert"><IconWarningOutlineMedium size={16} />{error}</p> : null}
     {mode !== 'import' ? <section className={sharing.jobs} aria-label="完整包作业"><div className={sharing.sectionHeading}><h3><IconClockOutlineMedium size={17} />{mode === 'history' ? '完整包导入记录' : '导出记录'}</h3><span>{shownJobs.length} 项 · 状态自动更新</span></div><div className={sharing.jobList}>{shownJobs.map(job => <WorkbenchCompleteJob key={job.id} job={job} busy={busy} disabled={disabled} {...jobActions} />)}</div>{!shownJobs.length ? <div className={sharing.empty}><IconClockOutlineMedium size={24} /><p>{mode === 'history' ? '还没有完整包导入记录' : '生成完整包后，在这里查看进度与下载'}</p></div> : null}</section> : null}
   </section>

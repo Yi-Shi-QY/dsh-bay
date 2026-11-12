@@ -21,7 +21,7 @@ export function createDistributionInstaller(options: { profile: ProfileContext; 
     const root = options.resolve(d.packageName) ?? join(options.profile.dir, 'node_modules', d.packageName)
     const files=await readRuntimeFiles(root,d.runtimeFiles)
     await verifyNativeResolvedArtifactFiles(root,files)
-    if (runtimeDigest(await readRuntimeFiles(root, d.runtimeFiles)) !== d.digest) throw new Error(`已安装扩展内容不一致：${d.packageName}`)
+    if (runtimeDigest(await readRuntimeFiles(root, d.runtimeFiles)) !== d.digest) throw new Error(`已安装扩展内容不一致：${d.packageName} ${d.version}。版本号相同，但属于不同构建；本次不会覆盖本机插件。`)
   }
   const check = async (d: WorkbenchPackageDependencyV4) => {
     const bundles = await options.native.listBundles()
@@ -32,7 +32,8 @@ export function createDistributionInstaller(options: { profile: ProfileContext; 
     }
     const row = bundles.find(b => b.name === d.packageName && b.installed)
     if (!row) return { present: false, enabled: false }
-    if (row.version !== d.version || row.readOnlyReason) throw new Error(`已有插件冲突或不可修改，请先在 DSH 插件管理器处理：${d.packageName}`)
+    if (row.version !== d.version) throw new Error(`插件版本冲突：${d.packageName}，包要求 ${d.version}，本机已安装 ${row.version ?? '未知版本'}。尚未验证跨版本兼容，请在 DSH 插件管理器处理后继续；本次不会自动升级或降级。`)
+    if (row.readOnlyReason) throw new Error(`已有插件不可修改：${d.packageName} ${row.version}。请在 DSH 插件管理器处理。`)
     await verified(d)
     return { present: true, enabled: row.enabled }
   }

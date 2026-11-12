@@ -318,7 +318,7 @@ export class HostWorkbenchDirectory {
     if (existsSync(path.join(parent, folderName))) throw new Error('目标文件夹已存在，请修改文件夹名称或重新选择位置。')
     return { valid: true }
   }
-  async create(input: { requestId: string; parentPath: string; folderName: string; record: WorkbenchRecordV2 }) {
+  async create(input: { requestId: string; parentPath: string; folderName: string; record: WorkbenchRecordV2; open?: boolean; extensionConsents?: WorkbenchSettingsV4['extensionConsents'] }) {
     return this.serial(async () => {
       if (!safeId(input.requestId) || !input.folderName.trim() || /[<>:"/\\|?*\u0000-\u001f]/u.test(input.folderName) || /[. ]$/u.test(input.folderName) || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/iu.test(input.folderName)) throw new Error('文件夹名称无效。')
       const parentPath = await realpath(input.parentPath), prior = this.registry.requests[input.requestId]
@@ -348,7 +348,9 @@ export class HostWorkbenchDirectory {
       const envelope: FileWorkbenchV1 = { schemaVersion: 2, revision: 0, record }
       registry.registrations[id] = registration
       registry.requests[input.requestId] = { workbenchId: id, parentPath, folderName: input.folderName }
-      registry.preferences.activeWorkbenchId = id; registry.preferences.openWorkbenchIds.push(id); registry.revision++
+      if (input.open !== false) { registry.preferences.activeWorkbenchId = id; registry.preferences.openWorkbenchIds.push(id) }
+      if (input.extensionConsents) registry.preferences.extensionConsents = { ...registry.preferences.extensionConsents, ...input.extensionConsents }
+      registry.revision++
       this.commit(registry, [{ file: filename(rootPath), value: envelope }]); this.records.set(id, envelope)
       this.writeProjection(rootPath, record); this.publish()
       unlinkSync(marker(rootPath)); unlinkSync(provisioningFile)

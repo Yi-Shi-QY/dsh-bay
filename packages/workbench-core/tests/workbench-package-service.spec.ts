@@ -3,10 +3,12 @@ import { buildWorkbenchPackageV4 } from '../src/foundation/workbench-package-v4.
 import { createDistributionPackageService } from '../src/foundation/distribution-package-service.ts'
 import { createProjectNeutralFrameSettings } from '../src/foundation/frame-settings-adapter.ts'
 import { mutableSettings, settingsFixture } from './settings-fixtures.ts'
+import { createWorkbenchContext, createAreaContext } from '../src/foundation/workbench-context.ts'
+import type { WorkbenchRecordV2 } from '../src/foundation/persistence.ts'
 
 const digest = (value: string): string => value.repeat(64)
 
-function setup() {
+function setup(change?: (record: WorkbenchRecordV2) => void) {
   const base = settingsFixture()
   const record = structuredClone(base.workbenches.a!)
   if (record.document.root.kind !== 'area') throw new Error('fixture must contain one area')
@@ -15,6 +17,7 @@ function setup() {
     lastKnownTitle: 'Custom', state: { schemaVersion: 1, color: 'blue' },
   }]
   record.document.root.activeModuleInstanceId = 'custom-page'
+  change?.(record)
   const { source } = mutableSettings({ ...base, workbenches: { ...base.workbenches, a: record } })
   const { directory } = createProjectNeutralFrameSettings(source)
   const editor = {
@@ -44,6 +47,23 @@ function setup() {
 }
 
 describe('workbench package service', () => {
+  it('exports only reusable configuration and includes human background only when selected', async () => {
+    const fixture = setup(record => {
+      record.context = createWorkbenchContext(); record.context.human.goal = 'Reusable background'
+      record.areaContexts = { 'area-a': createAreaContext() }; record.areaContexts['area-a']!.human.objective = 'Current project'
+      record.workbenchAi = { provider: 'local-provider', model: 'local-model' }
+    })
+    const plain = await fixture.service.prepareExport('a', 'layout-only')
+    expect(plain.preview.layout.context).toBeUndefined()
+    expect(plain.preview.layout.modelPreference).toBeUndefined()
+    expect(plain.preview.layout.orchestration).toBeUndefined()
+    const background = await fixture.service.prepareExport('a', 'layout-only', false, true)
+    expect(background.preview.layout.context?.workbench.human.goal).toBe('Reusable background')
+    expect(background.preview.layout.context?.workbench.agent).toBeUndefined()
+    expect(background.preview.layout.context?.areas).toEqual({})
+    expect(background.preview.layout.modelPreference).toBeUndefined()
+  })
+
   it('includes a custom editor when its live catalog row lacks distribution metadata', async () => {
     const fixture = setup()
     await fixture.service.prepareExport('a', 'layout-only')

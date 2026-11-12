@@ -17,9 +17,10 @@ export interface WorkbenchImportTransfer {
   jobId?: string
 }
 
-export function WorkbenchImportFlow({ transfer, job, busy, browser, disabled, editors = [], onFile, onChange, onSelectParent, onStart, onPause, onNew, jobActions }: {
+export function WorkbenchImportFlow({ transfer, job, busy, browser, disabled, editors = [], unifiedPicker = false, onFile, onChange, onSelectParent, onStart, onPause, onNew, jobActions }: {
   transfer: WorkbenchImportTransfer; job: CompletePackageJobView | undefined; busy: boolean; browser: boolean; disabled: boolean
   editors?: readonly WorkbenchEditorCatalogRow[]
+  unifiedPicker?: boolean
   onFile(file: File): void; onChange(value: Partial<WorkbenchImportTransfer>): void; onSelectParent(): void; onStart(): void; onPause(): void; onNew(): void
   jobActions: Pick<React.ComponentProps<typeof WorkbenchCompleteJob>, 'onOpen' | 'onResume' | 'onCancel' | 'onCorrectLocation' | 'onMapExtensions' | 'onConfirmExtensions' | 'onRestart' | 'browser'>
 }) {
@@ -35,10 +36,10 @@ export function WorkbenchImportFlow({ transfer, job, busy, browser, disabled, ed
       <section className={sharing.formPanel}>
         <div className={sharing.formIntro}><h3>{['接收一个工作台', '确认内容与存放位置', '恢复你的工作空间', '工作台已准备好'][step]}</h3><p>{['选择完整工作台包，带回项目文件、对话和工作进展。', '将在新的文件夹内恢复，原有工作台保持不变。', '作业由 DSH 持续处理，重新打开此页可以继续查看。', '数据已恢复，检查运行环境后再主动继续任务。'][step]}</p></div>
         {step < 2 ? <>
-          <label className={`${sharing.upload} ${preflight ? sharing.uploadCompact : ''}`} data-disabled={disabled || busy}>
-            <IconArchiveOutlineMedium size={30} /><strong>{upload?.name || '选择完整工作台包'}</strong><span>{preflight ? '重新选择文件' : '点击选择文件'}</span><small>18.0 完整包 · .tar.gz / .tgz / .gz</small>
+          {!unifiedPicker ? <label className={`${sharing.upload} ${preflight ? sharing.uploadCompact : ''}`} data-disabled={disabled || busy}>
+            <IconArchiveOutlineMedium size={30} /><strong>{upload?.name || '选择完整工作台包'}</strong><span>{preflight ? '重新选择文件' : '点击选择文件'}</span><small>完整包 V5 / V6 · .tar.gz / .tgz / .gz</small>
             <input aria-label="接收完整包" type="file" accept=".gz,.tgz,.tar.gz" disabled={disabled || busy} onChange={event => { const file = event.target.files?.[0]; if (file) onFile(file); event.target.value = '' }} />
-          </label>
+          </label> : null}
           {upload ? <div className={sharing.transferState} role="status"><span>{preflight ? `内容检查通过 · ${preflight.sessionCount} 个会话` : percent === 100 && busy ? '上传完成，正在检查文件、对话与关联…' : `已上传 ${percent}%${busy ? '' : ' · 重新选择同一文件可以继续'}`}</span>{!preflight ? <progress className={sharing.progress} aria-label={percent === 100 && busy ? '完整包检查进度' : '完整包上传进度'} max={100} {...(percent === 100 && busy ? {} : { value: percent })} /> : null}</div> : null}
           {busy && upload && !preflight ? <button type="button" className={css.secondaryButton} onClick={onPause}><IconPauseOutlineMedium size={16} />暂停传输与检查</button> : null}
           {preflight ? <>
@@ -52,7 +53,7 @@ export function WorkbenchImportFlow({ transfer, job, busy, browser, disabled, ed
             {selection?.state === 'pending' ? <p className={sharing.hint} role="status">正在等待 DSH 客户端确认目标目录。确认后可在此继续导入。</p> : null}
             {selection?.state === 'selected' ? <p className={sharing.hint} role="status">DSH 客户端已确认目标目录。</p> : null}
             {selection?.state === 'cancelled' ? <p className={sharing.hint} role="status">目录选择已取消，可以重新选择。</p> : null}
-          </> : <p className={sharing.hint}>这里接收完整工作台包。布局参考包和旧格式不用于恢复项目与对话。</p>}
+          </> : <p className={sharing.hint}>{unifiedPicker ? '完整包恢复项目与工作进展；模板包复用布局、内页和配置，选择后自动进入对应流程。' : '这里接收完整工作台包。工作台模板包请在 DSH 客户端导入。'}</p>}
         </> : job ? <>
           <WorkbenchCompleteJob job={job} busy={busy} disabled={disabled} {...jobActions} showReport />
           {job.stage === 'complete' && browser ? <p className={sharing.hint}>请在 DSH 客户端打开新工作台；当前浏览器继续管理原工作台。</p> : null}

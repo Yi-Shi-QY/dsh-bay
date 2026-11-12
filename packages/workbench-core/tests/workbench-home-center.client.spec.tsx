@@ -56,7 +56,7 @@ describe('Workbench Home center', () => {
     expect(f.source.getSnapshot().value!.activeWorkbenchId).toBe('')
   })
 
-  it('hosts import, export and durable history in Home with all three distribution modes', async () => {
+  it('hosts template import, export and durable history in Home with three extension delivery choices', async () => {
     const f = setup(), { view } = f
     fireEvent.click(within(view.getByRole('region', { name: '添加工作台' })).getByRole('button', { name: '导入工作台包' }))
     await view.findByLabelText('工作台包文件')
@@ -64,7 +64,7 @@ describe('Workbench Home center', () => {
     fireEvent.click(view.getByRole('button', { name: '返回总览' }))
     fireEvent.click(await view.findByRole('button', { name: '更多操作：A' }))
     fireEvent.click(await view.findByRole('menuitem', { name: '导出工作台' }))
-    const select = await view.findByLabelText('导出模式') as HTMLSelectElement
+    const select = await view.findByLabelText('扩展交付方式') as HTMLSelectElement
     expect(Array.from(select.options).map(o => o.value)).toEqual(['layout-only', 'online-reference', 'offline-embedded'])
     expect((view.getByLabelText('工作台') as HTMLSelectElement).value).toBe('a')
     fireEvent.click(view.getByRole('button', { name: '返回总览' }))

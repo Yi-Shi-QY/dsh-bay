@@ -12,6 +12,10 @@ import type { DistributionNativeManager } from './host-distribution-installer.ts
 import { DISTRIBUTION_ROUTE, createHostDistributionRuntimeV4 } from './distribution-contract.ts'
 import { WORKBENCH_CORE_VERSION } from './release-compatibility.ts'
 import type { WorkbenchPackageDependencyV4 } from './foundation/workbench-package-v4.ts'
+import type { HostWorkbenchDirectory } from './host-workbench-directory.ts'
+import { WORKBENCH_DIRECTORY_SERVICE } from './workbench-directory-contract.ts'
+import type { HostWorkbenchAccess } from './host-workbench-access.ts'
+import { WORKBENCH_ACCESS_SERVICE } from './workbench-access-contract.ts'
 
 interface PackageResolver { packageOf(name: string, parent: string): { name: string; version?: string; dir: string } | undefined }
 export async function fetchLockedDistributionArtifact(d: WorkbenchPackageDependencyV4, profile: string): Promise<Uint8Array> {
@@ -41,6 +45,8 @@ export function installDistributionRoutes(ctx:{get<T>(name:string,strict?:boolea
   if(!connection?.fetch||!profile||!native||!settings||!resolver)return undefined
   const resolve=(name:string)=>{try{const p=resolver.packageOf(name,import.meta.url);return p?.name===name?p.dir:undefined}catch{return undefined}}
   const distributionOptions: HostDistributionOptions = {profile,native,settings,credentials:ctx.get<CredentialProvider>('credentials',false),resolve,
+    directory: ctx.get<HostWorkbenchDirectory>(WORKBENCH_DIRECTORY_SERVICE, false),
+    access: ctx.get<HostWorkbenchAccess>(WORKBENCH_ACCESS_SERVICE, false),
     peerAvailable:(name,range)=>{
       if(!name.startsWith('@deepseek-ai/')&&!['react','react-dom'].includes(name))return false
       try { const p=resolver.packageOf(name,import.meta.url);if(!p?.version)return false
@@ -65,13 +71,13 @@ export function installDistributionRoutes(ctx:{get<T>(name:string,strict?:boolea
       for(;;){const next=await reader.read();if(next.done)break;size+=next.value.length;if(size>limit){await reader.cancel();throw new Error('请求内容超限。')}chunks.push(next.value)}
       const body=JSON.parse(Buffer.concat(chunks).toString('utf8'))
       if(!body||typeof body!=='object'||Array.isArray(body))throw new Error('请求格式无效。')
-      const allowed:Record<typeof action,string[]>={export:['layout','mode','prepareArtifacts','derivedFrom'],inspect:['archive'],consent:['transactionId','archiveSha256','confirmed'],resume:['transactionId'],complete:['transactionId','document','consents','pendingPageIds','context'],'restore-pending':['transactionId','document','expectedDocument','restoredPageIds'],'prepare-pending':['transactionId'],cancel:['transactionId'],history:[],identities:[]}
+      const allowed:Record<typeof action,string[]>={export:['layout','mode','prepareArtifacts','derivedFrom'],inspect:['archive'],consent:['transactionId','archiveSha256','confirmed','destination'],resume:['transactionId'],complete:['transactionId','document','consents','pendingPageIds','context'],'restore-pending':['transactionId','document','expectedDocument','restoredPageIds'],'prepare-pending':['transactionId'],cancel:['transactionId'],history:[],identities:[]}
       if(Object.keys(body).some(k=>!allowed[action].includes(k)))throw new Error('请求包含不支持的路径、命令或字段。')
       if(allowed[action].includes('transactionId')&&(typeof body.transactionId!=='string'||!/^distribution-[a-f0-9-]{36}$/u.test(body.transactionId)))throw new Error('导入记录无效。')
       let value:unknown
       if(action==='export')value=Buffer.from(await service.export(body)).toString('base64')
       else if(action==='inspect'){if(typeof body.archive!=='string'||!/^[A-Za-z0-9+/]*={0,2}$/u.test(body.archive))throw new Error('包数据无效。');value=await service.inspect(Buffer.from(body.archive,'base64'))}
-      else if(action==='consent'){if(body.confirmed!==true)throw new Error('尚未确认导入。');value=await service.consent(body.transactionId,body.archiveSha256)}
+      else if(action==='consent'){if(body.confirmed!==true)throw new Error('尚未确认导入。');value=await service.consent(body.transactionId,body.archiveSha256,body.destination)}
       else if(action==='resume')value=await service.resume(body.transactionId)
       else if(action==='prepare-pending')value=await service.preparePending(body.transactionId)
       else if(action==='complete')value=await service.complete(body.transactionId,body.document,body.consents,body.pendingPageIds,body.context)

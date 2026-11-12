@@ -32,7 +32,7 @@ it('shows three distinct modes and requires confirmation before importing',async
   expect(f.openAndSelect).not.toHaveBeenCalled()
   fireEvent.click(view.getByRole('button',{name:'打开导入的工作台'}));expect(f.openAndSelect).toHaveBeenCalledWith('new')
   fireEvent.click(view.getByRole('button',{name:'导出工作台'}))
-  const select=view.getByLabelText('导出模式') as HTMLSelectElement
+  const select=view.getByLabelText('扩展交付方式') as HTMLSelectElement
   expect([...select.options].map(o=>o.value)).toEqual(['layout-only','online-reference','offline-embedded'])
 })
 it('renders the export preview with the workbench layout summary',async()=>{
@@ -40,9 +40,9 @@ it('renders the export preview with the workbench layout summary',async()=>{
   f.props.openOptions={shareMode:'export',workbenchId:'a'}
   f.service.prepareExport.mockResolvedValue({preview:{layout:{name:'AAA',description:'工作台说明',tags:['研发'],document,warnings:[]},manifest:{dependencies:[]}},bytes:new Uint8Array([1])})
   const view=render(<WorkbenchDistributionPage {...f.props as never}/>)
-  fireEvent.click(view.getByRole('button',{name:'保存布局并生成分享包'}))
+  fireEvent.click(view.getByRole('button',{name:'保存布局并生成模板包'}))
   await waitFor(()=>expect(view.getByText('布局概览')).toBeDefined())
-  expect(view.getByText('当前分享包不包含额外扩展。')).toBeDefined()
+  expect(view.getByText('当前模板包不包含额外扩展。')).toBeDefined()
   expect(view.getByText('工作台说明')).toBeDefined()
 })
 it('refreshes durable transaction status after restore fails instead of losing the resume action',async()=>{

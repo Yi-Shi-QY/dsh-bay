@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+- Consolidated offline sharing into Complete Workbench and Workbench Template
+  exports, with one import picker that detects V5/V6 complete archives and V4
+  template archives. Both import histories now return to the correct workflow.
+- Template imports create a new folder-backed Workbench without opening it or
+  changing the current Workbench. Folder publication and deferred page-state
+  restoration use the Host directory, with durable retry and revision checks.
+- Template export optionally includes human-written Workbench background and
+  omits model choices and task progress. Extension delivery remains a secondary
+  choice: prepare locally, fetch exact dependencies, or embed approved artifacts.
+- Import checks show required and installed extension versions. Different
+  versions or builds are never silently replaced; missing template page state
+  stays available for restoration after exact dependencies are ready.
+
 ## 0.2.2-alpha.18.2 — private staging
 
 - Joined the browser owner and the DSH desktop owner to the same Host

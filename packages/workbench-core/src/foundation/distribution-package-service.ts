@@ -1,4 +1,4 @@
-import { CORE_PORTABLE_EDITORS, type DistributionClientV4, type DistributionImportStatus } from '../distribution-contract.ts'
+import { CORE_PORTABLE_EDITORS, type DistributionClientV4, type DistributionImportStatus, type DistributionImportDestination } from '../distribution-contract.ts'
 import { projectLayoutPackage, restoreLayoutPackage, inspectLayoutPackage, type PortableLayoutV2 } from './workbench-layout-package.ts'
 import { inspectWorkbenchPackageV4, buildWorkbenchPackageV4, type WorkbenchPackageModeV4 } from './workbench-package-v4.ts'
 import type { WorkbenchEditorCatalog, WorkbenchEditorCatalogRow } from './catalog.ts'
@@ -86,11 +86,11 @@ export function createDistributionPackageService(options:{client:DistributionCli
       if(!access?.contractFingerprint||!['ready','not-allowed','confirmation-required'].includes(access.availability))throw new Error(`扩展内页尚未注册或兼容：${d.packageName}。请重启 DSH 后继续。`)
       consents[`${d.packageName}::${d.moduleId}`]={packageName:d.packageName,moduleId:d.moduleId,apiVersion:1,editorIds:d.editorScopes.map(e=>e.editorId),contractFingerprint:access.contractFingerprint,allowedAt:Date.now(),allowed:true}
     }
-    const restored=restoreLayoutPackage(row.layout,row.mode==='layout-only'?await catalog():editors,bindings,row.mode!=='layout-only',true)
+    const restored=restoreLayoutPackage(row.layout,row.mode==='layout-only'?await catalog():editors,options.directory.completeRequest ? {} : bindings,row.mode!=='layout-only',true)
     return options.client.complete(row.transactionId,restored.document,consents,restored.pendingPageIds,restored.context,restored.orchestration)
   }
   return {
-    async prepareExport(id:string,mode:WorkbenchPackageModeV4,prepareArtifacts=false){
+    async prepareExport(id:string,mode:WorkbenchPackageModeV4,prepareArtifacts=false,includeBackground=false){
       if(!options.canExport(id))throw new Error('请先收回工作台再导出。')
       if(!await options.directory.flushBeforeLifecycleTransition?.())throw new Error('布局尚未保存，导出停止。')
       const record=options.settings.getSnapshot().value?.workbenches[id];if(!record||!options.canExport(id))throw new Error('工作台不可导出。')
@@ -98,20 +98,27 @@ export function createDistributionPackageService(options:{client:DistributionCli
       const available=await identities()
       const editors=options.editors.getSnapshot().map(row=>enrich(row,available))
       const layout=projectLayoutPackage(record,editors)
-      if(mode!=='layout-only'&&editors.some(e=>layout.modules.some(m=>m.editorId===e.id&&m.scope===e.scope)&&(!e.portability?.importState||!e.portability.exportState)))throw new Error('部分内页缺少配置迁移处理器，无法导出完整包。')
+      // Templates carry reusable configuration, never work progress or local model choices.
+      delete layout.orchestration
+      delete layout.modelPreference
+      if (!includeBackground) delete layout.context
+      else if (layout.context) layout.context.areas = {}
+      layout.schemaVersion = layout.context === undefined ? 2 : 3
+      if(mode!=='layout-only'&&editors.some(e=>layout.modules.some(m=>m.editorId===e.id&&m.scope===e.scope)&&(!e.portability?.importState||!e.portability.exportState)))throw new Error('部分内页缺少配置迁移处理器，无法生成带扩展的模板包。')
       if(areasOf(record.document.root).some(a=>a.moduleHistory.some(p=>p.pendingDistribution)))throw new Error('尚有配置等待恢复，请先从导入记录完成恢复，再重新导出。')
       const bytes=await options.client.prepare({layout,mode,prepareArtifacts,...record.packageOrigin?{derivedFrom:{packageId:record.packageOrigin.packageId,version:record.packageOrigin.version,archiveSha256:record.packageOrigin.archiveSha256}}:{}})
       return {bytes,preview:await inspectWorkbenchPackageV4(bytes)}
     },
-    async inspect(bytes:Uint8Array){if(options.directory.completeRequest)throw new Error('目录型工作台请使用完整工作台包 V5 导入。');if(!options.canImport())throw new Error('请在接收方 DSH 桌面导入。');return options.client.inspect(bytes)},
+    async inspect(bytes:Uint8Array){if(!options.canImport())throw new Error('请在接收方 DSH 桌面导入模板包。');return options.client.inspect(bytes)},
     async inspectLegacy(bytes:Uint8Array){
       throw new Error('18.0 不支持旧工作台格式，原文件未修改。请使用 18.0 完整工作台包。')
     },
-    async confirm(row:DistributionImportStatus,bindings:Readonly<Record<string,SessionBindingV1>>={}){if(!options.canImport())throw new Error('只能在接收方桌面确认。');return restore(await options.client.consent(row.transactionId,row.archiveSha256),bindings)},
+    async confirm(row:DistributionImportStatus,bindings:Readonly<Record<string,SessionBindingV1>>={},destination?:DistributionImportDestination){if(!options.canImport())throw new Error('只能在接收方桌面确认。');return restore(await options.client.consent(row.transactionId,row.archiveSha256,destination),bindings)},
     async resume(id:string,bindings:Readonly<Record<string,SessionBindingV1>>={}){if(!options.canImport())throw new Error('请在接收方桌面继续。');return restore(await options.client.resume(id),bindings)},
     cancel:(id:string)=>options.client.cancel(id),history:()=>options.client.history(),
     async restorePending(row:DistributionImportStatus){
       if(!options.canImport()||!row.layout||!row.pendingPageIds?.length)throw new Error('没有待恢复配置。')
+      if(!options.canExport(row.workbenchId))throw new Error('请先收回工作台，再恢复内页配置。')
       await options.client.preparePending(row.transactionId)
       await options.registry.refresh()
       const current=options.settings.getSnapshot().value?.workbenches[row.workbenchId]?.document

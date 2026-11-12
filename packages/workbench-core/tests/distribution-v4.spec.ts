@@ -9,6 +9,7 @@ import { buildWorkbenchPackageV4, inspectWorkbenchPackageV4, publisherKeyIdV4 } 
 import { decodeDeterministicZip, encodeDeterministicZip } from '../src/foundation/workbench-sharing.ts'
 import { prepareDistributionArtifact, inspectDistributionManifest, artifactHash } from '../src/host-distribution-artifacts.ts'
 import { createHostDistributionService } from '../src/host-distribution-service.ts'
+import { HostWorkbenchDirectory } from '../src/host-workbench-directory.ts'
 import { settingsFixture } from './settings-fixtures.ts'
 import { WORKBENCH_CORE_VERSION } from '../src/release-compatibility.ts'
 import {areasOf} from '../src/foundation/document-v3.ts'
@@ -124,7 +125,7 @@ describe('explicit runtime artifact preparation',()=>{
     expect(p.dependency.packageName).toBe('@local/workbench-editor-example')
     expect(p.dependency.runtimeFiles).toContain('client.js')
   })
-  it('exports, embeds, imports and restores a custom editor from one offline package',async()=>{
+  it.each(['settings', 'folder'])('exports, embeds, imports and restores a custom editor into %s',async destinationMode=>{
     const dir=await mkdtemp(join(tmpdir(),'wb172-custom-offline-')),source=join(dir,'source')
     let value:any=undefined,revision=1,stored:any,sourcePhase=true,active=false
     try{
@@ -151,6 +152,8 @@ describe('explicit runtime artifact preparation',()=>{
         setBundleEnabled:async()=>({application:'applied'}),
       }
       const options:any={profile:{name:'custom-offline',dir,cwd:dir,home:dir,installAnchor:dir,packageManager:{command:process.execPath,args:[join(dirname(process.execPath),'node_modules/corepack/dist/pnpm.js')]}} as any,native,resolve:()=>existsSync(join(installedRoot,'package.json'))?installedRoot:source,peerAvailable:()=>false,credentials,settings:{describe:()=>[{ns:'workbench-layout',value,revision}],mutate:async(_ns:any,ops:any[],expected:any)=>{if(expected!==revision)throw Error('CAS');stored=ops[0].value;value=stored;revision++}}}
+      const directory = destinationMode === 'folder' ? new HostWorkbenchDirectory(dir, { create: async () => ({ id: crypto.randomUUID() }) } as never) : undefined
+      if (directory) options.directory = directory
       const service=createHostDistributionService(options)
       const packageBytes=await service.export({layout:customLayout,mode:'offline-embedded',prepareArtifacts:true})
       sourcePhase=false
@@ -161,7 +164,7 @@ describe('explicit runtime artifact preparation',()=>{
       expect(preview.files.some(file=>file.path===preview.manifest.dependencies[0]?.archivePath)).toBe(true)
       const row=await service.inspect(packageBytes)
       expect(row.blockers).toEqual([])
-      const awaiting=await service.consent(row.transactionId,row.archiveSha256)
+      const awaiting=await service.consent(row.transactionId,row.archiveSha256,directory ? { parentPath: dir, folderName: 'received' } : undefined)
       expect(awaiting.state).toBe('restart-required')
       expect(existsSync(join(installedRoot,'package.json'))).toBe(true)
       active=true
@@ -172,6 +175,13 @@ describe('explicit runtime artifact preparation',()=>{
       const restored=restoreLayoutPackage(preview.layout,[editor],{},true,true)
       const done=await service.complete(row.transactionId,restored.document,consent as any,restored.pendingPageIds)
       expect(done.state).toBe('ready')
+      if (directory) {
+        expect(stored).toBeUndefined()
+        stored = directory.getSnapshot().value
+        expect(stored.openWorkbenchIds).toEqual([])
+        expect(stored.extensionConsents).toMatchObject(consent)
+        expect(directory.rootPath(row.workbenchId)).toBe(join(dir, 'received'))
+      }
       expect(stored.workbenches[row.workbenchId].packageOrigin.completeness).toBe('complete-offline')
       expect(areasOf(stored.workbenches[row.workbenchId].document.root)[0]!.moduleHistory[0]!.state).toEqual({schemaVersion:1,acknowledged:true})
     }finally{await rm(dir,{recursive:true,force:true})}
