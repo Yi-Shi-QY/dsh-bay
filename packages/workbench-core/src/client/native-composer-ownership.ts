@@ -1,5 +1,5 @@
 /**
- * DSH rc.1 keeps one InputShell/editor per Session. Its native Composer cleanup
+ * DSH keeps one InputShell/editor per Session. Its native Composer cleanup
  * unconditionally detaches that shared editor. A hidden original-mode view can
  * therefore detach a newly mounted Workbench composer. Keep the native editor
  * and draft, while giving each Workbench occurrence a root/readonly lease.

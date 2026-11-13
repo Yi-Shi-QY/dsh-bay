@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { filterWorkbenchRootSidebarRegistrations, isDeferredOfficialMoreRegistration } from '../src/client/workbench-more-policy.ts'
 
-describe('Workbench 17.5 More policy', () => {
-  it('filters only rc1 entry-customization on the three projected action slots', () => {
+describe('Workbench More policy', () => {
+  it('filters only the deferred official entry-customization on the three projected action slots', () => {
     for (const slot of [
       'sidebar.panellist.actions',
       'conversation.session.header.views.actions',

@@ -2,7 +2,7 @@
 
 DSH Bay 是面向 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的多区域工作台。它把项目文件、原生对话、工具内页与 Bay Agent 任务组织在同一个工作台中，并支持浏览器接管和完整工作台包迁移。
 
-当前候选为 **`0.2.2-alpha.18.2`**，兼容 **DSH `0.2.2-rc.1`**。这是私有实验包；源码基线和制品校验值见[验证记录](docs/VALIDATION.md)。安装验收仍待实际试用，自动化通过不代表跨平台迁移或真实模型长时间运行已经验证。
+当前私有候选为 **`dsh-bay@0.2.2-alpha.18.3`**，目标宿主 **DSH `0.2.2-rc.2`**。本轮已按 RC2 更新运行依赖、Sidebar/Workspace 和菜单锚点接口；自动化验证完成后仍需在隔离 DSH Profile 和第二设备上人工验收。
 
 ## 从这里开始
 
@@ -43,12 +43,12 @@ DSH Bay 是面向 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-har
 | --- | --- |
 | 安装包 / 客户端模块 | `dsh-bay` |
 | 内部模块标识 | `workbench.core` |
-| 插件版本 | `0.2.2-alpha.18.2` |
-| DSH 版本 | `0.2.2-rc.1` |
-| DSH 上游提交 | `66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db` |
+| 插件版本 | `0.2.2-alpha.18.3` |
+| DSH 版本 | `0.2.2-rc.2` |
+| DSH 上游提交 | `ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c` |
 | 交付范围 | 单一 Core 包；不含 Conversation Suite 或 SVG Pet 独立模块 |
 
-通过 DSH 原生插件管理器安装本地 `dsh-bay-0.2.2-alpha.18.2.tgz`，按宿主提示启用或重启。默认封包目录 `releases/alpha18.2-rc1-private/` 被 Git 忽略，需本地构建或取得交付制品。没有公开 npm 发布完成的记录，不把 registry 安装作为本实验版入口。
+通过 DSH 原生插件管理器安装本地 `dsh-bay-0.2.2-alpha.18.3.tgz`，按宿主提示启用或重启。默认封包目录 `releases/alpha18.3-rc2-private/` 被 Git 忽略，需本地构建或取得交付制品。本候选仅供私下验收，不代表已公开发布。
 
 如同一 Profile 还装有旧包 `@dsh-workbench/core`，先停用旧包，避免重复注册。**包身份更名不等于旧数据兼容**：18.x 不迁移 17.x 工作台数据或旧格式完整包；当前 18.x 文件型数据的项目归属升级另由 Host 处理。
 
@@ -58,7 +58,8 @@ DSH Bay 是面向 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-har
 
 ```sh
 pnpm install --frozen-lockfile --ignore-scripts
-pnpm check:rc1
+pnpm check:compat
+pnpm check:rc1-history
 pnpm test
 pnpm typecheck
 pnpm build
@@ -71,10 +72,11 @@ pnpm pack:core
 
 ## 来源、验证与发布
 
-- [RC1 兼容记录](compat/dsh-0.2.2-rc.1/manifest.json)
+- [RC2 兼容记录](compat/dsh-0.2.2-rc.2/manifest.json)
+- [RC2 适配方案与结论](docs/DSH-RC2-ADAPTATION-PLAN.zh-CN.md)
 - [上游适配记录](packages/workbench-core/core-upstream-adaptation.json)
-- [Sidebar / Workspace 来源索引](packages/workbench-core/rc1-sidebar-workspace-source-index.json)
-- [来源记录](provenance/dsh-0.2.2-rc.1.json)
+- [Sidebar / Workspace 来源索引](packages/workbench-core/rc2-sidebar-workspace-source-index.json)
+- [RC2 来源记录](provenance/dsh-0.2.2-rc.2.json)
 - [验证与当前制品](docs/VALIDATION.md)、[封包与发布](docs/PUBLISHING.zh-CN.md)、[变更记录](CHANGELOG.md)
 
 DSH 继续负责原生 Agent Loop、Session 持久化、模型、工具及插件管理。Bay 使用这些服务组织工作台，不另建插件管理器。历史来源记录的版本和摘要只说明对应时间的快照，不覆盖当前包与构建输入。

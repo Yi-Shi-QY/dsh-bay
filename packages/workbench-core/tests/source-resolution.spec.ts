@@ -26,7 +26,7 @@ describe('direct Workbench source resolution', () => {
   })
 
   it('rejects a DSH generation mismatch and mutable source result', async () => {
-    await expect(resolveWorkbenchDirectPackageV1(requestNpm, descriptor({ dshGeneration: '0.1.4' }), async () => digest)).rejects.toThrow('module-incompatible')
+    await expect(resolveWorkbenchDirectPackageV1(requestNpm, descriptor({ dshGeneration: '0.2.2-rc.1' }), async () => digest)).rejects.toThrow('module-incompatible')
     expect(validateWorkbenchDirectPackageDescriptorV1(descriptor())).toBe(true)
     expect(validateWorkbenchDirectPackageDescriptorV1({ ...descriptor(), artifactBytes: [1, 2, 3] })).toBe(false)
   })

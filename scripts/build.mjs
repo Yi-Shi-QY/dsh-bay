@@ -78,7 +78,7 @@ if (/\bprocess\.env\.DSH_CLIENT_/u.test(js)) throw new Error('Browser bundle ret
 const css = result.outputFiles.find(file => file.path.endsWith('.css'))?.text ?? ''
 const imports = [...new Set(Object.values(result.metafile.outputs).flatMap(output => output.imports.filter(item => item.external).map(item => item.path)))].sort()
 if (imports.includes('@deepseek-ai/dsh-api-workspace-controller/default-workspace')) {
-  throw new Error('RC1 default-workspace helper must be bundled locally; it has no client module-table row')
+  throw new Error('The default-workspace helper must be bundled locally; it has no client module-table row')
 }
 manifest.dsh.client.external = imports.filter(name => !['react', 'react-dom', 'react/jsx-runtime', '@deepseek-ai/cordis'].includes(name))
 writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n')
@@ -100,7 +100,7 @@ writeFileSync(path.join(core, 'lib/build-inputs.json'), JSON.stringify({
   workbenchVersion: manifest.version,
   defaultInstall: [WORKBENCH_PACKAGE_NAME],
   excludedModules: ['@dsh-workbench/conversation-suite', '@dsh-workbench/svgdeepseek-pet'],
-  more: { workbench: 'deferred', official: 'rc1-ui-entry-customization-only' },
+  more: { workbench: 'deferred', official: 'rc2-ui-entry-customization-only' },
   inputs,
   hostInputs: Object.keys(hostResult.metafile.inputs).sort().map(file => ({
     path: file.replaceAll(String.fromCharCode(92), '/'),

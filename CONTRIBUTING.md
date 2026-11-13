@@ -1,6 +1,6 @@
 # Contributing to DSH Bay
 
-The current candidate is `dsh-bay@0.2.2-alpha.18.2`, targeting DSH `0.2.2-rc.1`. Start with the [documentation index](docs/README.md), [architecture](docs/ARCHITECTURE.zh-CN.md), [source map](docs/REPOSITORY-STRUCTURE.md), and [validation record](docs/VALIDATION.md).
+The current private candidate is `dsh-bay@0.2.2-alpha.18.3`, targeting DSH `0.2.2-rc.2`. Start with the [documentation index](docs/README.md), [architecture](docs/ARCHITECTURE.zh-CN.md), [source map](docs/REPOSITORY-STRUCTURE.md), [RC2 adaptation record](docs/DSH-RC2-ADAPTATION-PLAN.zh-CN.md), and [validation record](docs/VALIDATION.md).
 
 ## Preserve the domain boundaries
 
@@ -18,7 +18,8 @@ The default distribution remains one Core package. Do not introduce a second Plu
 Use Node.js `>=24.9.0` and pnpm `11.28.5`. Feature and release checks are:
 
 ```sh
-pnpm check:rc1
+pnpm check:compat
+pnpm check:rc1-history
 pnpm test
 pnpm typecheck
 pnpm build

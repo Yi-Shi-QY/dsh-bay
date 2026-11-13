@@ -1,6 +1,28 @@
-# DSH Bay 18.2 验证与制品记录
+# DSH Bay 验证与制品记录
 
 更新日期：2026-11-13（Asia/Shanghai）。本页是当前验证入口；旧 [17.5 记录](archive/2026-11-11/VALIDATION.md) 已归档。各节摘要仅对应该节制品，不能交叉用于校验其他构建。
+
+## 2026-11-13 18.3 DSH 0.2.2-rc.2 适配候选
+
+本节记录 DSH `0.2.2-rc.2` 的独立私有候选 `dsh-bay@0.2.2-alpha.18.3`。上游 tag `dsh-v0.2.2-rc.2` 与 npm `gitHead` 均指向 `ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c`。
+
+- `pnpm install --frozen-lockfile`、`pnpm check:compat`、`pnpm typecheck`、`pnpm build` 均通过。兼容检查确认 36 个 RC2 源文件哈希一致，三处 Core 适配与三个 runtime extras 均有登记；patch digest 为 `665aef8a2b9fc094d847dc261c690c8bf14d35f2bf46513ed560beb03cf491a0`。
+- `pnpm check:rc1-history` 对旧 RC1 索引和工作树文件统一换行为 LF 后通过，34/34 个文件一致；此前报告的差异仅由 Windows `core.autocrlf=true` 检出 CRLF 引起，未改写历史索引或来源记录。
+- RC1 生成的 V3 布局包和 V4 工作台数据包在独立 schema、摘要、签名及 Core 兼容性校验通过后可导入；V6 完整包保留原有 Core 版本范围检查；其中 RC1 代际可执行扩展仍被拒绝，须针对 RC2 重建。Core 插件的 `engines.dsh` 与 DSH peer 范围均为 `>=0.2.2-rc.2 <0.2.3`；仓库构建依赖和 lockfile 解析仍精确固定 RC2，宿主兼容范围覆盖 RC2 后续 `0.2.2` 预发布版与正式版，不覆盖 RC1 或 `0.2.3`。
+- 完整回归 **174 个测试文件、1177 项测试全部通过**。输出中的 `window.open` 与 Canvas 未实现提示来自 jsdom，不影响测试结果。
+- `pnpm pack:core` 成功生成私有候选包；重新计算的 SHA-256 与 `candidate.json` 一致。封包流程同时重新完成构建及 Host/Client 类型声明编译。
+- 未在 DSH 桌面安装此候选，未完成第二设备验收；本机安装版是 RC1，RC2 GitHub Release 没有桌面安装制品，因此不以 RC1 代替 RC2 验收。没有发布 npm、Git tag 或 GitHub Release；自动化通过不代表桌面或跨设备实机验收完成。
+
+| 项目 | 值 |
+| --- | --- |
+| 包 / 版本 | `dsh-bay` / `0.2.2-alpha.18.3` |
+| DSH 代际 | `0.2.2-rc.2` |
+| 候选 ID | `dsh-bay-0.2.2-alpha.18.3-dsh-0.2.2-rc.2` |
+| 私有候选包 | `releases/alpha18.3-rc2-private/dsh-bay-0.2.2-alpha.18.3.tgz` |
+| 大小 | 1,405,305 字节 |
+| SHA-256 | `9a539e6273d65e5c636f136eee470aa67e4aa71a7cc17386b607b19a0efeffaa` |
+| SHA-512 integrity | `sha512-r7CQBmgZSGkqlUoNXZKV5N2EnPzQFeUPNiNV+GBhtAJ9OmD763Ycd5XUjcW/72H8Smcw5ZtCwpTeTswv/vnNgA==` |
+| 候选清单 | 同目录 `candidate.json`；RC2 来源与验证状态见 `provenance/dsh-0.2.2-rc.2.json` |
 
 ## 2026-11-13 18.2 离线工作台包与 LAN 联机整合验证
 

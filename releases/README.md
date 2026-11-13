@@ -1,18 +1,18 @@
 # Release records
 
-The current release tree contains only the active private candidate:
+The tracked release directory retains historical candidate records. New private
+candidate tarballs are generated into ignored release subdirectories and are
+not public releases. The current RC2 candidate output is:
 
 ```text
-alpha17.6-rc1-private/
+alpha18.3-rc2-private/
 ```
 
-It holds the candidate identity, package-name verification and local trial
-artifact metadata for DSH Bay `0.2.2-alpha.17.6` on DSH `0.2.2-rc.1`.
+It contains the private candidate package and generated `candidate.json` for
+DSH Bay `0.2.2-alpha.18.3` on DSH `0.2.2-rc.2` after `pnpm pack:core` runs.
 
-The current candidate includes the compact settings cards, inline extension
-permissions, tab status and metadata, and the unified conversation picker.
-Its checksum matches the latest local UI-card trial archive. Validation
-records distinguish scoped automated checks from DSH desktop acceptance.
+Validation records distinguish automated checks from DSH desktop and second
+device acceptance.
 
 Older alpha candidate records were removed from the tracked tree during the
 repository cleanup. Their source history remains in Git and they are not

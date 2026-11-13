@@ -11,7 +11,7 @@ it('installs a private self-contained tarball with the real native pnpm operatio
   try{
     await writeFile(join(root,'package.json'),JSON.stringify({name:'distribution-acceptance',private:true,dependencies:{}}))
     await writeFile(join(root,'.npmrc'),'registry=http://127.0.0.1:1/'+String.fromCharCode(10)+'store-dir='+join(root,'empty-store')+String.fromCharCode(10)+'manage-package-manager-versions=false'+String.fromCharCode(10))
-    const prepared=await prepareDistributionArtifact(join(import.meta.dirname,'../presets/workbench-creator/skills/workbench-extension-development/templates/workbench-editor'),(name,version)=>(name==='react'&&version==='18.3.1')||(name==='@deepseek-ai/dsh-client-ui-slots'&&version==='0.2.2-rc.1'))
+    const prepared=await prepareDistributionArtifact(join(import.meta.dirname,'../presets/workbench-creator/skills/workbench-extension-development/templates/workbench-editor'),(name,version)=>(name==='react'&&version==='18.3.1')||(name==='@deepseek-ai/dsh-client-ui-slots'&&version==='0.2.2-rc.2'))
     const artifact=join(root,'private.tgz');await writeFile(artifact,prepared.bytes)
     const packageRoot=join(root,'node_modules',prepared.dependency.packageName)
     let conflicting=false

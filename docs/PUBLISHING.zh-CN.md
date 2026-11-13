@@ -1,6 +1,6 @@
 # DSH Bay 封包与发布
 
-更新日期：2026-11-12。当前私有候选为 `dsh-bay@0.2.2-alpha.18.2`，目标 DSH `0.2.2-rc.1`。最新已交付包身份与验证范围见 [VALIDATION.md](VALIDATION.md)。
+更新日期：2026-11-13。当前私有候选为 `dsh-bay@0.2.2-alpha.18.3`，目标 DSH `0.2.2-rc.2`。本轮只生成私有候选；桌面实机和第二设备验收状态见 [VALIDATION.md](VALIDATION.md)。
 
 ## 私有实验包流程
 
@@ -11,7 +11,8 @@
 5. 交付包路径、源码提交、校验值及真实验收边界，按用户安装结果推进下一阶段。
 
 ```sh
-pnpm check:rc1
+pnpm check:compat
+pnpm check:rc1-history
 pnpm test
 pnpm typecheck
 pnpm verify:workbench-package
@@ -22,8 +23,8 @@ pnpm pack:core
 默认输出：
 
 ```text
-releases/alpha18.2-rc1-private/
-├─ dsh-bay-0.2.2-alpha.18.2.tgz
+releases/alpha18.3-rc2-private/
+├─ dsh-bay-0.2.2-alpha.18.3.tgz
 └─ candidate.json
 ```
 

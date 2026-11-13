@@ -1,79 +1,63 @@
 {
   "schemaVersion": 1,
-  "upstreamCommit": "66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db",
+  "upstreamCommit": "ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c",
+  "upstreamTag": "dsh-v0.2.2-rc.2",
   "upstreamPackage": "@deepseek-ai/dsh-client-ui-sidebar",
-  "upstreamVersion": "0.2.2-rc.1",
-  "upstreamGeneration": "0.2.2-rc.1",
+  "upstreamVersion": "0.2.2-rc.2",
+  "upstreamGeneration": "0.2.2-rc.2",
   "entries": [
     {
       "source": "ui-sidebar/src/client",
       "destination": "workbench-sidebar/generated/upstream/ui-sidebar",
-      "copyMode": "exact-source-mirror-then-adapt-public-api-imports"
+      "copyMode": "exact-rc2-source-mirror"
     },
     {
       "source": "ui-workspace/src/client",
       "destination": "workbench-sidebar/generated/upstream/ui-workspace",
-      "copyMode": "exact-source-mirror-then-adapt-public-api-imports-and-session-projection"
+      "copyMode": "exact-rc2-source-mirror-then-apply-recorded-core-adaptations"
     }
   ],
   "adaptations": [
-    "Keep the upstream SidebarRoot and WorkspaceBrowser visual contract",
-    "Route start/open/fork actions through an explicit Workbench Area",
-    "Project focused-session emphasis without mutating DSH current Session",
-    "Pass rc.1 agentPreset and keep draft semantics through Area-local placement",
-    "Consume rc.1 Conversation View and Sidebar Guide action contracts through the native Area renderer",
-    "Controlled rebase reviewed against rc1 Sidebar/Workspace source",
-    "Keep official entry-customization More deferred from Workbench projections"
+    "Use the RC2 SidebarRoot and WorkspaceBrowser source as the controlled rebase baseline",
+    "Route Workbench session operations through explicit Area-local placement outside the upstream browser",
+    "Use the RC2 anchorRef menu contract and keep default workspace title helpers local to the bundled Core",
+    "Add the locale Context merge required by the Workbench package typecheck",
+    "Keep official entry-customization More deferred from Workbench projections",
+    "Preserve the RC1 source snapshot and validation record as immutable historical evidence"
   ],
   "officialOwnersReplaced": [],
-  "sourceDigest": "1ddb4669dbcb52b0a3c93fa1dda418e26994ae83216979849efed76820cd86e3",
-  "baselinePatchDigest": "1ddb4669dbcb52b0a3c93fa1dda418e26994ae83216979849efed76820cd86e3",
-  "patchDigest": "8becd2d0305576e49b0181e6ee9ecba22ce3bb2ab4d59522a9d39893dc2befe1",
+  "sourceDigest": "e9b1d5923b0a8d6541399db3421c85f72015e53eb117201ecc83e4eba16b80eb",
+  "patchDigestFormat": "sha256 of codepoint-sorted adapted path NUL normalized-source-sha256 NUL normalized-runtime-sha256 LF records followed by sorted runtime-extra path NUL dash NUL normalized-runtime-sha256 LF records",
+  "baselinePatchDigest": "e9b1d5923b0a8d6541399db3421c85f72015e53eb117201ecc83e4eba16b80eb",
+  "patchDigest": "665aef8a2b9fc094d847dc261c690c8bf14d35f2bf46513ed560beb03cf491a0",
   "migration": {
-    "targetUpstreamCommit": "66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db",
-    "targetGeneration": "0.2.2-rc.1",
-    "sourceMaterialization": "rc1 source index and adapted destination verified",
-    "supplementalSource": "packages/client/ui-workspace/src/client/subagent-lineage.ts (historical rc3 supplemental, deferred)"
+    "targetUpstreamCommit": "ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c",
+    "targetGeneration": "0.2.2-rc.2",
+    "sourceMaterialization": "36 RC2 source files hash-verified; three explicit Core adaptations and three runtime extras are registered",
+    "historicalRc3Supplement": "not carried into the RC2 runtime; no live import depends on it"
   },
-  "sourceMirror": "generated/upstream/rc1-source",
-  "sourceMaterialization": "exact rc1 source mirror present; runtime destination retains reviewed Workbench adaptations",
+  "sourceMirror": "generated/upstream/rc2-source",
+  "sourceMaterialization": "exact RC2 source mirror present; runtime destination retains only the three reviewed Core adaptations",
   "adaptedFiles": [
-    "ui-sidebar/contract/slots.ts",
-    "ui-sidebar/index.ts",
-    "ui-sidebar/locales.ts",
-    "ui-sidebar/SidebarRoot.module.css",
-    "ui-sidebar/SidebarRoot.tsx",
     "ui-workspace/contract/slots.ts",
-    "ui-workspace/index.ts",
-    "ui-workspace/locales.ts",
-    "ui-workspace/rows/Rows.module.css",
-    "ui-workspace/rows/Rows.tsx",
-    "ui-workspace/stores.ts",
-    "ui-workspace/tree.ts",
-    "ui-workspace/WorkspacePicker.tsx"
+    "ui-workspace/WorkspacePicker.tsx",
+    "ui-workspace/rows/WorkspaceBrowser.tsx"
   ],
   "runtimeExtras": [
     {
       "path": "ui-workspace/WorkspaceBrowser.module.css",
       "destinations": "all-sidebar-runtime-destinations",
-      "reason": "Workbench Area/session browser remains at its reviewed legacy path while rc1 source uses ui-workspace/rows/WorkspaceBrowser.module.css"
+      "reason": "Workbench browser wrapper retains its stable legacy path while the RC2 implementation is under ui-workspace/rows/"
     },
     {
       "path": "ui-workspace/WorkspaceBrowser.tsx",
       "destinations": "all-sidebar-runtime-destinations",
-      "reason": "Workbench Area/session browser preserves explicit Area-local routing and does not consume the rc1 global current Session"
+      "reason": "Core retains its wrapper path for the Workbench-specific Area-local navigation adapter"
     },
     {
       "path": "ui-workspace/default-workspace.ts",
       "destinations": "all-sidebar-runtime-destinations",
-      "reason": "RC1 publishes the pure default Workspace label helper as a package subpath without a client module-table row; keep the browser helper local so the bundle inlines it"
-    },
-    {
-      "path": "ui-workspace/subagent-lineage.ts",
-      "destinations": [
-        "packages/workbench-core/src/foundation/workbench-sidebar/generated/upstream"
-      ],
-      "reason": "Historical rc3 supplemental source retained only in Core provenance; Conversation migration remains deferred"
+      "reason": "The WorkspacePicker path uses a Core-local helper so the browser bundle does not request an un-injected workspace-controller subpath"
     }
   ]
 }

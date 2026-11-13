@@ -4,7 +4,7 @@ import { areasOf, validateWorkbenchDocumentV3, type WorkbenchDocumentV3, type Wo
 import type { JsonValue, SessionBindingV1 } from './model.ts'
 import type { WorkbenchRecordV2 } from './persistence.ts'
 import { canonicalJson, decodeDeterministicZip, encodeDeterministicZip, sha256Hex, type PortableWorkbenchV1 } from './workbench-sharing.ts'
-import { WORKBENCH_CORE_VERSION, WORKBENCH_DSH_GENERATION, isWorkbenchCorePackageName } from '../release-compatibility.ts'
+import { WORKBENCH_CORE_VERSION, WORKBENCH_DSH_GENERATION, isWorkbenchCorePackageName, isWorkbenchPortablePackageDshGenerationCompatible } from '../release-compatibility.ts'
 import { CORE_PORTABLE_EDITORS } from '../distribution-contract.ts'
 import { workbenchEditorStateFailureV1 } from '../workbench-editor-state.ts'
 import { workbenchCoreCompatibilitySatisfies } from '../module-source.ts'
@@ -189,7 +189,7 @@ export async function inspectLayoutPackage(bytes: Uint8Array): Promise<LayoutPac
   }
   if (manifest.schemaVersion === 3) {
     if (!keys(manifest, ['schemaVersion', 'format', 'mode', 'compatibility', 'files', 'contextPath', 'contextPolicy', 'contextDigest']) || manifest.format !== 'dsh-workbench-package' || manifest.mode !== 'layout-only'
-      || !record(manifest.compatibility) || !keys(manifest.compatibility, ['dsh', 'core', 'portableLayout']) || manifest.compatibility.dsh !== WORKBENCH_DSH_GENERATION
+      || !record(manifest.compatibility) || !keys(manifest.compatibility, ['dsh', 'core', 'portableLayout']) || !isWorkbenchPortablePackageDshGenerationCompatible(manifest.compatibility.dsh)
       || !workbenchCoreCompatibilitySatisfies(WORKBENCH_CORE_VERSION, String(manifest.compatibility.core ?? '')) || ![2, 3].includes(manifest.compatibility.portableLayout as number)
       || (manifest.contextPath !== undefined && manifest.contextPath !== 'context.json')
       || (manifest.contextPolicy !== undefined && !['human', 'handoff'].includes(String(manifest.contextPolicy)))

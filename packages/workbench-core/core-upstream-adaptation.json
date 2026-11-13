@@ -1,164 +1,70 @@
 {
-  "schemaVersion": 2,
-  "migration": "dsh-0.2.2-rc.1-to-workbench-0.2.2-alpha.18.2",
-  "candidate": "dsh-bay-0.2.2-alpha.18.2-dsh-0.2.2-rc.1",
+  "schemaVersion": 3,
+  "migration": "dsh-0.2.2-rc.1-to-workbench-0.2.2-alpha.18.3-on-dsh-0.2.2-rc.2",
+  "candidate": "dsh-bay-0.2.2-alpha.18.3-dsh-0.2.2-rc.2",
   "upstream": {
     "repository": "https://github.com/deepseek-ai/deepseek-harness.git",
-    "tag": "dsh-v0.2.2-rc.1",
-    "commit": "66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db",
-    "generation": "0.2.2-rc.1",
+    "tag": "dsh-v0.2.2-rc.2",
+    "commit": "ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c",
     "acquisition": {
-      "status": "git-checkout-and-npm-verified",
-      "checkout": "detached-local-checkout@66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db",
-      "sourceOfTypes": "@deepseek-ai/dsh-client-ui-* npm packages at 0.2.2-rc.1",
-      "sourceModification": "none",
-      "sourceEvidence": "packages/workbench-core/rc1-sidebar-workspace-source-index.json; provenance/dsh-0.2.2-rc.1.json",
-      "cleanCheckout": true
+      "status": "git-tag-and-npm-metadata-verified",
+      "verification": "git ls-remote tag and npm gitHead match",
+      "sourceOfTypes": "exact 0.2.2-rc.2 npm packages",
+      "sourceFiles": "Sidebar and Workspace source mirrored from exact package tarballs"
     }
   },
   "delivery": {
-    "workbenchVersion": "0.2.2-alpha.18.2",
-    "productLine": "DSH Bay 0.2.2-alpha.18.2",
+    "workbenchVersion": "0.2.2-alpha.18.3",
+    "dshEngineRange": ">=0.2.2-rc.2 <0.2.3",
     "mode": "core-only",
-    "defaultInstall": [
-      "dsh-bay"
-    ],
-    "excluded": [
-      "@dsh-workbench/conversation-suite",
-      "@dsh-workbench/svgdeepseek-pet"
-    ],
+    "defaultInstall": ["dsh-bay"],
+    "excluded": ["@dsh-workbench/conversation-suite", "@dsh-workbench/svgdeepseek-pet"],
     "more": "deferred-workbench-official-only",
     "pluginManager": "native-dsh-settings-entry"
   },
-  "compatibilityPatches": [
+  "adaptations": [
     {
-      "id": "session-placement-agent-preset",
-      "status": "verified-adapted-runtime",
-      "owner": "packages/workbench/src/client/workbench-session-placement.ts",
-      "reason": "rc.1 retains agentPreset on connect/create"
+    "id": "workspace-menu-anchor",
+      "status": "rebased-to-rc2-source",
+      "owner": "generated/upstream/ui-workspace/WorkspacePicker.tsx",
+      "change": "Uses RC2 Menu anchorRef contract; no removed getAnchorRect prop remains"
     },
     {
-      "id": "session-placement-draft-keep",
-      "status": "clean",
-      "owner": "generated-workspace-startSession",
-      "reason": "rc.1 retains whenDraftExists keep/replace/append"
+      "id": "area-local-session-placement",
+      "status": "retained",
+      "owner": "generated/upstream/ui-workspace/WorkspaceBrowser.tsx",
+      "change": "Session creation and navigation continue through the Workbench Area-local adapter"
     },
     {
-      "id": "current-session-isolation",
-      "status": "clean",
-      "owner": "packages/workbench/src/client/workbench-session-placement.ts",
-      "reason": "explicit sessions.create sibling remains required"
+      "id": "workspace-default-label-and-locale",
+      "status": "retained-core-adaptation",
+      "owner": "generated/upstream/ui-workspace/WorkspacePicker.tsx",
+      "change": "Uses the Core-local default-workspace helper in WorkspacePicker and WorkspaceBrowser, and keeps the locale Context type merge"
     },
     {
-      "id": "conversation-view-actions",
-      "status": "verified",
+      "id": "official-more-boundary",
+      "status": "retained",
       "owner": "packages/workbench-core/src/client/native-area-slot-renderer.tsx",
-      "reason": "rc.1 public slot contract is forwarded Area-locally"
-    },
-    {
-      "id": "sidebar-guide-actions",
-      "status": "verified",
-      "owner": "packages/workbench-core/src/client/native-area-slot-renderer.tsx",
-      "reason": "rc.1 public guide actions contract is forwarded without global tab mutation"
-    },
-    {
-      "id": "entry-customization-filter",
-      "status": "verified",
-      "owner": "packages/workbench-core/src/client/native-area-slot-renderer.tsx",
-      "reason": "only the official entry-customization registration is hidden at the Workbench projection boundary"
-    },
-    {
-      "id": "expanded-area-minimum-footprint",
-      "status": "retained-17.4-baseline",
-      "owner": "Workbench 17.4 baseline: packages/workbench-core/src/foundation/collapse-projection.ts; packages/workbench-core/src/foundation/WorkbenchFrame.tsx",
-      "reason": "Container inner-page split projection intentionally remains on the Workbench 17.4 geometry algorithm; DSH 0.2.2-rc.1 adaptation does not change Area minimum-track semantics."
-    },
-    {
-      "id": "official-inner-page-contracts",
-      "status": "verified",
-      "owner": "packages/workbench-core/src/client/official-area-editors.tsx",
-      "reason": "native entries retain Area-local Session and fallback seams"
-    },
-    {
-      "id": "generated-source-materialization",
-      "status": "clean",
-      "owner": "Sidebar/Workspace controlled rebase",
-      "reason": "All 34 rc1 source files are present in the snapshot, three exact mirrors, and all three runtime destinations; 13 explicit source paths retain reviewed Workbench adaptations and three historical runtime extras are registered, with source, patch, typecheck, targeted renderer tests, and native registration scan verified"
-    },
-    {
-      "id": "conversation-generated-source",
-      "status": "deferred",
-      "owner": "packages/workbench/src/client/workbench-conversation/copy-manifest.json",
-      "reason": "Conversation/Trajectory generated copies remain historical rc.3 evidence and are excluded from Core-only"
-    },
-    {
-      "id": "creator-preset-override",
-      "status": "obsolete",
-      "owner": "packages/workbench-core/presets/workbench-creator",
-      "reason": "global dsh-skill provider remains the public path; no Workbench Creator draft adapter"
+      "change": "Defers only official entry-customization inside Workbench projections; DSH owners are unchanged"
     }
   ],
-  "newUiSlots": {
-    "conversation.session.header.views.actions": {
-      "kind": "list",
-      "scope": "root",
-      "contract": "ConversationViewActionsOwnerProps",
-      "areaIsolation": "native-renderer-session-area",
-      "rc1": "verified"
-    },
-    "sidebar.right.tab.guide.actions": {
-      "kind": "list",
-      "scope": "root",
-      "contract": "SidebarRightGuideActionsOwnerProps",
-      "areaIsolation": "NativeSidebarAreaEditor.openNativeTab",
-      "rc1": "verified"
-    }
+  "nativeDshChanges": {
+    "sessionTeamMode": "RC2 keeps Agent Teams as a saved per-Session opt-in; Workbench does not add a second control surface",
+    "namedNestedSubagents": "DSH owns name-based controls and browsing; Workbench resource routes still use Session ids and parent-child addresses",
+    "toolErrorsAndSessionAppend": "No direct Session.append consumer found in Core; portability writes through the Session Persistence handle in bounded event batches",
+    "sessionFormat": "No Workbench storage migration introduced in this candidate"
   },
-  "innerPages": {
-    "dynamicNativeProjection": [
-      "workspace-files",
-      "terminal",
-      "document-preview",
-      "changes-review",
-      "plan",
-      "schedule-task",
-      "guide",
-      "subagent-chat",
-      "browser-native-entry"
-    ],
-    "wrapperOwned": [
-      "area-editor-declaration",
-      "area-session-binding",
-      "layout-persistence",
-      "fallback-pages",
-      "browser-iframe-sandbox",
-      "native-store-lifecycle"
-    ],
-    "verification": "registration-scan-passed; targeted native projection tests passed; desktop smoke remains a release gate"
-  },
-  "generated": {
-    "api": "consumed from rc.1 package declarations",
-    "catalog": "rc.1 metadata recorded in candidate provenance",
-    "graph": "pnpm lock regenerated against rc.1",
-    "copyManifests": [
-      "packages/workbench-core/core-foundation-copy-manifest.json",
-      "packages/workbench-core/src/foundation/workbench-sidebar.copy-manifest.json"
-    ],
-    "sourceDigest": "1ddb4669dbcb52b0a3c93fa1dda418e26994ae83216979849efed76820cd86e3",
-    "patchDigest": "d56161dc9ba95af52e097dbec29a55c63dd0f6f9c7de0901cf38d3514516f75b",
-    "lockfileDigest": "c13619ee21412537a484b46ee6cfd86b8045e01414c64fa10d5cf2cf6bec5727",
-    "sourceMaterialization": {
-      "mode": "exact-rc1-source-mirror-and-verified-adapted-destination",
-      "sourceFiles": 34,
-      "runtimeDestinations": 1,
-      "adaptedSourceFiles": 13,
-      "runtimeExtras": 3,
-      "verification": "all non-adapted runtime files hash-match rc1 source; adapted paths and historical extras are explicitly registered"
-    }
+  "sourceMaterialization": {
+    "sourceMirror": "generated/upstream/rc2-source",
+    "sourceDigest": "e9b1d5923b0a8d6541399db3421c85f72015e53eb117201ecc83e4eba16b80eb",
+    "sourceFiles": 36,
+    "adaptedFiles": 3,
+    "runtimeExtras": 3,
+    "patchDigest": "665aef8a2b9fc094d847dc261c690c8bf14d35f2bf46513ed560beb03cf491a0",
+    "verification": "all source files match RC2 runtime copies except registered adaptations; all extras are explicit"
   },
   "rollback": {
-    "historicalEvidence": "retained-in-source-repository",
     "independentCandidate": true,
-    "derivedFrom": "dsh-bay-main-f78908d"
+    "historicalRc1Evidence": "preserved; legacy index and source mirror mismatch is surfaced by check:rc1-history"
   }
 }

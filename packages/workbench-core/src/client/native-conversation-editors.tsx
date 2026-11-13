@@ -336,11 +336,8 @@ function conversationPresentationOf(
     ? 'blank'
     : dshConversationPhase(session, conversation)
   const openState = session?.openState
-  const parentAvailabilityPending = session?.subagent?.address.mode === 'continuable'
-    && session.subagent.parentAvailable === undefined
   const settling = sessionId !== undefined && (
     (shellPhase === 'blank' && openState === 'loading' && summaryBlank !== true)
-    || parentAvailabilityPending
   )
   const hero = sessionId === undefined
     || (shellPhase === 'blank' && (openState === 'open' || summaryBlank === true))

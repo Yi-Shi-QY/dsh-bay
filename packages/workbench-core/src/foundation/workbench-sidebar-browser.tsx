@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useSyncExternalStore, type ReactNode } from 'react'
-import type { ContextMenus } from '@deepseek-ai/dsh-client-ui-context-menu/client'
+import type { ContextMenuButtonProps, ContextMenus } from '@deepseek-ai/dsh-client-ui-context-menu/client'
 import type { HostObservable } from '@deepseek-ai/dsh-client-ui-slots'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+import { IconEllipsisOutlineRegular, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { SessionStatusSnapshot } from '@deepseek-ai/dsh-client-ui-session/client'
 import { type SessionListState as ProjectedSessionListState, projectWorkbenchSidebarSessions } from './workbench-sidebar-session-list.ts'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
@@ -9,6 +10,7 @@ import type { SessionListState, SessionSearchResultItem } from '@deepseek-ai/dsh
 import type { WorkspaceId, WorkspaceSnapshot as WorkspaceListState, WorkspaceView } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import type { ContextMenuTarget } from '@deepseek-ai/dsh-client-ui-context-menu/client'
 import type { WorkspaceShortcutState } from './workbench-sidebar/generated/upstream/ui-workspace/shortcuts.ts'
+import type { UseSectionScroller } from './workbench-sidebar/generated/upstream/ui-sidebar/contract/slots.ts'
 import { WorkspaceBrowser } from './workbench-sidebar/generated/upstream/ui-workspace/WorkspaceBrowser.tsx'
 import { createWorkspaceViewStore } from './workbench-sidebar/generated/upstream/ui-workspace/stores.ts'
 import { createWorkspaceShortcutControls } from './workbench-sidebar/generated/upstream/ui-workspace/shortcuts.ts'
@@ -56,6 +58,7 @@ export interface WorkbenchSidebarBrowserProps {
   useRemoteAccess: PropsRuntime<'shell.overlay'>['useRemoteAccess']
   useContextMenu: PropsRuntime<'shell.overlay'>['useContextMenu']
   useResource: PropsRuntime<'shell.overlay'>['useResource']
+  useSectionScroller: UseSectionScroller
 }
 
 const EMPTY_CONTEXT_MENU: HostObservable<ContextMenuTarget | null> = {
@@ -104,6 +107,46 @@ function DirectoryFlowDriver({ owner, pickDirectory }: {
   return null
 }
 
+function WorkbenchContextMenuButton({
+  contextMenus, target, label, className,
+}: {
+  contextMenus: ContextMenus
+  target: ContextMenuTarget
+  label: string
+  className?: string | undefined
+}): ReactNode {
+  const registeredKinds = useSyncExternalStore(
+    contextMenus.registeredKinds.subscribe,
+    contextMenus.registeredKinds.getSnapshot,
+    contextMenus.registeredKinds.getSnapshot,
+  )
+  const activeTarget = useSyncExternalStore(
+    contextMenus.active.subscribe,
+    contextMenus.active.getSnapshot,
+    contextMenus.active.getSnapshot,
+  )
+  if (!registeredKinds.includes(target.kind)) return null
+  const expanded = activeTarget !== null && activeTarget.kind === target.kind
+    && JSON.stringify(activeTarget.value) === JSON.stringify(target.value)
+  return <Tooltip label={label} side="bottom" align="end" portal>
+    <button
+      type="button"
+      className={className}
+      data-context-menu-trigger=""
+      aria-label={label}
+      aria-haspopup="menu"
+      aria-expanded={expanded}
+      onPointerDown={event => { event.stopPropagation() }}
+      onClick={event => {
+        event.stopPropagation()
+        event.currentTarget.focus({ preventScroll: true })
+        const rect = event.currentTarget.getBoundingClientRect()
+        contextMenus.open(target, { x: rect.left, y: rect.bottom })
+      }}
+    ><IconEllipsisOutlineRegular /></button>
+  </Tooltip>
+}
+
 /**
  * Exact upstream WorkspaceBrowser with only its navigation callbacks adapted
  * to explicit Workbench Area placement. Search, grouping, drag ordering,
@@ -112,6 +155,7 @@ function DirectoryFlowDriver({ owner, pickDirectory }: {
 export function WorkbenchSidebarBrowser({
   wide, expandSidebar, useSessions, useWorkspaces, routing, hostActions, contextMenus,
   useSessionStatus, useSessionRetainInfo, useSessionAccess, useWorkspaceAccess, usePanelInfo, useRemoteAccess, useContextMenu, useResource,
+  useSectionScroller,
 }: WorkbenchSidebarBrowserProps): ReactNode {
   const routeSnapshot = useSyncExternalStore(routing.subscribe, routing.getSnapshot, routing.getSnapshot)
   const storeRef = useRef<ReturnType<ReturnType<typeof createWorkspaceViewStore>['create']>>()
@@ -195,6 +239,16 @@ export function WorkbenchSidebarBrowser({
     }
     return options?.fallback ?? null
   }
+  const renderFactorySlot: WorkspaceBrowserProps['renderFactorySlot'] = (name, props) => {
+    if (name !== 'contextMenu.button' || contextMenus === undefined) return null
+    const button = props as ContextMenuButtonProps
+    return <WorkbenchContextMenuButton
+      contextMenus={contextMenus}
+      target={button.target}
+      label={button.label}
+      className={button.className}
+    />
+  }
   const browserProps = {
     wide,
     expandSidebar,
@@ -238,6 +292,8 @@ export function WorkbenchSidebarBrowser({
     useContextMenuTarget,
     useContextMenu,
     useResource,
+    useSectionScroller,
+    renderFactorySlot,
     renderSlot,
     t: workspaceTranslate as never,
   } as unknown as WorkspaceBrowserProps

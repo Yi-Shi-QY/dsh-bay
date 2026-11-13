@@ -154,6 +154,12 @@ describe('layout sharing manifest v3 / portable layout v2', () => {
     const preview = await inspectLayoutPackage(encodeDeterministicZip(files))
     expect(preview.layout.name).toBe(fixture().name)
   })
+  it('imports an RC1 layout archive when its portable schema and file digests are valid', async () => {
+    const bytes = await alter(await buildLayoutPackage(fixture()), manifest => {
+      manifest.compatibility.dsh = '0.2.2-rc.1'
+    })
+    expect((await inspectLayoutPackage(bytes)).layout.name).toBe(fixture().name)
+  })
   it('allocates fresh local identities and leaves session pages pending without fake sessions', () => {
     const a = restoreLayoutPackage(fixture(), [descriptor]); const b = restoreLayoutPackage(fixture(), [descriptor])
     expect(a.document.activeAreaId).not.toBe(b.document.activeAreaId)

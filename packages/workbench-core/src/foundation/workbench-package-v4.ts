@@ -1,7 +1,7 @@
 import { canonicalJson, decodeDeterministicZip, encodeDeterministicZip, sha256Hex as legacySha256, type WorkbenchPackageFileV1 } from './workbench-sharing.ts'
 import { validatePortableLayout, type PortableLayoutV2 } from './workbench-layout-package.ts'
 import { renderPortableAreaContextMarkdown, renderPortableWorkbenchContextMarkdown, validatePortableWorkbenchContext } from './workbench-context-portability.ts'
-import { WORKBENCH_CORE_VERSION, WORKBENCH_DSH_GENERATION, isWorkbenchCorePackageName } from '../release-compatibility.ts'
+import { WORKBENCH_CORE_VERSION, WORKBENCH_DSH_GENERATION, isWorkbenchCorePackageName, isWorkbenchPortablePackageDshGenerationCompatible } from '../release-compatibility.ts'
 import { CORE_PORTABLE_EDITORS } from '../distribution-contract.ts'
 import { workbenchCoreCompatibilitySatisfies } from '../module-source.ts'
 import { areasOf, type WorkbenchDocumentV3, type WorkbenchNodeV3 } from './document-v3.ts'
@@ -108,7 +108,7 @@ export async function inspectWorkbenchPackageV4(bytes: Uint8Array): Promise<Work
     || Object.keys(raw).some(k => !['schemaVersion','format','mode','packageId','version','name','createdAt','compatibility','dependencies','permissions','files','publisher','derivedFrom'].includes(k))
     || typeof raw.packageId !== 'string' || !hex.test(raw.packageId) || typeof raw.name !== 'string' || !raw.name || raw.name.length > 160
     || typeof raw.createdAt !== 'string' || !Number.isFinite(Date.parse(raw.createdAt)) || typeof raw.version !== 'string' || !workbenchCoreCompatibilitySatisfies(WORKBENCH_CORE_VERSION, raw.version)
-    || !obj(raw.compatibility) || !workbenchCoreCompatibilitySatisfies(WORKBENCH_CORE_VERSION, String(raw.compatibility.core ?? '')) || raw.compatibility.dsh !== WORKBENCH_DSH_GENERATION || ![2, 3].includes(raw.compatibility.portableLayout as number)
+    || !obj(raw.compatibility) || !workbenchCoreCompatibilitySatisfies(WORKBENCH_CORE_VERSION, String(raw.compatibility.core ?? '')) || !isWorkbenchPortablePackageDshGenerationCompatible(raw.compatibility.dsh) || ![2, 3].includes(raw.compatibility.portableLayout as number)
     || !Array.isArray(raw.dependencies) || raw.dependencies.length > 32 || !strings(raw.permissions) || !Array.isArray(raw.files) || raw.files.length > 64) throw new Error('工作台 V4 包格式或版本不兼容。')
   const manifest = raw as unknown as WorkbenchPackageManifestV4
   if (!only(manifest.compatibility, ['core','dsh','portableLayout'])

@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react'
 import type { ContextMenus } from '@deepseek-ai/dsh-client-ui-context-menu/client'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+import type { SidebarSectionHookContext, UseSectionScroller } from './workbench-sidebar/generated/upstream/ui-sidebar/contract/slots.ts'
 import { IconSettingsOutlineMedium } from '@deepseek-ai/dsh-client-ui-primitives'
 import css from './WorkbenchSidebarActions.module.css'
 import { WorkbenchBrandMark, WorkbenchBrandName } from './WorkbenchBrand.tsx'
@@ -20,6 +21,7 @@ const fallbackUseSessionAccess = (() => true) as PropsRuntime<'shell.overlay'>['
 const fallbackUseWorkspaceAccess = (() => true) as PropsRuntime<'shell.overlay'>['useWorkspaceAccess']
 const fallbackUseContextMenu = (() => ({ getTriggerProps: (_target: unknown, handlers?: Record<string, unknown>) => handlers ?? {} })) as PropsRuntime<'shell.overlay'>['useContextMenu']
 const fallbackUseResource = (() => ({ status: 'none', value: undefined, failure: undefined })) as PropsRuntime<'shell.overlay'>['useResource']
+const fallbackUseSectionScroller: UseSectionScroller = () => ({ bindScrollerRef: () => {} })
 
 export interface WorkbenchCoreSidebarProps {
   collapsed: boolean
@@ -58,8 +60,13 @@ export function WorkbenchCoreSidebar({
   exit, openSettings, settingsOpen, renderFooterActions,
 }: WorkbenchCoreSidebarProps): ReactNode {
   const [navigationError, setNavigationError] = useState<string>()
-  const renderSlot = (name: string, owner: { wide?: boolean; expandSidebar?: () => void; size?: number }): ReactNode => {
+  const renderSlot = (
+    name: string,
+    owner: { wide?: boolean; expandSidebar?: () => void; size?: number },
+    options?: { hookContext?: unknown },
+  ): ReactNode => {
     if (name === 'sidebar.workspaces') {
+      const hookContext = options?.hookContext as SidebarSectionHookContext | undefined
       return <WorkbenchSidebarBrowser
         wide={owner.wide ?? !collapsed}
         expandSidebar={owner.expandSidebar ?? toggleSidebar}
@@ -76,6 +83,7 @@ export function WorkbenchCoreSidebar({
         useRemoteAccess={useRemoteAccess}
         useContextMenu={useContextMenu}
         useResource={useResource}
+        useSectionScroller={hookContext?.useSectionScroller ?? fallbackUseSectionScroller}
       />
     }
     if (name === 'sidebar.settings') {
@@ -121,6 +129,7 @@ export function WorkbenchCoreSidebar({
     useSessionAccess,
     useSessionRetainInfo,
     usePanels: <T,>(selector: (state: readonly never[]) => T): T => selector([]),
+    renderFactorySlot: () => null,
     useEntryPins: <T,>(selector: (state: readonly string[]) => T): T => selector([]),
     useEntryActions: <T,>(selector: (state: boolean) => T): T => selector(false),
     useShortcuts: <T,>(selector: (state: readonly never[]) => T): T => selector([]),

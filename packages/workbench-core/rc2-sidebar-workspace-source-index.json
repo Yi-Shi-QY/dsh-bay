@@ -1,0 +1,192 @@
+{
+  "schemaVersion": 1,
+  "product": "DSH Bay 0.2.2-alpha.18.3",
+  "generation": "0.2.2-rc.2",
+  "upstreamCommit": "ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c",
+  "sourceRoot": "packages/client",
+  "sourceDigestFormat": "sha256 of codepoint-sorted package/path NUL raw-file-sha256 LF records",
+  "sourceDigest": "e9b1d5923b0a8d6541399db3421c85f72015e53eb117201ecc83e4eba16b80eb",
+  "fileCount": 36,
+  "packages": [
+    {
+      "package": "ui-sidebar",
+      "path": "HeaderLeadingControls.module.css",
+      "sha256": "054dbbcf4cc260903c82cd9158fdcb6427c8582b6cf9c25b2fd14d06a1453bf2"
+    },
+    {
+      "package": "ui-sidebar",
+      "path": "HeaderLeadingControls.tsx",
+      "sha256": "3a5d0a28b0b6a63874935a23834c5e779a735c48c06a6201877330a65cc0da95"
+    },
+    {
+      "package": "ui-sidebar",
+      "path": "PanelIcon.tsx",
+      "sha256": "3624d445da4652043f54c4973740ea638d9ccf310297fc3775e412dae1f5cfa1"
+    },
+    {
+      "package": "ui-sidebar",
+      "path": "SidebarRoot.module.css",
+      "sha256": "e7c0a9720e72b6a3c7e3202edadc6678245f10298b588ff8995f63797ad8c25d"
+    },
+    {
+      "package": "ui-sidebar",
+      "path": "SidebarRoot.tsx",
+      "sha256": "610796c346bfb721bf6430fd39af0c840cd6ecb43b7a612d720a540cdd8e24db"
+    },
+    {
+      "package": "ui-sidebar",
+      "path": "contract/slots.ts",
+      "sha256": "7583ce7a93eba5acea3a8cee26e75ff63e946ba88b0fafe01a0ed90cf04ac380"
+    },
+    {
+      "package": "ui-sidebar",
+      "path": "index.ts",
+      "sha256": "bfc3483f9843d3c7538f05270bed84fc09b54387309488e3bf21a9c3c83871b9"
+    },
+    {
+      "package": "ui-sidebar",
+      "path": "locales.ts",
+      "sha256": "e8c5d98bd691cf45882e78be4b30624731dac7abf9331bd3a99328103ec92ed3"
+    },
+    {
+      "package": "ui-sidebar",
+      "path": "panel-pins.ts",
+      "sha256": "aa50c9eeee25bf161ba1aa0c75fb46796cdb1258ecada82b56349bc7fe84dffc"
+    },
+    {
+      "package": "ui-sidebar",
+      "path": "scroll-handoff.ts",
+      "sha256": "f6ca8cc4ddba22a4f43ccc8152e7b99efe3871db998ad7119ee39573c1d1ec0d"
+    },
+    {
+      "package": "ui-workspace",
+      "path": "WorkspacePicker.module.css",
+      "sha256": "bd1fea15e55afbfacdae5f97c98bb831b080996bf4d920430f1fd31e304abd14"
+    },
+    {
+      "package": "ui-workspace",
+      "path": "WorkspacePicker.tsx",
+      "sha256": "6acb7a630b1fc6204b13b7d891ed543c62302e65e6edcb33303b339abda5d665"
+    },
+    {
+      "package": "ui-workspace",
+      "path": "contract/slots.ts",
+      "sha256": "65a12fed8943d0c00f0b930f19cc81d254b69e2963caf891849969579bcb6215"
+    },
+    {
+      "package": "ui-workspace",
+      "path": "contract/toast.ts",
+      "sha256": "bf60a6b55a3302672d06823e8bc9ff9242f537ca8493587851ffad7e63c50616"
+    },
+    {
+      "package": "ui-workspace",
+      "path": "index.ts",
+      "sha256": "177105bb5970c27db085581067f9cd6e43ae46775988db58e723531744ba3a9b"
+    },
+    {
+      "package": "ui-workspace",
+      "path": "locales.ts",
+      "sha256": "9485a1f9ca84c59a25021212fe2df59110d5dcb8cf9c209e63b74ba750bda6f6"
+    },
+    {
+      "package": "ui-workspace",
+      "path": "navigation.ts",
+      "sha256": "f9a65b9e80b892219faf1be20631199f9be4f2348a31251167f309e3abcb7018"
+    },
+    {
+      "package": "ui-workspace",
+      "path": "path-suffix.ts",
+      "sha256": "31b29940b1ef5a2a223d83d5b354d63cc7dbfd54853315cc3535d689a7ac6a21"
+    },
+    {
+      "package": "ui-workspace",
+      "path": "pin-order.ts",
+      "sha256": "2138241b54aa77924dc1b7ed2b7fdcc32ed6229251473a3aa27e6847309c72f0"
+    },
+    {
+      "package": "ui-workspace",
+      "path": "rows/Rows.module.css",
+      "sha256": "3bdee563fa922f382b39b16bf727d3a1df845f22a7be232a3e6c02cb63b12adb"
+    },
+    {
+      "package": "ui-workspace",
+      "path": "rows/Rows.tsx",
+      "sha256": "49da9e1ac08f2ffe9b99db60af14d0ad49b0566ed9f4e7d7933f7e9234dc03b3"
+    },
+    {
+      "package": "ui-workspace",
+      "path": "rows/WorkspaceBrowser.module.css",
+      "sha256": "ad5b00559833a1521f75f6c8fa00ce8a70ef8c3ebca310874cdbc4593c4cb992"
+    },
+    {
+      "package": "ui-workspace",
+      "path": "rows/WorkspaceBrowser.tsx",
+      "sha256": "f619ef0684f57551e8b31c19c7b32a3ec239adcde19105f2103ff8d6dd12d003"
+    },
+    {
+      "package": "ui-workspace",
+      "path": "rows/WorkspaceDialogs.tsx",
+      "sha256": "12cdb74ccf545e0b38593f912cd81d8b7ef36b75b6e742403848042043fb3445"
+    },
+    {
+      "package": "ui-workspace",
+      "path": "session-actions/ArchiveSession.tsx",
+      "sha256": "25060f622ca339c2ef84e6ac29c05d57de18442ecab2f97984806078d3c5ddb7"
+    },
+    {
+      "package": "ui-workspace",
+      "path": "session-actions/PinSession.tsx",
+      "sha256": "11e1bc392292921679a667c933a24b982a7c66dea6d7821a16133a9cb36226cb"
+    },
+    {
+      "package": "ui-workspace",
+      "path": "session-actions/RenameSession.tsx",
+      "sha256": "889975808b39963df4d67b6b3e630072b3dc502545a25d1d7509bdf8b977c5c5"
+    },
+    {
+      "package": "ui-workspace",
+      "path": "session-actions/RowActionToast.tsx",
+      "sha256": "e844aef3af1e00389e663efe2b18336900e862ecbbb814cb5d445e59e025f6a3"
+    },
+    {
+      "package": "ui-workspace",
+      "path": "session-actions/SessionMenu.tsx",
+      "sha256": "7ffc2b7e199566a6578a033fab85fc17f8c4c38b37603edeedf890b389cfa847"
+    },
+    {
+      "package": "ui-workspace",
+      "path": "session-actions/context-menus.tsx",
+      "sha256": "89aa141e86321098f5b63c39a0c9fa5fc06058e0489a0334b5b06be6125884df"
+    },
+    {
+      "package": "ui-workspace",
+      "path": "session-actions/derived.ts",
+      "sha256": "8ec437e979e144e7eb44bffa629445ebcd1ee10371843d05dd436fcc13a266d4"
+    },
+    {
+      "package": "ui-workspace",
+      "path": "shortcuts.ts",
+      "sha256": "da073448ecedc3f08dd532bad25b4c5a4fa5499c5bc012707bb83a6b95e5dce0"
+    },
+    {
+      "package": "ui-workspace",
+      "path": "stores.ts",
+      "sha256": "b94d8e12a14a6377fb8c56067dcee07ac8d0365008c5a691694ce21b2968b007"
+    },
+    {
+      "package": "ui-workspace",
+      "path": "toast/Toast.tsx",
+      "sha256": "a618182f76a94c506b26bbb29d6830d039c38e2c22396e1a97e472378e46c1ad"
+    },
+    {
+      "package": "ui-workspace",
+      "path": "toast/register.ts",
+      "sha256": "790bc202705d485c0f6eeb65ad00706b5943db6306f27defda727f4180e05d2a"
+    },
+    {
+      "package": "ui-workspace",
+      "path": "tree.ts",
+      "sha256": "9213064fdc642ebebe9fc35cd1562b0d23bd1338bac3abf04e6498e54a4861ed"
+    }
+  ]
+}

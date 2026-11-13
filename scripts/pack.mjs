@@ -8,7 +8,7 @@ const project = fileURLToPath(new URL('../', import.meta.url))
 const core = path.join(project, 'packages', 'workbench-core')
 const manifest = JSON.parse(readFileSync(path.join(core, 'package.json'), 'utf8'))
 const prerelease = manifest.version.split('-')[1]?.replace(/^alpha\./u, 'alpha') ?? manifest.version
-const trialSuffix = manifest.dsh?.workbench?.dshGeneration === '0.2.2-rc.1' ? '-rc1' : ''
+const trialSuffix = manifest.dsh?.workbench?.dshGeneration === '0.2.2-rc.2' ? '-rc2' : ''
 const outputArgument = process.argv.find(arg => arg.startsWith('--output='))?.slice('--output='.length)
 const output = outputArgument ? path.resolve(project, outputArgument) : path.join(project, 'releases', `${prerelease}${trialSuffix}-private`)
 if (!output.startsWith(path.join(project, 'releases') + path.sep)) throw new Error('Package output must be a directory inside releases/')
@@ -16,7 +16,7 @@ const tarball = `${manifest.name.replace(/^@/u, '').replaceAll('/', '-')}-${mani
 mkdirSync(output, { recursive: true })
 // TypeScript's incremental build does not remove declarations emitted by a
 // previous DSH generation. Start from a clean generated directory so the
-// archive cannot carry historical RC5 types into the RC1 trial package.
+// archive cannot carry declarations from a different upstream generation.
 rmSync(path.join(core, 'lib'), { recursive: true, force: true })
 const node = process.execPath
 execFileSync(node, [path.join(project, 'scripts/build.mjs')], { cwd: project, stdio: 'inherit', windowsHide: true })

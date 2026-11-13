@@ -14,7 +14,7 @@ Core 兼容范围为 `>=0.2.2-alpha.18.0 <0.2.2-alpha.19.0`。模板扩展自身
 - 临时标签只在本客户端本次运行中保留；几何存于独立 Profile UI namespace，均不写入 PortableLayout 或分享包。正式固定后才参与布局保存和现有分发。
 - 必测：两个工作台相同标签 ID、最小化和总览往返、退出再进入、固定前后 DOM/控制器一致、关闭取消、固定冲突、权限撤回和旧绑定回调。
 
-模板兼容 DSH `0.2.2-rc.1`，锁定上游提交 `66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db`。
+模板兼容 DSH `0.2.2-rc.2`，锁定上游提交 `ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c`。
 
 完整字段、生命周期、身份校验、权限和验收要求见[Workbench 容器内页扩展插件开发规范](../../WORKBENCH-CONTAINER-INNER-PAGE-EXTENSION-SPEC.zh.md)。
 
@@ -57,7 +57,7 @@ ctx.slots.inject('workbench.editor.session', () => ctx.slots.register({
     apiVersion: 1,
     editorIds: ['workbench.example'],
     coreCompatibility: '>=0.2.2-alpha.18.0 <0.2.2-alpha.19.0',
-    dshGeneration: '0.2.2-rc.1',
+    dshGeneration: '0.2.2-rc.2',
   } } }),
 }, Editor))
 ```

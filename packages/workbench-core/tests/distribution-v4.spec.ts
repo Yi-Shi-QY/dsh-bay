@@ -58,6 +58,16 @@ describe('17.2 signed package contract',()=>{
     expect(preview.manifest.compatibility.core).toBe('0.2.2-alpha.18.0')
     expect(preview.layout.modules[0]?.version).toBe('0.2.2-alpha.18.0')
   })
+  it('imports RC1 V4 data packages without relaxing embedded extension generation checks',async()=>{
+    const current=await buildWorkbenchPackageV4({layout:layout(),mode:'layout-only'})
+    const files=decodeDeterministicZip(current).map(file=>{
+      if(file.path!=='manifest.json')return file
+      const manifest=JSON.parse(new TextDecoder().decode(file.content))
+      manifest.compatibility.dsh='0.2.2-rc.1'
+      return{...file,content:new TextEncoder().encode(JSON.stringify(manifest))}
+    })
+    expect((await inspectWorkbenchPackageV4(encodeDeterministicZip(files))).manifest.compatibility.dsh).toBe('0.2.2-rc.1')
+  })
   it('rejects payload tampering, key substitution and undeclared files',async()=>{
     const original=await buildWorkbenchPackageV4({layout:layout(),mode:'offline-embedded',...await signer()})
     const files=decodeDeterministicZip(original)
@@ -104,14 +114,14 @@ describe('explicit runtime artifact preparation',()=>{
       manifest.dsh.workbench.scope='session'
       manifest.dsh.workbench.editors[0].scope='session'
       await writeFile(join(dir,'package.json'),JSON.stringify(manifest))
-      const prepared=await prepareDistributionArtifact(dir,(name,version)=>(name==='react'&&version==='18.3.1')||(name==='@deepseek-ai/dsh-client-ui-slots'&&version==='0.2.2-rc.1'))
+      const prepared=await prepareDistributionArtifact(dir,(name,version)=>(name==='react'&&version==='18.3.1')||(name==='@deepseek-ai/dsh-client-ui-slots'&&version==='0.2.2-rc.2'))
       expect(prepared.dependency.editorScopes).toEqual([{editorId:'workbench.example',scope:'session'}])
       expect(prepared.dependency.exportPolicy).toBe('embed')
       expect(prepared.dependency.runtimeFiles).toEqual(expect.arrayContaining(['package.json','client.js','cordis.patch.yml','LICENSE']))
     }finally{await rm(dir,{recursive:true,force:true})}
   })
   it('supports the real Creator root-entry template and exact runtime file set',async()=>{
-    const p=await prepareDistributionArtifact(template,(name,version)=>(name==='react'&&version==='18.3.1')||(name==='@deepseek-ai/dsh-client-ui-slots'&&version==='0.2.2-rc.1'))
+    const p=await prepareDistributionArtifact(template,(name,version)=>(name==='react'&&version==='18.3.1')||(name==='@deepseek-ai/dsh-client-ui-slots'&&version==='0.2.2-rc.2'))
     expect(p.dependency.packageName).toBe('@local/workbench-editor-example')
     expect(p.dependency.archiveSha256).toBe(artifactHash(p.bytes))
     expect(p.dependency.runtimeFiles).toContain('client.js')
@@ -192,12 +202,17 @@ describe('explicit runtime artifact preparation',()=>{
       const p=structuredClone(original);alter(p);expect(()=>inspectDistributionManifest(p)).toThrow()
     }
   })
+  it('requires RC2-built executable extension artifacts even when RC1 data archives remain importable',async()=>{
+    const manifest=JSON.parse(await readFile(join(template,'package.json'),'utf8'))
+    manifest.dsh.workbench.dshGeneration='0.2.2-rc.1'
+    expect(()=>inspectDistributionManifest(manifest)).toThrow()
+  })
   it('checks parsed module loads, host peers and client-only Host shims',async()=>{
     const dir=await mkdtemp(join(tmpdir(),'wb172-closure-'))
     try{
       await cp(template,dir,{recursive:true})
       const client=await readFile(join(dir,'client.js'),'utf8'),manifest=JSON.parse(await readFile(join(dir,'package.json'),'utf8'))
-      const peer=(n:string,v:string)=>(n==='react'&&v==='18.3.1')||(n==='@deepseek-ai/dsh-client-ui-slots'&&v==='0.2.2-rc.1')
+      const peer=(n:string,v:string)=>(n==='react'&&v==='18.3.1')||(n==='@deepseek-ai/dsh-client-ui-slots'&&v==='0.2.2-rc.2')
       for(const extra of ['require/* bypass */(variable)','import(/* bypass */"not-collected")']){
         await writeFile(join(dir,'client.js'),client+';'+extra)
         await expect(prepareDistributionArtifact(dir,peer)).rejects.toThrow()
@@ -236,7 +251,7 @@ describe('Host distribution transaction boundaries',()=>{
     try{
       await cp(template,pkg,{recursive:true})
       await rm(join(pkg,'README.md'))
-      const peer=(n:string,v:string)=>(n==='react'&&v==='18.3.1')||(n==='@deepseek-ai/dsh-client-ui-slots'&&v==='0.2.2-rc.1')
+      const peer=(n:string,v:string)=>(n==='react'&&v==='18.3.1')||(n==='@deepseek-ai/dsh-client-ui-slots'&&v==='0.2.2-rc.2')
       const prepared=await prepareDistributionArtifact(pkg,peer),d=prepared.dependency
       const w=JSON.parse(await readFile(join(pkg,'package.json'),'utf8')).dsh.workbench
       const {workbenchExtensionContractFingerprint}=await import('../src/workbench-extension-access.ts')

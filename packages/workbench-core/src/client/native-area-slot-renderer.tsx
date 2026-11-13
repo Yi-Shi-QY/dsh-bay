@@ -291,7 +291,7 @@ export function createWorkbenchNativeAreaSlotRenderer(
   const forbidden = new Set(['root', 'main', 'main.conversation', 'layout.frame', 'sidebar', 'rightbar.session', 'conversation', 'details', 'shell.overlay'])
 
   /**
-   * DSH rc1's official entry-customization plugin registers its More menu
+   * DSH's official entry-customization plugin registers its More menu
    * under three ordinary action Slots.  Workbench intentionally projects
    * only Area-local native content, so that one registration must be hidden
    * at this boundary while every other action remains available.  Match both

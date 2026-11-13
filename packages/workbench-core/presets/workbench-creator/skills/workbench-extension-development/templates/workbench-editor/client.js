@@ -1,4 +1,4 @@
-// DSH 0.2.2-rc.1 upstream commit: 66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db
+// DSH 0.2.2-rc.2 upstream commit: ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c
 window.__ModuleLoader__.load({
   id: '@local/workbench-editor-example',
   factory(require) {
@@ -49,7 +49,7 @@ window.__ModuleLoader__.load({
       apiVersion: 1,
       editorIds: ['workbench.example'],
       coreCompatibility: '>=0.2.2-alpha.18.0 <0.2.2-alpha.19.0',
-      dshGeneration: '0.2.2-rc.1',
+      dshGeneration: '0.2.2-rc.2',
     }
 
     return {

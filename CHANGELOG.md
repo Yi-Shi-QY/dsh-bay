@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+## 0.2.2-alpha.18.3 — private RC2 candidate
+
+- Rebased the private Core candidate to DSH `0.2.2-rc.2`; kept the root build
+  dependency and lockfile resolution pinned to RC2 while declaring the same
+  `>=0.2.2-rc.2 <0.2.3` range for DSH peers and `engines.dsh`. Recorded the
+  upstream tag, npm artifact integrity values, source index and candidate identity.
+- Rebased the copied Sidebar and Workspace UI to RC2, including the new menu
+  `anchorRef` contract, PanelIcon slot and long-list scroll handoff. Preserved
+  Area-local Session routing and removed unused RC1 runtime files.
+- Kept RC1 V3 layout and V4 Workbench data archives importable after their
+  schema, digest, signature and Core compatibility checks. Executable RC1
+  extension artifacts remain incompatible and must be rebuilt for RC2.
+- Declared `engines.dsh` as `>=0.2.2-rc.2 <0.2.3`, accepting RC2 and later
+  `0.2.2` prereleases and release while keeping build dependencies pinned.
+- Normalized line endings in the RC1 historical source audit; all 34 indexed
+  files match their LF hashes, and the aggregate historical digest also matches.
+- Updated the bundled Creator guide for RC2 named and nested SubAgents and
+  native per-Session AgentTeam opt-in. Bay Agent Assignments remain independent.
+- Added current compatibility and source-integrity checks; separated RC1
+  historical metadata checks and corrected the CRLF-only false mismatch report.
+- This candidate is private. npm publication, Git tag and GitHub Release were
+  not created. Desktop and second-device acceptance remain pending.
+
 - Consolidated offline sharing into Complete Workbench and Workbench Template
   exports, with one import picker that detects V5/V6 complete archives and V4
   template archives. Both import histories now return to the correct workflow.
