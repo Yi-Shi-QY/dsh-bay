@@ -1,6 +1,6 @@
 # DSH Bay 文档导航
 
-整理日期：2026-11-13（Asia/Shanghai）。当前私有候选 `0.2.2-alpha.18.3`，目标 DSH `0.2.2-rc.2`；自动化验证和人工验收状态见[验证记录](VALIDATION.md)。本文是项目文档的统一入口。
+整理日期：2026-11-13（Asia/Shanghai）。当前私有候选 `0.2.2-alpha.18.6`，目标 DSH `0.2.2-rc.2`；自动化验证和人工验收状态见[验证记录](VALIDATION.md)。本文是项目文档的统一入口。
 
 ## 先了解，再上手
 
@@ -34,6 +34,8 @@
 | [扩展技术规范](../packages/workbench-core/presets/workbench-creator/skills/workbench-extension-development/WORKBENCH-CONTAINER-INNER-PAGE-EXTENSION-SPEC.zh.md) | Slot、绑定、状态、生命周期、离线制品契约 |
 | [验证记录](VALIDATION.md) | 最新已验证提交、制品摘要、通过项和未验证项 |
 | [DSH RC2 适配方案与实施记录](DSH-RC2-ADAPTATION-PLAN.zh-CN.md) | 适配决策、上游差异、实施边界和人工验收状态 |
+| [DSH RC2 官方内页修复审计](DSH-RC2-NATIVE-PAGES-AUDIT.zh-CN.md) | 空白根因、12 类内页逐项核对、官方新增页面检查和实机验收清单 |
+| [DSH 依赖与漂移扫描工具包](../tools/dsh-adaptation/README.zh-CN.md) | 依赖地图、离线完整性检查、DSH Git/npm 漂移扫描和影响验证入口 |
 | [封包与发布](PUBLISHING.zh-CN.md) | 私有封包、检查命令与公开发布门槛 |
 | [变更记录](../CHANGELOG.md) | 版本级功能变化 |
 | [历史归档](archive/README.md) | 被替代的计划、旧审计和阶段验收原文 |

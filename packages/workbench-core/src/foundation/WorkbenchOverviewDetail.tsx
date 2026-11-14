@@ -11,8 +11,8 @@ import { renderAreaContextMarkdown } from './workbench-context.ts'
 import css from './WorkbenchHome.module.css'
 
 const tabs = { overview: '概览', areas: '项目与区域', context: '背景与记忆', sharing: '分享与迁移' } as const
-export function WorkbenchOverviewDetail({ record, directory, editors = [], navigate, onOpen, writable, busy, generateContextDraft }: WorkbenchHomeProps & {
-  record: WorkbenchRecordV2; onOpen(): void; writable: boolean; busy: boolean
+export function WorkbenchOverviewDetail({ record, directory, editors = [], navigate, onOpen, onReclaim, writable, busy, generateContextDraft }: WorkbenchHomeProps & {
+  record: WorkbenchRecordV2; onOpen(): void; onReclaim?(): void; writable: boolean; busy: boolean
 }) {
   const [tab, setTab] = useState<keyof typeof tabs>('overview')
   const [areaId, setAreaId] = useState<string>()
@@ -29,8 +29,8 @@ export function WorkbenchOverviewDetail({ record, directory, editors = [], navig
   const areaLabel = (id: string) => record.areaMetadata?.[id]?.label || `区域 ${all.findIndex(area => area.areaId === id) + 1}`
   return <section className={css.selectedDetail} aria-label={`${record.name}详情`}>
     <header className={css.selectedHeader}>
-      <span className={css.detailEyebrow}>{record.archivedAt ? '已归档' : !writable ? '正在浏览器中使用' : '工作空间'}</span>
-      <div className={css.selectedTitle}><h2>{record.name}</h2><Button variant="primary" disabled={busy || !!record.archivedAt} onClick={onOpen}>{!writable ? '管理浏览器工作台' : '打开工作台'}</Button></div>
+      <span className={css.detailEyebrow}>{!writable ? `正在浏览器中使用${record.archivedAt ? ' · 已归档' : ''}` : record.archivedAt ? '已归档' : '工作空间'}</span>
+      <div className={css.selectedTitle}><h2>{record.name}</h2>{!writable ? <Button variant="outline" aria-label={`收回“${record.name}”的浏览器控制权`} disabled={busy || !onReclaim} onClick={onReclaim}>收回控制权</Button> : null}<Button variant="primary" disabled={busy || !!record.archivedAt} onClick={onOpen}>{!writable ? '管理浏览器工作台' : '打开工作台'}</Button></div>
       <p>{record.description || '还没有填写工作台简介。'}</p>
       <div className={css.rootPath}><IconFolderOpenOutlineMedium size={15} /><span>{directory.getRootPath?.(record.workbenchId) ?? '目录尚不可用'}</span></div>
       <div className={css.detailCounters}><span>{projects.length} 个项目</span><span>{all.length} 个区域</span><span>{pages.length} 个内页</span><span>{sessions.size} 个独立会话</span><Button size="sm" icon={<IconSettingsOutlineMedium size={14} />} onClick={manage}>工作台资料</Button></div>

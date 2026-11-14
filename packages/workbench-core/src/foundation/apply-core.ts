@@ -167,9 +167,11 @@ export function applyWorkbenchCoreFoundation(
   const suppliedToolUsageService = (ctx as unknown as { get?: (name: string, strict?: boolean) => unknown }).get?.('workbenchToolUsageService') as WorkbenchToolUsageServiceV1 | undefined
   ctx.effect(() => installNativeAutomaticIsolation(ctx, modeController), 'workbench: automatic review isolation')
   floatingRuntime.setCleanup(id => {
-    closeWorkbenchNative(id)
-    floatingSessionReferences.get(id)?.release()
-    floatingSessionReferences.delete(id)
+    try { closeWorkbenchNative(id) }
+    finally {
+      try { floatingSessionReferences.get(id)?.release() }
+      finally { floatingSessionReferences.delete(id) }
+    }
   })
   const fileSettings = createFileWorkbenchSettings()
   ctx.effect(() => () => fileSettings.dispose(), 'workbench: file authority')
@@ -479,8 +481,13 @@ export function applyWorkbenchCoreFoundation(
   ;(ctx as unknown as { provide?: (name: string, value: unknown) => unknown }).provide?.('bayAgentController', bayAgent)
   ctx.effect(() => {
     const sync = () => {
-      const workbenchId = windowView?.workbenchId ?? settings.getSnapshot().value?.activeWorkbenchId
-      if (workbenchId === undefined || !settings.getSnapshot().value?.workbenches[workbenchId]) return
+      const value = settings.getSnapshot().value
+      const workbenchId = windowView?.workbenchId ?? value?.activeWorkbenchId
+      const record = workbenchId ? value?.workbenches[workbenchId] : undefined
+      if (!workbenchId || !record || record.archivedAt !== undefined) {
+        bayAgent.setWorkbenchId('')
+        return
+      }
       bayAgent.setWorkbenchId(workbenchId)
     }
     const off = settings.subscribe(sync)

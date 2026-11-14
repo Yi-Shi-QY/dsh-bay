@@ -126,6 +126,21 @@ it('isolates identical layout tab IDs by workbench, including guards and cleanup
   expect(runtime.find('temporary', 'one')).toBeDefined()
 })
 
+it('completes Workbench disposal when one native cleanup handler throws', async () => {
+  const runtime = createFloatingWorkspaceRuntime()
+  const cleanup = vi.fn((key: string) => {
+    if (key === JSON.stringify(['one', 'first'])) throw new Error('native tab already closed')
+  })
+  runtime.setCleanup(cleanup)
+  runtime.open('one', tab('first'))
+  runtime.open('one', tab('second'))
+
+  expect(() => runtime.disposeWorkbench('one')).not.toThrow()
+  expect(cleanup).toHaveBeenCalledTimes(2)
+  expect(runtime.instances.size).toBe(0)
+  expect(await runtime.guardWorkbench('one')).toBe(true)
+})
+
 it('retains late controller state while pinning and on a failed commit', async () => {
   const runtime = createFloatingWorkspaceRuntime(); runtime.open('one', tab())
   let finish!: (ok: boolean) => void

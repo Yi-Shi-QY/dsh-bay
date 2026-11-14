@@ -2,7 +2,7 @@
 
 更新日期：2026-11-13（Asia/Shanghai）。状态：按方案完成实现；来源检查、全量测试、类型检查、构建和私有封包均通过；桌面实机和第二设备仍待人工验收。
 
-目标上游为 [DSH `dsh-v0.2.2-rc.2`](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.2-rc.2)，上游提交 `ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c` 已由 Git tag 与 npm `gitHead` 相互核对。当前候选为 `dsh-bay@0.2.2-alpha.18.3`，目标 DSH `0.2.2-rc.2`；仅产出私有候选，不发布 npm、tag 或 GitHub Release。
+目标上游为 [DSH `dsh-v0.2.2-rc.2`](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.2-rc.2)，上游提交 `ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c` 已由 Git tag 与 npm `gitHead` 相互核对。首次候选为 `dsh-bay@0.2.2-alpha.18.3`，官方内页修复候选为 `0.2.2-alpha.18.4`，归档控制与路由修复候选为 `0.2.2-alpha.18.5` 和 `0.2.2-alpha.18.6`。目标 DSH `0.2.2-rc.2`；仅产出私有候选，不发布 npm、tag 或 GitHub Release。
 
 ## 目标与边界
 
@@ -95,8 +95,8 @@
 
 ## 本轮已确定的决策
 
-- 候选版本为 `0.2.2-alpha.18.3`，RC2 源码已作为 Sidebar / Workspace 基线，继续保留 Workbench Area 与 Session 组织方式。
+- 初始适配候选为 `0.2.2-alpha.18.3`，修复候选升为 `0.2.2-alpha.18.4`；RC2 Sidebar、Workspace 与私有 Area renderer 都有来源核验，继续保留 Workbench Area 与 Session 组织方式。
 - AgentTeam 保持 DSH 原生的按 Session opt-in；不新增 Workbench 控制面，也不替代 Bay Agent 的 Work Item / Assignment。
 - RC1 V3/V4 数据包可按独立 schema、签名、摘要和 Core 兼容性验证后导入；V6 完整包保留已有 Core 范围兼容检查；内嵌 RC1 扩展可执行制品仍不能安装或运行，必须按 RC2 重建。Core 插件 `engines.dsh` 与所有 DSH peer 使用 `>=0.2.2-rc.2 <0.2.3`；构建依赖精确固定 RC2。
-- `pnpm check:compat`、174 个测试文件/1177 项测试、`pnpm typecheck`、`pnpm build` 与 `pnpm pack:core` 均已通过。候选制品位于 `releases/alpha18.3-rc2-private/`，SHA-256 为 `9a539e6273d65e5c636f136eee470aa67e4aa71a7cc17386b607b19a0efeffaa`。
+- 18.3 的原始验证已由 [18.4 内页修复记录](DSH-RC2-NATIVE-PAGES-AUDIT.zh-CN.md)及[制品验证记录](VALIDATION.md)补充；本轮重新生成的 18.4 候选是当前供复测的包。
 - 当前候选仅完成源码、自动化与私有封包验证。桌面安装版仍是 RC1，RC2 GitHub Release 没有桌面制品，所以 DSH 桌面 Profile 安装和第二设备协作仍未验收，不由自动化结果推断通过；本轮没有发布 npm、Git tag 或 GitHub Release。

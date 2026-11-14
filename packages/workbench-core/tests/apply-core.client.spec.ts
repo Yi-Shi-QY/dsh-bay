@@ -18,6 +18,7 @@ import { installWorkbenchDirectoryRoute } from '../src/host-workbench-directory-
 import { createFileWorkbenchSettings } from '../src/client/file-workbench-settings.ts'
 import { WORKBENCH_DIRECTORY_ROUTE } from '../src/workbench-directory-contract.ts'
 import { WORKBENCH_ACCESS_HEADER } from '../src/workbench-access-contract.ts'
+import { createProjectNeutralFrameSettings } from '../src/foundation/frame-settings-adapter.ts'
 
 const cleanup: Array<() => Promise<void> | void> = []
 afterEach(async () => { for (const dispose of cleanup.splice(0).reverse()) await dispose(); vi.unstubAllGlobals() })
@@ -33,12 +34,49 @@ async function fileAuthority() {
   const access = new HostWorkbenchAccess(directory)
   let route!: (request: Request) => Promise<Response>
   installWorkbenchDirectoryRoute({ fetch: { register: (config: { fetch: typeof route }) => { route = config.fetch; return () => {} } } } as never, directory, async () => {}, undefined, undefined, access)
-  const fetcher = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => String(url) === WORKBENCH_DIRECTORY_ROUTE
-    ? route(new Request('http://localhost' + WORKBENCH_DIRECTORY_ROUTE, init))
-    : Response.json({ draft: 'Draft' }))
+  const responses: Response[] = []
+  const fetcher = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+    const response = String(url) === WORKBENCH_DIRECTORY_ROUTE
+      ? await route(new Request('http://localhost' + WORKBENCH_DIRECTORY_ROUTE, init))
+      : Response.json({ draft: 'Draft' })
+    responses.push(response.clone())
+    return response
+  })
   vi.stubGlobal('fetch', fetcher)
-  return { directory, access, fetcher }
+  return { directory, access, fetcher, responses }
 }
+
+it('archives, restores, and removes a workbench through the file-authoritative directory route', async () => {
+  const authority = await fileAuthority()
+  const fileSettings = createFileWorkbenchSettings()
+  cleanup.push(() => fileSettings.dispose())
+  await fileSettings.refresh()
+  const directory = createProjectNeutralFrameSettings(fileSettings.scope).directory
+
+  expect(await directory.archive('a')).toMatchObject({ status: 'committed' })
+  expect(fileSettings.scope.getSnapshot().value?.workbenches.a?.archivedAt).toBeDefined()
+
+  const archivedSnapshot = authority.directory.getSnapshot()
+  const tampered = structuredClone(archivedSnapshot.value)
+  tampered.workbenches.a!.name = 'Tampered archived workbench'
+  const unauthorized = await authority.fetcher(WORKBENCH_DIRECTORY_ROUTE, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ action: 'patch', operation: { operation: 'set', path: [], expectedRevision: archivedSnapshot.revision, value: tampered } }),
+  })
+  expect(unauthorized.status).toBe(404)
+
+  const restoreResult = await directory.restore('a')
+  if (restoreResult.status !== 'committed') {
+    const response = authority.responses.at(-1)
+    throw new Error(`restore returned ${restoreResult.status}: ${JSON.stringify(await response?.json())}`)
+  }
+  expect(fileSettings.scope.getSnapshot().value?.workbenches.a?.archivedAt).toBeUndefined()
+
+  expect(await directory.archive('a')).toMatchObject({ status: 'committed' })
+  expect(await directory.remove('a')).toMatchObject({ status: 'committed' })
+  await fileSettings.refresh()
+  expect(fileSettings.scope.getSnapshot().value?.workbenches).toEqual({})
+})
 
 function settingsScope() {
   const snapshot = {

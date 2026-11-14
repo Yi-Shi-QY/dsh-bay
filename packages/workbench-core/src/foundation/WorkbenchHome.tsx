@@ -64,6 +64,25 @@ export function WorkbenchHome({ value, initialSelectedId, directory, editors = [
     try { await action.run(workbenchId, () => directory.restore(workbenchId)) } finally { setBusyId(undefined) }
   }
 
+  const reclaimBrowser = (workbenchId: string) => {
+    if (busyId !== undefined || !windowController?.reclaim) return
+    return action.run('reclaim-' + workbenchId, async () => {
+      setBusyId(workbenchId)
+      try {
+        const result = await windowController.reclaim!(workbenchId)
+        if (result.status !== 'reclaimed') {
+          const message = result.code === 'browser-view-reclaim-timeout'
+            ? '浏览器没有及时确认收回。请检查浏览器页面连接后重试。'
+            : result.code === 'browser-view-not-ready'
+              ? '浏览器工作台状态尚未就绪，请刷新状态后重试。'
+              : `收回控制权失败${result.code ? `（${result.code}）` : ''}，请重试。`
+          throw new Error(message)
+        }
+        return true
+      } finally { setBusyId(undefined) }
+    })
+  }
+
   const archive = async (workbenchId: string) => {
     if (busyId !== undefined) return
     setBusyId(workbenchId)
@@ -108,13 +127,17 @@ export function WorkbenchHome({ value, initialSelectedId, directory, editors = [
             const selected = (filtered.some(item => item.workbenchId === selectedId) ? selectedId : filtered[0]?.workbenchId) === row.workbenchId
             const pinned = snapshot.sidebarShortcuts?.includes(row.workbenchId) === true
             const browser = !settingsTargetWritable(DESKTOP_SETTINGS_CONTEXT, row.workbenchId, windowController)
-            const status = row.archivedAt !== undefined ? 'archived' : browser ? 'browser' : activeIds.has(row.workbenchId) ? 'open' : 'inactive'
+            const windowsSnapshot = windowController?.getSnapshot()
+            const windowRequests = windowsSnapshot?.requests ?? (windowsSnapshot?.request ? [windowsSnapshot.request] : [])
+            const browserRequest = windowRequests.find(request => request.workbenchId === row.workbenchId)
+            const reclaiming = browserRequest?.status === 'reclaiming'
+            const status = browser ? 'browser' : row.archivedAt !== undefined ? 'archived' : activeIds.has(row.workbenchId) ? 'open' : 'inactive'
             const record = value?.workbenches[row.workbenchId]
             const pages = record ? areasOf(record.document.root).flatMap(area => area.moduleHistory) : []
             const sessions = record ? new Set([...Object.values(record.sessionCatalog ?? {}).map(entry => entry.sessionId ?? entry.sessionKey), ...pages.flatMap(page => page.binding ? [page.binding.sessionId] : [])]) : undefined
             return <article key={row.workbenchId} className={css.workbenchRow} aria-label={row.name} data-selected={selected || undefined}>
               <button type="button" className={css.workbenchSelect} aria-label={row.name} aria-pressed={selected} onClick={() => setSelectedId(row.workbenchId)}>
-                <span className={css.rowHeading}><span className={css.rowMark} aria-hidden="true"><IconPanelLeftOutlineMedium size={21} /></span><strong title={row.name}>{row.name}</strong><span className={css.rowStatus} data-status={status}>{status === 'archived' ? <IconArchiveOutlineMedium size={12} /> : status === 'browser' ? <IconGlobeOutlineMedium size={12} /> : <i aria-hidden="true" />}{status === 'archived' ? '已归档' : status === 'browser' ? '浏览器中' : status === 'open' ? '已打开' : '未打开'}</span></span>
+                <span className={css.rowHeading}><span className={css.rowMark} aria-hidden="true"><IconPanelLeftOutlineMedium size={21} /></span><strong title={row.name}>{row.name}</strong><span className={css.rowStatus} data-status={status}>{status === 'archived' ? <IconArchiveOutlineMedium size={12} /> : status === 'browser' ? <IconGlobeOutlineMedium size={12} /> : <i aria-hidden="true" />}{status === 'browser' ? `浏览器中${row.archivedAt !== undefined ? ' · 已归档' : ''}` : status === 'archived' ? '已归档' : status === 'open' ? '已打开' : '未打开'}</span></span>
                 <span className={css.rowDescription}>{row.description || '添加简介，记录这个工作台的方向'}</span>
                 <span className={css.rowStats} aria-label="工作台内容概况">
                   <span title="当前展示区域"><IconPanelLeftOutlineMedium size={14} /><b>{record ? workbenchAreas(record).length : '—'}</b><span>区域</span></span>
@@ -125,12 +148,13 @@ export function WorkbenchHome({ value, initialSelectedId, directory, editors = [
               <div className={css.workbenchRowFooter}>
                 <button type="button" className={css.sidebarPin} aria-label={pinned ? '已固定到 DSH 侧栏' : '固定到 DSH 侧栏'} title={pinned ? '取消固定到 DSH 侧栏' : '固定到 DSH 侧栏'} aria-pressed={pinned} disabled={!directory.setSidebarPinned || !!action.states['pin-' + row.workbenchId]?.busy} onClick={() => void action.run('pin-' + row.workbenchId, () => directory.setSidebarPinned!(row.workbenchId, !pinned))}>{pinned ? <IconPinFillMedium size={14} /> : <IconPinOutlineMedium size={14} />}{pinned ? '已固定' : '固定到侧栏'}</button>
                 <div className={css.rowUtilities}>
-                  {row.archivedAt ? <Button size="sm" aria-label="恢复工作台" title="恢复工作台" disabled={busyId !== undefined} onClick={() => void restore(row.workbenchId)}><IconArchiveOutlineMedium size={14} /></Button> : null}
+                  {browser ? <Button size="sm" aria-label={`收回控制权：${row.name}`} title="收回浏览器控制权" disabled={busyId !== undefined || !windowController?.reclaim} onClick={() => void reclaimBrowser(row.workbenchId)}>{reclaiming ? '正在收回…' : '收回控制权'}</Button> : null}
+                  {row.archivedAt ? <Button size="sm" aria-label={`恢复工作台：${row.name}`} title="恢复工作台" disabled={browser || busyId !== undefined} onClick={() => void restore(row.workbenchId)}><IconArchiveOutlineMedium size={14} /></Button> : null}
                   <Button size="sm" icon={<IconSettingsOutlineMedium size={14} />} onClick={() => navigate?.({ section: 'workbenches', workbenchId: row.workbenchId })}>管理</Button>
                   <Menu open={menuId === row.workbenchId} onClose={() => setMenuId(undefined)} align="end" portal autoFocus anchor={<Button size="sm" aria-label={'更多操作：' + row.name} aria-haspopup="menu" aria-expanded={menuId === row.workbenchId} onClick={() => setMenuId(row.workbenchId)}><IconEllipsisOutlineMedium size={16} /></Button>} items={[{ id: 'export', label: '导出工作台', disabled: browser || !!row.archivedAt }, { id: 'archive', label: row.archivedAt ? '恢复工作台' : '归档工作台', disabled: browser || busyId !== undefined }]} onSelect={id => { setMenuId(undefined); if (id === 'export') navigate?.({ section: 'sharing', workbenchId: row.workbenchId, shareMode: 'export' }); else if (row.archivedAt) void restore(row.workbenchId); else void archive(row.workbenchId) }} />
                 </div>
               </div>
-              <div className={css.rowFeedback}>{action.states['pin-' + row.workbenchId]?.error || action.states['pin-' + row.workbenchId]?.busy ? action.feedback('pin-' + row.workbenchId) : null}{action.states[row.workbenchId]?.error || action.states[row.workbenchId]?.busy ? action.feedback(row.workbenchId) : null}</div>
+              <div className={css.rowFeedback}>{browser ? <span role="status">{reclaiming ? '正在等待浏览器交回控制权…' : '此工作台仍在浏览器中使用。收回控制权后才能恢复或归档。'}</span> : null}{action.states['reclaim-' + row.workbenchId]?.error || action.states['reclaim-' + row.workbenchId]?.busy ? action.feedback('reclaim-' + row.workbenchId) : null}{action.states['pin-' + row.workbenchId]?.error || action.states['pin-' + row.workbenchId]?.busy ? action.feedback('pin-' + row.workbenchId) : null}{action.states[row.workbenchId]?.error || action.states[row.workbenchId]?.busy ? action.feedback(row.workbenchId) : null}</div>
             </article>
           })}</div>
             <section className={css.addWorkbenchCard} aria-label="添加工作台">
@@ -138,7 +162,7 @@ export function WorkbenchHome({ value, initialSelectedId, directory, editors = [
               <WorkbenchCreateMenu onSelect={setCreatePreset} anchor={props => <Button className={css.addWorkbenchAction} aria-label="创建工作台" {...props}><span className={css.addWorkbenchIcon} data-accent><IconPlusOutlineMedium size={20} /></span><span className={css.addWorkbenchCopy}><strong>创建工作台</strong><small>从空白或预设布局开始</small></span><IconChevronRightOutlineMedium size={16} /></Button>} />
             </section>
           </aside>
-          {(() => { const row = filtered.find(row => row.workbenchId === selectedId) ?? filtered[0]!; const record = value?.workbenches[row.workbenchId]; return record ? <WorkbenchOverviewDetail key={row.workbenchId} record={record} directory={directory} editors={editors} navigate={navigate} windowController={windowController} onOpenWorkbench={onOpenWorkbench} onCreated={onCreated} generateContextDraft={generateContextDraft} onOpen={() => void open(row.workbenchId)} writable={settingsTargetWritable(DESKTOP_SETTINGS_CONTEXT, row.workbenchId, windowController)} busy={busyId !== undefined} /> : <section className={css.selectedDetail}><h2>{row.name}</h2><p>正在读取工作台详情…</p><Button onClick={() => void open(row.workbenchId)}>打开工作台</Button></section> })()}
+          {(() => { const row = filtered.find(row => row.workbenchId === selectedId) ?? filtered[0]!; const record = value?.workbenches[row.workbenchId]; return record ? <WorkbenchOverviewDetail key={row.workbenchId} record={record} directory={directory} editors={editors} navigate={navigate} windowController={windowController} onOpenWorkbench={onOpenWorkbench} onCreated={onCreated} generateContextDraft={generateContextDraft} onOpen={() => void open(row.workbenchId)} onReclaim={() => void reclaimBrowser(row.workbenchId)} writable={settingsTargetWritable(DESKTOP_SETTINGS_CONTEXT, row.workbenchId, windowController)} busy={busyId !== undefined} /> : <section className={css.selectedDetail}><h2>{row.name}</h2><p>正在读取工作台详情…</p><Button onClick={() => void open(row.workbenchId)}>打开工作台</Button></section> })()}
         </div> : <div className={css.noResults} role="status"><IconSearchOutlineMedium size={24} /><h2>没有找到工作台</h2><p>{query ? '试试其他名称、简介或标签。' : '这个分类里还没有工作台。'}</p><Button variant="outline" onClick={() => { setFilter('all'); setQuery('') }}>查看全部工作台</Button></div>}
         <p className={css.librarySummary}>{rows.length} 个工作台 · {snapshot.openWorkbenchIds.length} 个已打开<span>布局和内页会自动保留</span></p>
       </section>}

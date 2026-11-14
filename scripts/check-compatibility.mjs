@@ -148,6 +148,23 @@ const patchRows = [
 assert.equal(sha256(Buffer.from(patchRows.join(''))), copyManifest.patchDigest)
 assert.equal(provenance.digests.lockfile, sha256File('pnpm-lock.yaml'))
 
+// The private Area renderer is a separate upstream copy from Sidebar/Workspace.
+// Auditing only the Sidebar mirror allowed an older renderer to drop RC2 HOC content.
+const rendererRoot = 'packages/workbench-core/src/foundation/renderer/'
+const rendererProvenance = readJson(`${rendererRoot}provenance.json`)
+const rendererPackage = 'node_modules/@deepseek-ai/dsh-client-ui-renderer/'
+assert.equal(rendererProvenance.schemaVersion, 2)
+assert.equal(rendererProvenance.upstreamPackage, '@deepseek-ai/dsh-client-ui-renderer')
+assert.equal(rendererProvenance.upstreamVersion, identity.generation)
+assert.equal(rendererProvenance.upstreamCommit, identity.commit)
+assert.equal(readJson(`${rendererPackage}package.json`).version, identity.generation)
+assert.deepEqual(rendererProvenance.files.map(file => file.output).sort(), ['bind.ts', 'bindings.tsx', 'errors.ts', 'scoped-slots.tsx'])
+for (const file of rendererProvenance.files) {
+  assert.equal(sha256File(`${rendererPackage}${file.npmSource}`), file.upstreamSha256, `renderer RC2 source: ${file.output}`)
+  assert.equal(sha256File(`${rendererRoot}${file.output}`), file.sha256, `renderer adaptation: ${file.output}`)
+  if (file.output !== 'scoped-slots.tsx') assert.equal(file.sha256, file.upstreamSha256)
+}
+
 const bundlePatch = parseYaml(readFileSync(path.join(project, 'packages/workbench-core/dsh.bundle.patch.yml'), 'utf8'))
 assert.deepEqual(bundlePatch.flatMap(operation => operation.insert.map(row => row.name)), [WORKBENCH_PACKAGE_NAME])
 assert.ok(existsFile(path.join(project, 'packages/workbench-core/src/client/native-area-slot-renderer.tsx')))
@@ -156,4 +173,4 @@ function existsFile(file) {
   try { readFileSync(file); return true } catch { return false }
 }
 
-console.log(JSON.stringify({ status: 'passed', ...identity, sourceFileCount: sourceRows.length, sourceDigest, patchDigest: copyManifest.patchDigest, lockfileDigest: provenance.digests.lockfile }, null, 2))
+console.log(JSON.stringify({ status: 'passed', ...identity, sourceFileCount: sourceRows.length, rendererFileCount: rendererProvenance.files.length, sourceDigest, patchDigest: copyManifest.patchDigest, lockfileDigest: provenance.digests.lockfile }, null, 2))

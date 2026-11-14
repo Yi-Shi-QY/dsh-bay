@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>DSH Bay | 依赖漂移</title>
+  <style>@@REPORT_CSS@@</style>
+</head>
+<body>
+  <div class="top-shell">
+    <header class="topbar">
+      <a class="brand" href="#overview" aria-label="DSH Bay 依赖漂移首页">
+        <span class="brand-mark" aria-hidden="true">B</span>
+        <span class="brand-name">DSH Bay</span>
+        <span class="brand-divider" aria-hidden="true"></span>
+        <span class="brand-context">依赖漂移</span>
+      </a>
+      <div class="top-controls">
+        <label class="snapshot-control">
+          <span class="visually-hidden">选择扫描快照</span>
+          <select id="report-select" aria-label="选择扫描快照"></select>
+        </label>
+        <label class="import-button" for="report-import">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 10V2m0 0L4.8 5.2M8 2l3.2 3.2M2.5 9.5v3A1.5 1.5 0 0 0 4 14h8a1.5 1.5 0 0 0 1.5-1.5v-3" /></svg>
+          <span>导入历史 JSON</span>
+          <input id="report-import" type="file" accept=".json,application/json" multiple>
+        </label>
+      </div>
+    </header>
+    <nav class="section-nav" aria-label="报告分区">
+      <a href="#overview">概览</a>
+      <a href="#upstream">DSH 上游</a>
+      <a href="#npm">npm 依赖</a>
+      <a href="#history">历史扫描</a>
+    </nav>
+  </div>
+
+  <main id="overview">
+    <section class="report-heading">
+      <div>
+        <h1>依赖漂移</h1>
+        <p class="report-subtitle" id="report-subtitle"></p>
+      </div>
+      <div class="scan-status" id="scan-status" aria-live="polite"></div>
+    </section>
+
+    <section class="baseline-strip" aria-label="版本基线">
+      <div class="baseline-side">
+        <span class="baseline-label">Bay 基线</span>
+        <strong id="bay-version"></strong>
+      </div>
+      <span class="baseline-arrow" aria-hidden="true">&#8594;</span>
+      <div class="baseline-side">
+        <span class="baseline-label">DSH 基线 / 目标</span>
+        <strong><span id="baseline-tag"></span><span class="baseline-separator">/</span><span id="latest-tag"></span></strong>
+      </div>
+      <div class="baseline-meta" id="fetch-status"></div>
+    </section>
+
+    <section class="metric-row" aria-label="扫描摘要">
+      <article class="metric">
+        <span class="metric-label">上游提交</span>
+        <strong class="metric-value" id="metric-commits"></strong>
+        <span class="metric-note">相对记录基线</span>
+      </article>
+      <article class="metric">
+        <span class="metric-label">变更文件</span>
+        <strong class="metric-value" id="metric-files"></strong>
+        <span class="metric-note" id="metric-files-note"></span>
+      </article>
+      <article class="metric">
+        <span class="metric-label">关联依赖</span>
+        <strong class="metric-value" id="metric-dependencies"></strong>
+        <span class="metric-note" id="metric-dependencies-note"></span>
+      </article>
+      <article class="metric metric-findings">
+        <span class="metric-label">适配信号</span>
+        <strong class="metric-value" id="metric-findings"></strong>
+        <span class="metric-note" id="metric-findings-note"></span>
+      </article>
+    </section>
+
+    <section class="overview-grid">
+      <article class="visual-panel trend-panel">
+        <div class="panel-heading">
+          <div>
+            <h2>扫描趋势</h2>
+            <p id="trend-caption"></p>
+          </div>
+          <div class="legend" aria-label="趋势图图例">
+            <span><i class="legend-dot total"></i>全部</span>
+            <span><i class="legend-dot p1"></i>P1</span>
+            <span><i class="legend-dot p2"></i>P2</span>
+          </div>
+        </div>
+        <div class="chart-wrap" id="trend-chart"></div>
+      </article>
+      <article class="visual-panel signal-panel">
+        <div class="panel-heading">
+          <div>
+            <h2>信号分布</h2>
+            <p>按本次报告的处置优先级</p>
+          </div>
+        </div>
+        <div id="severity-breakdown" class="severity-breakdown"></div>
+        <div class="integrity-line" id="integrity-line"></div>
+      </article>
+    </section>
+
+    <section class="report-section" id="upstream">
+      <div class="section-heading">
+        <div>
+          <h2>DSH 上游变化</h2>
+          <p id="upstream-caption"></p>
+        </div>
+      </div>
+      <div class="upstream-grid">
+        <article class="subsection">
+          <h3>提交记录</h3>
+          <ol id="commit-list" class="commit-list"></ol>
+        </article>
+        <article class="subsection">
+          <h3>源码镜像</h3>
+          <div id="source-copy-list" class="source-copy-list"></div>
+          <details class="untracked-details" id="untracked-details">
+            <summary id="untracked-summary"></summary>
+            <ul id="untracked-list"></ul>
+          </details>
+        </article>
+      </div>
+
+      <div class="table-heading">
+        <div>
+          <h3>依赖影响</h3>
+          <span class="table-count" id="impact-count"></span>
+        </div>
+        <div class="table-controls">
+          <label class="search-control">
+            <span class="visually-hidden">搜索依赖</span>
+            <input id="impact-search" type="search" placeholder="搜索包名或路径">
+          </label>
+          <label>
+            <span class="visually-hidden">按变化类型筛选</span>
+            <select id="impact-filter">
+              <option value="all">全部变化</option>
+              <option value="runtime">运行时代码</option>
+              <option value="metadata">版本、文档与测试</option>
+            </select>
+          </label>
+        </div>
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>依赖包</th><th>变化类型</th><th>优先级</th><th>文件</th><th>Bay 消费者</th><th>详情</th></tr></thead>
+          <tbody id="impact-body"></tbody>
+        </table>
+        <div class="empty-state" id="impact-empty" hidden>没有符合条件的依赖。</div>
+      </div>
+    </section>
+
+    <section class="report-section npm-section" id="npm">
+      <div class="section-heading">
+        <div>
+          <h2>npm 依赖变化</h2>
+          <p id="npm-caption"></p>
+        </div>
+        <label class="search-control">
+          <span class="visually-hidden">搜索 npm 包</span>
+          <input id="npm-search" type="search" placeholder="搜索 npm 包">
+        </label>
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>包</th><th>基线</th><th>Registry 最新版</th><th>peer / exports</th><th>优先级</th></tr></thead>
+          <tbody id="npm-body"></tbody>
+        </table>
+        <div class="empty-state" id="npm-empty" hidden>没有符合条件的 npm 变化。</div>
+      </div>
+      <div class="peer-section">
+        <h3>Peer 契约变化</h3>
+        <div id="peer-list" class="peer-list"></div>
+      </div>
+    </section>
+
+    <section class="report-section history-section" id="history">
+      <div class="section-heading">
+        <div>
+          <h2>扫描历史</h2>
+          <p id="history-caption"></p>
+        </div>
+      </div>
+      <div class="history-table-wrap">
+        <table>
+          <thead><tr><th>生成时间</th><th>DSH 目标</th><th>上游提交</th><th>文件</th><th>适配信号</th><th>P1 / P2</th></tr></thead>
+          <tbody id="history-body"></tbody>
+        </table>
+      </div>
+    </section>
+    <footer class="report-footer">
+      <span>DSH Bay 依赖适配报告</span>
+      <span id="footer-meta"></span>
+    </footer>
+  </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script id="embedded-reports" type="application/json">@@REPORT_DATA@@</script>
+  <script>@@REPORT_APP@@</script>
+</body>
+</html>

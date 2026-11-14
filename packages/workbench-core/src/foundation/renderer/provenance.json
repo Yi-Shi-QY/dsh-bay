@@ -1,21 +1,42 @@
 {
-  "upstreamCommit": "477b4f420553e8a52c2fbccc464d7561b239c443",
-  "adaptation": "unmodified-private-renderer",
+  "schemaVersion": 2,
+  "upstreamPackage": "@deepseek-ai/dsh-client-ui-renderer",
+  "upstreamVersion": "0.2.2-rc.2",
+  "upstreamCommit": "ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c",
+  "adaptation": "rc2-private-area-renderer",
+  "adaptations": [
+    "Host-keyed child-slot binding caches preserve Area lifetime isolation.",
+    "Private stable Factory root supports Area-local rendering and late registration subscriptions.",
+    "All other renderer machinery follows the pinned RC2 source; hashes normalize CRLF to LF."
+  ],
   "files": [
     {
       "source": "packages/client/ui-renderer/src/client/scoped-slots.tsx",
+      "npmSource": "src/client/scoped-slots.tsx",
       "output": "scoped-slots.tsx",
-      "sha256": "2e06b3f92df68e882ea7f8f266298df929d9a7cfc0870fdd72b1fbde71d7cbbb"
+      "upstreamSha256": "7f348afba3e4aa2882ee50c7a18800fe03c606bb87b61e02ee64b99d919450a1",
+      "sha256": "e2dbe33ca9256181b701e975b1776ef2f06c1c83e5c860b91f89aa35ca8b2580"
     },
     {
       "source": "packages/client/ui-renderer/src/client/bindings.tsx",
+      "npmSource": "src/client/bindings.tsx",
       "output": "bindings.tsx",
-      "sha256": "c67c5f09eba2eaf84ff377d69f68b9c0896cfe467910e35d32ba889205b7c468"
+      "upstreamSha256": "ceaf302fcb4eb4ec419fc92c5b39f3667d753e67584dffbaf4540a67fc4f6672",
+      "sha256": "ceaf302fcb4eb4ec419fc92c5b39f3667d753e67584dffbaf4540a67fc4f6672"
     },
     {
       "source": "packages/client/ui-renderer/src/client/bind.ts",
+      "npmSource": "src/client/bind.ts",
       "output": "bind.ts",
-      "sha256": "bc1ced1819b2496f139299b789bc13cb3295a47397ea2e0d65b5bb4000e8d389"
+      "upstreamSha256": "91e70ae7ae0eca972de8c809b3e6ea77cc8d228bae6886ee782ae496cc1d4f45",
+      "sha256": "91e70ae7ae0eca972de8c809b3e6ea77cc8d228bae6886ee782ae496cc1d4f45"
+    },
+    {
+      "source": "packages/client/ui-renderer/src/client/errors.ts",
+      "npmSource": "src/client/errors.ts",
+      "output": "errors.ts",
+      "upstreamSha256": "594e7de016772aa6ffa3b00a83387b891d660cfb6cbbe719e82ec28871b8edac",
+      "sha256": "594e7de016772aa6ffa3b00a83387b891d660cfb6cbbe719e82ec28871b8edac"
     }
   ]
 }

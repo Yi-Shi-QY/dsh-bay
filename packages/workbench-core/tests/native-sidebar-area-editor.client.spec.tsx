@@ -4,6 +4,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
 import { createWorkbenchOfficialAreaEditors } from '../src/client/official-area-editors.tsx'
 import { closeWorkbenchNative } from '../src/client/native-sidebar-area-editor.tsx'
+import { ScheduleTaskTabTitle } from '@deepseek-ai/dsh-client-ui-schedule/src/client/ScheduleTaskTabTitle.tsx'
+import { TaskTabBindings } from '@deepseek-ai/dsh-client-ui-schedule/src/client/task-tab-bindings.ts'
 
 function snapshotStore<T>(initial: T) {
   let value = initial
@@ -64,8 +66,25 @@ function nativeContext() {
   }
 }
 
+afterEach(() => cleanup())
+
+it('restores the official schedule target from its Area resource address without Sidebar history', async () => {
+  const fixture = nativeContext()
+  fixture.install({
+    options: { key: '@deepseek-ai/dsh-client-ui-schedule/task' },
+    component: ScheduleTaskTabTitle,
+    locale: 'schedule.manager',
+    inject: () => ({
+      taskBindings: new TaskTabBindings(() => ['official-sidebar-tab']),
+      hooks: { catalog: snapshotStore({ records: [{ id: 'task-42', title: 'Recovered schedule task' }] }) },
+    }),
+  } as never)
+  const Editor = createWorkbenchOfficialAreaEditors(fixture.context as never).scheduleTask
+  render(<Editor {...owner()} state={{ nativeContentId: 'dsh-resource://schedule-task/session/session-test/task-42' }} />)
+  expect(await screen.findByText('Recovered schedule task')).toBeTruthy()
+})
+
 describe('Workbench native Sidebar Area editor lifecycle', () => {
-  afterEach(() => cleanup())
 
   it('switches from fallback to the DSH body when registration arrives, then back when it is removed', async () => {
     const fixture = nativeContext()

@@ -31,3 +31,18 @@ it('single-flights Main requests and exposes host errors without a demo fallback
   expect(fetcher).toHaveBeenCalledTimes(1); expect(results.every(row => row.status === 'rejected')).toBe(true)
   expect(controller.getSnapshot().error).toContain('host unavailable'); expect(controller.getSnapshot().bayAgentSessionId).toBeUndefined(); controller.dispose()
 })
+
+it('does not poll or issue actions while the directory has no active Workbench', async () => {
+  vi.useFakeTimers()
+  const fetcher = vi.fn(async () => Response.json({ error: 'invalid workbench' }, { status: 400 }))
+  const controller = createRemoteBayAgentController('one', fetcher as never)
+  const unsubscribe = controller.subscribe(() => {})
+  controller.setWorkbenchId('')
+
+  await vi.advanceTimersByTimeAsync(5000)
+  await expect(controller.ensureMainSession()).rejects.toThrow('请选择工作台。')
+  expect(fetcher).not.toHaveBeenCalled()
+  unsubscribe()
+  controller.dispose()
+  vi.useRealTimers()
+})

@@ -32,6 +32,38 @@ function makeContext(entry: object, bindingSource: () => { getSnapshot: () => ob
 describe('Workbench Area-local native sidebar adapter', () => {
   afterEach(() => cleanup())
 
+  it('preserves RC2 HOC children while rendering an Area-local Conversation frame', () => {
+    const frame = {
+      component: ({ children }: { children?: ReactNode }) => <section data-testid="native-conversation-frame">{children}</section>,
+      options: { id: 'official-frame' },
+    }
+    const binding = { key: 'session-a', hooks: {}, keyedHooks: {}, props: {} }
+    const context = {
+      slots: {
+        spec: (name: string) => name === 'conversation.hero.frame' ? { kind: 'hoc', scope: 'root' } : undefined,
+        entries: (name: string) => name === 'conversation.hero.frame' ? [frame] : [],
+        entriesOfSlot: (name: string) => name === 'conversation.hero.frame' ? [frame] : [],
+        subscribe: () => () => {},
+        getVersion: () => 0,
+        _host: { root: source({ hooks: {}, keyedHooks: {}, props: {} }), scope: () => ({ bindingSource: () => source(binding) }) },
+      },
+      locale: undefined,
+      resources: { source: () => source(undefined) },
+      sessions: { list: { getSnapshot: () => ({ byId: {} }) } },
+    } as never
+    const renderer = createWorkbenchNativeAreaSlotRenderer(context, 'session-a', {}, {
+      sessionReference: { sessionId: 'session-a' } as never,
+    })
+
+    render(renderer.render('conversation.hero.frame', { hero: true }, {
+      children: <div data-testid="conversation-scroll-body">Transcript and composer</div>,
+    }))
+
+    expect(screen.getByTestId('native-conversation-frame').querySelector('[data-testid="conversation-scroll-body"]')?.textContent)
+      .toBe('Transcript and composer')
+    renderer.dispose()
+  })
+
   it('remounts a native Composer scope when the retained Session generation changes', () => {
     const rootContext = {}
     const sessionContextA = {}

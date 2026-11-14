@@ -1,6 +1,6 @@
 # Contributing to DSH Bay
 
-The current private candidate is `dsh-bay@0.2.2-alpha.18.3`, targeting DSH `0.2.2-rc.2`. Start with the [documentation index](docs/README.md), [architecture](docs/ARCHITECTURE.zh-CN.md), [source map](docs/REPOSITORY-STRUCTURE.md), [RC2 adaptation record](docs/DSH-RC2-ADAPTATION-PLAN.zh-CN.md), and [validation record](docs/VALIDATION.md).
+The current private candidate is `dsh-bay@0.2.2-alpha.18.6`, targeting DSH `0.2.2-rc.2`. Start with the [documentation index](docs/README.md), [architecture](docs/ARCHITECTURE.zh-CN.md), [source map](docs/REPOSITORY-STRUCTURE.md), [RC2 adaptation record](docs/DSH-RC2-ADAPTATION-PLAN.zh-CN.md), and [validation record](docs/VALIDATION.md).
 
 ## Preserve the domain boundaries
 

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
-  "migration": "dsh-0.2.2-rc.1-to-workbench-0.2.2-alpha.18.3-on-dsh-0.2.2-rc.2",
-  "candidate": "dsh-bay-0.2.2-alpha.18.3-dsh-0.2.2-rc.2",
+  "migration": "dsh-0.2.2-rc.1-to-workbench-0.2.2-alpha.18.6-on-dsh-0.2.2-rc.2",
+  "candidate": "dsh-bay-0.2.2-alpha.18.6-dsh-0.2.2-rc.2",
   "upstream": {
     "repository": "https://github.com/deepseek-ai/deepseek-harness.git",
     "tag": "dsh-v0.2.2-rc.2",
@@ -14,17 +14,22 @@
     }
   },
   "delivery": {
-    "workbenchVersion": "0.2.2-alpha.18.3",
+    "workbenchVersion": "0.2.2-alpha.18.6",
     "dshEngineRange": ">=0.2.2-rc.2 <0.2.3",
     "mode": "core-only",
-    "defaultInstall": ["dsh-bay"],
-    "excluded": ["@dsh-workbench/conversation-suite", "@dsh-workbench/svgdeepseek-pet"],
+    "defaultInstall": [
+      "dsh-bay"
+    ],
+    "excluded": [
+      "@dsh-workbench/conversation-suite",
+      "@dsh-workbench/svgdeepseek-pet"
+    ],
     "more": "deferred-workbench-official-only",
     "pluginManager": "native-dsh-settings-entry"
   },
   "adaptations": [
     {
-    "id": "workspace-menu-anchor",
+      "id": "workspace-menu-anchor",
       "status": "rebased-to-rc2-source",
       "owner": "generated/upstream/ui-workspace/WorkspacePicker.tsx",
       "change": "Uses RC2 Menu anchorRef contract; no removed getAnchorRect prop remains"
@@ -46,6 +51,12 @@
       "status": "retained",
       "owner": "packages/workbench-core/src/client/native-area-slot-renderer.tsx",
       "change": "Defers only official entry-customization inside Workbench projections; DSH owners are unchanged"
+    },
+    {
+      "id": "rc2-private-area-renderer",
+      "status": "rebased-to-rc2-source",
+      "owner": "src/foundation/renderer/provenance.json",
+      "change": "HOC content, inline anchors and keyed member hooks follow RC2; private host caches, late Factory registration and nested Session store bindings preserve Area ownership."
     }
   ],
   "nativeDshChanges": {

@@ -2,6 +2,44 @@
 
 ## Unreleased
 
+- Add a machine-readable DSH and direct dependency provenance map covering
+  declared packages, host-provided closure, official resource identities and
+  copied upstream source.
+- Add `check:dsh-dependencies` and run it from `pnpm verify`; unclassified DSH
+  package literals and dependency manifest drift now fail before compatibility
+  checks.
+- Move DSH dependency provenance into `tools/dsh-adaptation/` and add an offline
+  and remote Git/npm drift scanner with optional JSON output and strict mode.
+- Map upstream package paths to Bay consumers and verification steps, compare
+  npm tarball integrity to lockfile baselines, and archive weekly scan reports.
+
+## 0.2.2-alpha.18.6 — Workbench archive lifecycle
+
+- Allow the DSH desktop to restore or remove archived workbenches through the
+  directory route while preserving browser-control and snapshot barriers.
+- Limit the archived-record authorization to restore and remove transitions;
+  ordinary edits remain denied. Cover the full lifecycle in an end-to-end test.
+
+## 0.2.2-alpha.18.5 — Workbench lifecycle recovery
+
+- Make browser ownership visible in the Workbench overview even when the
+  Workbench is archived; disable restore until the browser lease is reclaimed.
+- Add reclaim controls to the overview card and detail, show actionable reclaim
+  errors, and cover successful and timed-out reclaim before restore.
+
+## 0.2.2-alpha.18.4 — RC2 native Area page fixes
+
+- Rebased the private Area renderer to RC2. Preserve Conversation content inside
+  HOC slots (including missing or failing decorative layers), keyed Markdown
+  fence wrappers, inline slot anchors, and keyed source member selection.
+- Bind nested Subagent Chat stores to their child Session, preserve keyless root
+  stores, and recover Conversation Factories that register after an Area mounts.
+- Recover schedule task navigation from its durable Area resource address without
+  depending on the official Sidebar's local tab history.
+- Added tests using real RC2 Conversation and Subagent components, audited all
+  nine stable native Sidebar types, and included private renderer hashes in
+  `check:compat`. Desktop and second-device acceptance remain separate checks.
+
 ## 0.2.2-alpha.18.3 — private RC2 candidate
 
 - Rebased the private Core candidate to DSH `0.2.2-rc.2`; kept the root build

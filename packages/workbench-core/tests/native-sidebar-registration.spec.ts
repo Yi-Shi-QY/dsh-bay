@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'vitest'
+import { readdirSync, readFileSync } from 'node:fs'
+import path from 'node:path'
+import ts from 'typescript'
 import { hasWorkbenchNativeSidebarRegistration } from '../src/client/native-sidebar-area-editor.tsx'
 import {
   WORKBENCH_NATIVE_SIDEBAR_DEFINITIONS,
@@ -20,6 +23,34 @@ function contextFor(input: {
 }
 
 describe('Workbench native Sidebar registration probe', () => {
+  it('accounts for every stable RC2 Sidebar body shipped in the installed official UI sources', () => {
+    const vendor = path.resolve('node_modules/@deepseek-ai')
+    const registrations: string[] = []
+    const scan = (directory: string, provider: string): void => {
+      for (const file of readdirSync(directory, { withFileTypes: true })) {
+        const absolute = path.join(directory, file.name)
+        if (file.isDirectory()) { scan(absolute, provider); continue }
+        if (!/\.tsx?$/u.test(file.name) || file.name.endsWith('.d.ts')) continue
+        const parsed = ts.createSourceFile(absolute, readFileSync(absolute, 'utf8'), ts.ScriptTarget.Latest, true)
+        const visit = (node: ts.Node): void => {
+          if (ts.isPropertyAssignment(node) && node.name.getText(parsed) === 'name'
+            && ts.isStringLiteral(node.initializer) && node.initializer.text === 'sidebar.right.pane.tab') {
+            registrations.push(provider)
+          }
+          ts.forEachChild(node, visit)
+        }
+        visit(parsed)
+      }
+    }
+    for (const name of readdirSync(vendor).filter(name => name.startsWith('dsh-client-ui-'))) {
+      scan(path.join(vendor, name, 'src'), `@deepseek-ai/${name}`)
+    }
+    // Count registrations too: a second body from an existing provider still
+    // requires a new compatibility decision, even if the package list is unchanged.
+    expect(registrations.sort()).toEqual(WORKBENCH_NATIVE_SIDEBAR_DEFINITIONS
+      .map(item => item.entryKey.split('/').slice(0, 2).join('/')).sort())
+  })
+
   it('keeps every DSH body in one adapter table and exposes entries with configured Area projections', () => {
     expect(WORKBENCH_NATIVE_SIDEBAR_DEFINITIONS.map(item => item.entryKey)).toEqual([
       '@deepseek-ai/dsh-client-ui-sidebar-files',

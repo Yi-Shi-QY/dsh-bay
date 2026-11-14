@@ -612,6 +612,21 @@ export class HostWorkbenchAccess {
     const result = operation(); set.add(result)
     try { return await result } finally { set.delete(result) }
   }
+  /** Desktop-only profile management may restore or remove an archived record. */
+  authorizeDirectoryManagement(context: WorkbenchAccessContext, workbenchId: string): void {
+    if (this.getContext(context.accessId).actor !== 'desktop') throw new WorkbenchAccessError('directory-management-denied', 'Only the DSH desktop may manage the Workbench directory.')
+    const record = this.directory.getSnapshot().value.workbenches[workbenchId]
+    if (!record || typeof record.fileWorkbench?.rootPath !== 'string') throw new WorkbenchAccessError('workbench-unavailable', 'Workbench does not exist.', 404)
+    if (this.controller(workbenchId) === 'browser') throw new WorkbenchAccessError('browser-controls-workbench', 'The browser currently controls this Workbench.', 409)
+    if (this.barriers.has(workbenchId)) throw new WorkbenchAccessError('snapshot-in-progress', 'A Workbench snapshot is in progress.', 423)
+  }
+  async runDirectoryManagement<T>(context: WorkbenchAccessContext, workbenchId: string, operation: () => Promise<T>): Promise<T> {
+    this.authorizeDirectoryManagement(context, workbenchId)
+    const set = this.writes.get(workbenchId) ?? new Set<Promise<unknown>>()
+    this.writes.set(workbenchId, set)
+    const result = operation(); set.add(result)
+    try { return await result } finally { set.delete(result) }
+  }
   registerSnapshotParticipant(participant: (id: string) => Promise<() => void | Promise<void>>) { this.snapshotParticipants.add(participant); return () => { this.snapshotParticipants.delete(participant) } }
   async withSnapshot<T>(workbenchId: string, operation: () => Promise<T>): Promise<T> {
     if (this.barriers.has(workbenchId)) throw new WorkbenchAccessError('snapshot-in-progress', '已有快照作业正在进行。', 423)

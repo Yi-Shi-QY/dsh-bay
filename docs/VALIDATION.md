@@ -2,7 +2,67 @@
 
 更新日期：2026-11-13（Asia/Shanghai）。本页是当前验证入口；旧 [17.5 记录](archive/2026-11-11/VALIDATION.md) 已归档。各节摘要仅对应该节制品，不能交叉用于校验其他构建。
 
-## 2026-11-13 18.3 DSH 0.2.2-rc.2 适配候选
+## 2026-11-13 18.6 DSH 0.2.2-rc.2 工作台归档恢复修复候选
+
+用户在 DSH 中安装 `alpha.18.5` 后报告，归档工作台仍无法恢复，删除也提示“操作未完成，请检查目标状态并重试”。真实目录路由集成测试复现相同失败：Host 的执行阶段已使用桌面专用归档管理检查，但执行前的预授权仍走普通工作台访问检查；普通检查会把已归档工作台视为不可用，因此恢复与删除在修改目录前被拒绝。
+
+- 新增桌面专用目录管理预授权，并与执行阶段共用同一检查；只允许 DSH 桌面管理记录，同时继续检查工作台存在、浏览器控制权和快照屏障。
+- 真实文件权威目录与 HTTP 路由回归覆盖归档、恢复、再次归档、删除完整流程。全量回归 **177 个测试文件、1197 项测试通过**；类型检查、RC2 兼容性与 RC1 LF 历史检查通过。
+- `pnpm pack:core` 完成构建、Host/Client 声明编译和私有封包。`alpha.18.6` 尚待安装到 DSH 后实测；第二设备验收未进行。
+- 本候选为私有实验包，没有发布 npm、Git tag 或 GitHub Release。
+
+| 项目 | 值 |
+| --- | --- |
+| 包 / 版本 | `dsh-bay` / `0.2.2-alpha.18.6` |
+| DSH 代际 | `0.2.2-rc.2` |
+| 候选 ID | `dsh-bay-0.2.2-alpha.18.6-dsh-0.2.2-rc.2` |
+| 私有候选包 | `releases/alpha18.6-rc2-archive-fix-private/dsh-bay-0.2.2-alpha.18.6.tgz` |
+| 大小 | 1,408,268 字节 |
+| SHA-256 | `ee9c7b1207103fe21a30658da0f58f016cfb57778d4055f8c54eeb154e7556d9` |
+| SHA-512 integrity | `sha512-m7/TWICLtDOHNr7M6r9AJlmZurY2qmSNpYKcr/kRYGiqGQ9UONmCY87PJeSbWL/hnSuo2ceYdWh2F+6XPNsJxQ==` |
+| 候选清单 | 同目录 `candidate.json`；来源与验证状态见 `provenance/dsh-0.2.2-rc.2.json` |
+
+## 2026-11-13 18.5 DSH 0.2.2-rc.2 工作台生命周期修复候选
+
+本节记录 `alpha.18.4` 实测时发现的管理问题。DSH 插件管理器确认载入 `dsh-bay@0.2.2-alpha.18.4`；用户不确定安装后是否完整重启。点击已归档工作台的恢复按钮后，客户端没有发送目录 `patch`，只读取了 `snapshot`。根因是浏览器控制租约仍有效，设置适配器按设计拒绝桌面写入；总览卡片却显示“已归档”，并让直接恢复按钮可点，而且没有收回租约的入口。`alpha.18.5` 在总览与详情显示浏览器占用、禁用占用中的恢复并提供收回控制权；成功收回后才允许继续归档或恢复。
+
+- 回归测试覆盖适配器占用时返回 `unavailable` 且不产生写入、总览禁用恢复、收回成功后恢复提交，以及收回超时后仍保持锁定并显示重试提示。
+- `pnpm verify` 通过：兼容性检查与 36 个 RC2 Sidebar / Workspace 来源文件、4 个私有 renderer 文件摘要一致；RC1 历史检查 34/34 个 LF 归一化文件匹配；全量回归 **177 个测试文件、1196 项测试通过**；生产构建完成。jsdom 的 `window.open` / Canvas 未实现提示不影响结果。
+- `pnpm pack:core` 完成 Host / Client 声明编译、构建与私有封包；tarball 摘要与候选清单一致。
+- 用户随后安装 18.5 并确认归档仍有问题：恢复和删除未能完成。问题在 18.6 节记录并由目录路由集成测试复现；18.5 未完成第二设备验收，也未公开发布。
+
+| 项目 | 值 |
+| --- | --- |
+| 包 / 版本 | `dsh-bay` / `0.2.2-alpha.18.5` |
+| DSH 代际 | `0.2.2-rc.2` |
+| 候选 ID | `dsh-bay-0.2.2-alpha.18.5-dsh-0.2.2-rc.2` |
+| 私有候选包 | `releases/alpha18.5-rc2-private/dsh-bay-0.2.2-alpha.18.5.tgz` |
+| 大小 | 1,407,824 字节 |
+| SHA-256 | `9c5c1649e17c4142f529781f0767a8f88704ead734268232939c664bb8833a83` |
+| SHA-512 integrity | `sha512-XJeWydf+X/BmnRvT8+6LcdPIDW9ehVQrEMQaPhPjrNWThCUmy2gpjX4c3+WkCPDORc4coRc3lR/rf+57vb+5+w==` |
+| 候选清单 | 同目录 `candidate.json`；来源与验证状态见 `provenance/dsh-0.2.2-rc.2.json` |
+
+## 2026-11-13 18.4 DSH 0.2.2-rc.2 内页修复候选
+
+本节记录用户发现 18.3 的官方“新建对话”和“对话”在普通容器与浮动工作区均空白后，修复私有渲染器并逐项审查官方内页的候选 `dsh-bay@0.2.2-alpha.18.4`。原因是 RC2 `ConversationContent` 通过 HOC 插槽传入主体内容，而 Bay 的私有渲染器仍缺少 HOC 渲染，连同 messages、views 与 composer 一起被丢弃。修复与 12 类内页的逐项结论见[RC2 官方内页审计](DSH-RC2-NATIVE-PAGES-AUDIT.zh-CN.md)。
+
+- 全量回归 **176 个测试文件、1191 项测试通过**，含真实 RC2 Conversation / Subagent 组件、普通及浮动运行身份、HOC 缺失和崩溃时的内容保留、子会话 store 身份、任务地址恢复、Factory 晚注册、Markdown inline/keyed slot 与官方稳定内页注册扫描。测试环境的 `window.open` / Canvas 未实现提示不影响结果。
+- `pnpm typecheck`、`pnpm check:compat`、`pnpm check:rc1-history` 通过。兼容检查现核对 36 个 Sidebar / Workspace 来源文件及 4 个 RC2 私有渲染器来源/适配哈希；RC1 历史索引 34/34 文件 LF 归一后一致。
+- `pnpm pack:core` 完成构建、Host/Client 声明编译和私有封包。以下制品 SHA-256 由本地重新计算并与 `candidate.json` 一致。
+- 初次封包记录时尚未安装 18.4。用户随后安装并复测，发现工作台恢复被浏览器控制租约在客户端拦截；该问题已在下一节 18.5 修复，仍待安装 18.5 后复测。没有发布 npm、Git tag 或 GitHub Release。
+
+| 项目 | 值 |
+| --- | --- |
+| 包 / 版本 | `dsh-bay` / `0.2.2-alpha.18.4` |
+| DSH 代际 | `0.2.2-rc.2` |
+| 候选 ID | `dsh-bay-0.2.2-alpha.18.4-dsh-0.2.2-rc.2` |
+| 私有候选包 | `releases/alpha18.4-rc2-private/dsh-bay-0.2.2-alpha.18.4.tgz` |
+| 大小 | 1,406,752 字节 |
+| SHA-256 | `f98d558b1fa416f159c60d336d41c90180c125c44745c837c8f025c9d80b1c28` |
+| SHA-512 integrity | `sha512-MSl9vaji0m7arBBqsfKQW2LmVDB/KUpM0j6ZitmKX8MO0hKwssBkKn0L5HLPLpfxMDVyIaNK4PHnxajqUzC4Lw==` |
+| 候选清单 | 同目录 `candidate.json`；来源与验证状态见 `provenance/dsh-0.2.2-rc.2.json` |
+
+## 2026-11-13 18.3 DSH 0.2.2-rc.2 初始适配候选
 
 本节记录 DSH `0.2.2-rc.2` 的独立私有候选 `dsh-bay@0.2.2-alpha.18.3`。上游 tag `dsh-v0.2.2-rc.2` 与 npm `gitHead` 均指向 `ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c`。
 

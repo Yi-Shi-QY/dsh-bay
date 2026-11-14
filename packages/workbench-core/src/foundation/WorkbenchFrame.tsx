@@ -200,6 +200,7 @@ import type { WorkbenchCollaborationClientV1 } from '../client/workbench-collabo
 import { collaborationStatusLabel } from './WorkbenchSharedCanvasViewport.tsx'
 import type { SharedCanvasFocusV1, WorkbenchCollaborationSnapshotV1 } from '../workbench-collaboration-contract.ts'
 import type { BayAgentControllerV1 } from './workbench-bay-agent-work.ts'
+import { bayAgentWorkbenchTarget } from '../client/bay-agent-controller.ts'
 
 const EMPTY_WORKBENCH_SHARE_SNAPSHOT: WorkbenchShareSnapshotV1 = Object.freeze({
   supported: false, sessions: Object.freeze([]), links: Object.freeze({}),
@@ -1123,9 +1124,10 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
   const [frameTransition, setFrameTransition] = useState<WorkbenchFrameTransition>()
   const displayedWorkbenchId = frameTransition?.workbenchId ?? workbenchDirectorySnapshot.activeWorkbenchId
   const selectedWorkbenchId = surfaceWorkbenchId ?? workbenchDirectorySnapshot.activeWorkbenchId
+  const bayAgentWorkbenchId = bayAgentWorkbenchTarget(selectedWorkbenchId, workbenchDirectorySnapshot.rows)
   useEffect(() => {
-    if (selectedWorkbenchId !== undefined) props.bayAgent?.setWorkbenchId(selectedWorkbenchId)
-  }, [props.bayAgent, selectedWorkbenchId])
+    props.bayAgent?.setWorkbenchId(bayAgentWorkbenchId)
+  }, [bayAgentWorkbenchId, props.bayAgent])
   const activeWorkbenchRow = workbenchDirectorySnapshot.rows.find(row => row.workbenchId === selectedWorkbenchId)
   const [layoutLockOverride, setLayoutLockOverride] = useState<{ workbenchId: string; locked: boolean }>()
   const layoutLocked = layoutLockOverride !== undefined && layoutLockOverride.workbenchId === selectedWorkbenchId

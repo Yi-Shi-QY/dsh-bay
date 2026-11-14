@@ -6,17 +6,17 @@ import { createProjectNeutralFrameSettings } from '../src/foundation/frame-setti
 import { mutableSettings, settingsFixture } from './settings-fixtures.ts'
 
 afterEach(cleanup)
-function setup() {
-  const value = settingsFixture(); delete value.workbenches.b
+function setup(options: { value?: ReturnType<typeof settingsFixture>; windowController?: unknown; isBrowserOwned?: (workbenchId: string) => boolean } = {}) {
+  const value = options.value ?? settingsFixture(); delete value.workbenches.b
   const f = mutableSettings(value)
-  const directory = createProjectNeutralFrameSettings(f.source).directory
+  const directory = createProjectNeutralFrameSettings(f.source, options.isBrowserOwned ? { isBrowserOwned: options.isBrowserOwned } : {}).directory
   const editors: never[] = []
   const onOpenWorkbench = vi.fn(async (id: string) => { await directory.openAndSelect(id) })
   const distributionPackage = { history: vi.fn(async () => []), prepareExport: vi.fn(), inspect: vi.fn(), inspectLegacy: vi.fn(), confirm: vi.fn(), resume: vi.fn(), cancel: vi.fn(), restorePending: vi.fn() }
   let guard: (() => Promise<boolean>) | undefined
   const props = { directory, workbenchSettings: f.source, editorCatalog: { getSnapshot: () => editors, subscribe: () => () => {} },
     useSessions: (select: any) => select({ ids: [], byId: {} }), useWorkspaces: (select: any) => select({ items: [] }),
-    onOpenWorkbench, onCreated: vi.fn(), distributionPackage,
+    onOpenWorkbench, onCreated: vi.fn(), distributionPackage, ...(options.windowController ? { windowController: options.windowController } : {}),
     registerBeforeLeave: (next: () => Promise<boolean>) => { guard = next; return () => { guard = undefined } },
   } as WorkbenchHomeCenterProps
   return { ...f, directory, distributionPackage, onOpenWorkbench, props, view: render(<WorkbenchHomeCenter {...props} />), leave: () => guard!() }
@@ -54,6 +54,69 @@ describe('Workbench Home center', () => {
     expect(f.source.getSnapshot().value!.workbenches).toEqual({})
     expect(f.source.getSnapshot().value!.openWorkbenchIds).toEqual([])
     expect(f.source.getSnapshot().value!.activeWorkbenchId).toBe('')
+  })
+
+  it('keeps an archived browser-owned workbench visible and unlocks restore after reclaim', async () => {
+    const value = settingsFixture()
+    value.workbenches.a!.archivedAt = 3
+    value.openWorkbenchIds = []
+    value.activeWorkbenchId = ''
+    let windowSnapshot = {
+      supported: true,
+      windows: [],
+      requests: [{ workbenchId: 'a', status: 'ready' as const, windowId: '00000000-0000-4000-8000-000000000001' }],
+    }
+    const listeners = new Set<() => void>()
+    const windowController = {
+      getSnapshot: () => windowSnapshot,
+      subscribe(listener: () => void) { listeners.add(listener); return () => listeners.delete(listener) },
+      open: vi.fn(async () => ({ status: 'failed' as const, code: 'unused' })),
+      reclaim: vi.fn(async () => {
+        windowSnapshot = { ...windowSnapshot, requests: [{ ...windowSnapshot.requests[0]!, status: 'reclaimed' as const }] }
+        listeners.forEach(listener => listener())
+        return { status: 'reclaimed' as const }
+      }),
+      focus: vi.fn(async () => ({ status: 'failed' as const, code: 'unused' })),
+      close: vi.fn(async () => ({ status: 'failed' as const, code: 'unused' })),
+    }
+    const f = setup({ value, windowController, isBrowserOwned: id => id === 'a' && windowSnapshot.requests[0]?.status !== 'reclaimed' })
+    const row = within(f.view.getByRole('article', { name: 'A' }))
+    expect(row.getByText('浏览器中 · 已归档')).toBeDefined()
+    const restore = row.getByRole('button', { name: '恢复工作台：A' }) as HTMLButtonElement
+    expect(restore.disabled).toBe(true)
+    expect(await f.directory.restore('a')).toMatchObject({ status: 'unavailable' })
+    expect(f.writes).toHaveLength(0)
+    fireEvent.click(row.getByRole('button', { name: '收回控制权：A' }))
+    await waitFor(() => expect(restore.disabled).toBe(false))
+    expect(windowController.reclaim).toHaveBeenCalledOnce()
+    fireEvent.click(restore)
+    await waitFor(() => expect(f.source.getSnapshot().value!.workbenches.a!.archivedAt).toBeUndefined())
+  })
+
+  it('keeps restore locked and explains how to retry after reclaim times out', async () => {
+    const value = settingsFixture()
+    value.workbenches.a!.archivedAt = 3
+    value.openWorkbenchIds = []
+    value.activeWorkbenchId = ''
+    const windowSnapshot = {
+      supported: true,
+      windows: [],
+      requests: [{ workbenchId: 'a', status: 'ready' as const, windowId: '00000000-0000-4000-8000-000000000001' }],
+    }
+    const windowController = {
+      getSnapshot: () => windowSnapshot,
+      subscribe: () => () => {},
+      open: vi.fn(async () => ({ status: 'failed' as const, code: 'unused' })),
+      reclaim: vi.fn(async () => ({ status: 'failed' as const, code: 'browser-view-reclaim-timeout' })),
+      focus: vi.fn(async () => ({ status: 'failed' as const, code: 'unused' })),
+      close: vi.fn(async () => ({ status: 'failed' as const, code: 'unused' })),
+    }
+    const f = setup({ value, windowController, isBrowserOwned: id => id === 'a' })
+    const row = within(f.view.getByRole('article', { name: 'A' }))
+    fireEvent.click(row.getByRole('button', { name: '收回控制权：A' }))
+    expect((await f.view.findByRole('alert')).textContent).toContain('浏览器没有及时确认收回')
+    expect((row.getByRole('button', { name: '恢复工作台：A' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(f.writes).toHaveLength(0)
   })
 
   it('hosts template import, export and durable history in Home with three extension delivery choices', async () => {

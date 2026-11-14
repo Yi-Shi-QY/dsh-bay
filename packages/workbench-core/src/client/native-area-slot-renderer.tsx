@@ -17,7 +17,7 @@ import { createSlotRenderer, renderFactoryRoot } from '../foundation/renderer/sc
 import { SlotAssemblyError } from '../foundation/renderer/errors.ts'
 import { isDeferredOfficialMoreRegistration } from './workbench-more-policy.ts'
 import type {
-  RenderOpts, SlotRendererHost, SlotSpec, StandardSourceBinding, StoredEntry, StoredFactory, StoreInstanceLike,
+  HocRenderOpts, RenderOpts, SlotRendererHost, SlotScope, SlotSpec, StandardSourceBinding, StoredEntry, StoredFactory, StoreInstanceLike,
 } from '@deepseek-ai/dsh-client-ui-slots'
 
 interface AgentPresetOption {
@@ -94,9 +94,9 @@ interface SharedNativeStoreRecord {
   readonly instance: StoreInstanceLike & { clearPersisted?: () => void }
   refs: number
 }
-const sharedNativeStores = new WeakMap<object, Map<string, SharedNativeStoreRecord>>()
+const sharedNativeStores = new WeakMap<object, Map<string | undefined, SharedNativeStoreRecord>>()
 
-function retainSessionNativeStore(handle: NativeStoreHandle, sessionId: string): {
+function retainNativeStore(handle: NativeStoreHandle, sessionId: string | undefined): {
   readonly instance: SharedNativeStoreRecord['instance']
   readonly release: () => void
 } {
@@ -107,7 +107,7 @@ function retainSessionNativeStore(handle: NativeStoreHandle, sessionId: string):
   }
   let record = records.get(sessionId)
   if (record === undefined) {
-    record = { instance: handle.create(sessionId), refs: 0 }
+    record = { instance: sessionId === undefined ? handle.create() : handle.create(sessionId), refs: 0 }
     records.set(sessionId, record)
   }
   record.refs += 1
@@ -174,11 +174,12 @@ export function createWorkbenchNativeAreaSlotRenderer(
   // not necessarily live in `adapted`, so track every entry actually handed
   // to an Outlet explicitly.
   const authorizedEntries = new WeakSet<StoredEntry>()
+  const entryScopes = new WeakMap<StoredEntry, SlotScope>()
   const denied = new Set<StoredEntry>()
-  const stores = new Map<StoredEntry, {
+  const stores = new Map<StoredEntry, Map<string | undefined, {
     readonly instance: StoreInstanceLike & { clearPersisted?: () => void }
     readonly release: () => void
-  }>()
+  }>>()
   /**
    * DSH Factory stores have a second identity axis that ordinary slot stores
    * do not have: one exclusive handle per mounted Factory occurrence.  The
@@ -319,11 +320,17 @@ export function createWorkbenchNativeAreaSlotRenderer(
         ? adaptAgentPresetEntry(entry)
         : adaptAreaEntry(entry, slot))
       .filter(entry => !denied.has(entry))
-    for (const entry of projected) authorizedEntries.add(entry)
+    for (const entry of projected) {
+      authorizedEntries.add(entry)
+      const spec = ctx.slots.spec(keyOf(slot))
+      if (spec !== undefined) entryScopes.set(entry, spec.scope)
+    }
     return projected
   }
   const clearStores = () => {
-    for (const store of stores.values()) store.release()
+    for (const byScope of stores.values()) {
+      for (const store of byScope.values()) store.release()
+    }
     stores.clear()
     for (const byScope of factorySharedRecords.values()) {
       for (const retained of byScope.values()) retained.release()
@@ -364,7 +371,7 @@ export function createWorkbenchNativeAreaSlotRenderer(
       if (existing !== undefined) return existing.instance
       const retained = scopeKey === 'root'
         ? { instance: declaration.create(), release: () => {} }
-        : retainSessionNativeStore(declaration, scopeKey)
+        : retainNativeStore(declaration, scopeKey)
       byScope.set(scopeKey, retained)
       return retained.instance
     }
@@ -861,7 +868,7 @@ export function createWorkbenchNativeAreaSlotRenderer(
     // mount the Factory; its actual local child specs are resolved from the
     // Factory definition while the occurrence renders.
     const declared = (ctx.slots.spec(keyOf(slot))
-      ?? (slot === 'conversation.content' && slotApi.factory?.(slot) !== undefined
+      ?? (slot === 'conversation.content'
         ? { kind: 'single', scope: 'root' }
         : undefined)) as SlotSpec<import('@deepseek-ai/dsh-client-ui-slots').SlotEntryDef> | undefined
     if (declared === undefined) return undefined
@@ -897,8 +904,8 @@ export function createWorkbenchNativeAreaSlotRenderer(
       : declared
     type RootProps = {
       owner: object
-      options?: RenderOpts
-      renderSlot: (key: string, owner: object, options?: RenderOpts) => ReactNode
+      options?: RenderOpts & Partial<HocRenderOpts>
+      renderSlot: (key: string, owner: object, options?: RenderOpts & Partial<HocRenderOpts>) => ReactNode
     }
     const component = ({ owner, options, renderSlot }: RootProps) => renderSlot(slot, owner, options)
     const root: StoredEntry = { component, options: {}, children: { [slot]: spec } }
@@ -911,18 +918,23 @@ export function createWorkbenchNativeAreaSlotRenderer(
       reportFactoryError: () => {},
       specOf: key => key === 'root' ? { kind: 'single', scope: 'root' } : key === slot ? spec : ctx.slots.spec(keyOf(key)),
       isLive: entry => live && (entry === root || authorizedEntries.has(entry)),
-      storeOf: entry => {
+      storeOf: (entry, scopeBinding) => {
         if (!entry.store || ownsNativeSidebar(entry)) return undefined
-        const retained = stores.get(entry)
+        // Nested SessionProvider (Subagent Chat) changes the store identity as
+        // well as its hooks. Never substitute the Area's parent Session here.
+        const storeKey = entryScopes.get(entry) === 'root'
+          ? undefined
+          : scopeBinding?.key ?? `workbench-area:${options.scopeKey ?? 'unbound'}`
+        let byScope = stores.get(entry)
+        if (byScope === undefined) {
+          byScope = new Map()
+          stores.set(entry, byScope)
+        }
+        const retained = byScope.get(storeKey)
         if (retained !== undefined) return retained.instance
         const handle = entry.store as NativeStoreHandle
-        const retainedStore = sessionId === undefined
-          ? (() => {
-              const namespace = `workbench-area:${options.scopeKey ?? 'unbound'}`
-              return { instance: handle.create(namespace), release: () => {} }
-            })()
-          : retainSessionNativeStore(handle, sessionId)
-        stores.set(entry, retainedStore)
+        const retainedStore = retainNativeStore(handle, storeKey)
+        byScope.set(storeKey, retainedStore)
         return retainedStore.instance
       },
       factoryStoreOf,
@@ -951,7 +963,7 @@ export function createWorkbenchNativeAreaSlotRenderer(
   }
 
   return {
-    render(slot: string, owner: object, options?: RenderOpts): ReactNode {
+    render(slot: string, owner: object, options?: RenderOpts & Partial<HocRenderOpts>): ReactNode {
       if (!live || forbidden.has(slot)) return options?.fallback ?? null
       const host = hostFor(slot)
       return host === undefined ? options?.fallback ?? null : renderer.renderRoot(host, { owner, options })

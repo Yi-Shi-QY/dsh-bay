@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "owner": "DSH Bay",
-  "candidateId": "dsh-bay-0.2.2-alpha.18.3-dsh-0.2.2-rc.2",
-  "productLine": "DSH Bay 0.2.2-alpha.18.3",
+  "candidateId": "dsh-bay-0.2.2-alpha.18.6-dsh-0.2.2-rc.2",
+  "productLine": "DSH Bay 0.2.2-alpha.18.6",
   "upstream": {
     "repository": "https://github.com/deepseek-ai/deepseek-harness.git",
     "tag": "dsh-v0.2.2-rc.2",

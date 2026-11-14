@@ -32,6 +32,7 @@ export function installWorkbenchDirectoryRoute(connection: HostConnectionHandle,
       // transaction wrapper. Rechecking only the workbench would discard the
       const writeAreas = new Map<string, Set<string>>()
       const scopedRequirements: { capability: WorkbenchCapability; target: WorkbenchAccessTarget }[] = []
+      const archivedManagementTargets = new Set<string>()
       const addScopedRequirement = (capability: WorkbenchCapability, target: WorkbenchAccessTarget) => {
         if (!scopedRequirements.some(row => row.capability === capability && row.target.workbenchId === target.workbenchId && row.target.areaId === target.areaId)) scopedRequirements.push({ capability, target })
       }
@@ -63,7 +64,14 @@ export function installWorkbenchDirectoryRoute(connection: HostConnectionHandle,
             const before = directory.getSnapshot().value.workbenches
             const value = patch.value as Record<string, unknown> | undefined
             const after = (patch.path.length === 0 ? value?.workbenches : value) as Record<string, unknown> | undefined
-            if (after) for (const id of new Set([...Object.keys(before), ...Object.keys(after)])) if (before[id] && !isDeepStrictEqual(before[id], after[id])) writeTargets.add(id)
+            if (after) for (const id of new Set([...Object.keys(before), ...Object.keys(after)])) if (before[id] && !isDeepStrictEqual(before[id], after[id])) {
+              writeTargets.add(id)
+              const previous = before[id]!
+              if (previous.archivedAt !== undefined) {
+                const { archivedAt: _archivedAt, ...restored } = previous
+                if (after[id] === undefined || isDeepStrictEqual(after[id], restored)) archivedManagementTargets.add(id)
+              }
+            }
           }
           // A browser owner or LAN participant may set the marker of a Session
           // of its own Workbench; every other preference stays Host-only.
@@ -91,7 +99,10 @@ export function installWorkbenchDirectoryRoute(connection: HostConnectionHandle,
           if (body.action !== 'patch') access.authorize(actor, capability, { workbenchId, ...(typeof body.areaId === 'string' ? { areaId: body.areaId } : {}), ...(relativePath !== undefined ? { relativePath } : {}) })
           if (body.action === 'bind-area' && body.createDirectory === true) access.authorize(actor, 'write-files', { workbenchId, ...(typeof body.areaId === 'string' ? { areaId: body.areaId } : {}), relativePath: text('relativePath') })
         } else if (actor.actor !== 'desktop') throw new WorkbenchAccessError('workbench-required', '缺少工作台身份。')
-        if (mutation) for (const requirement of scopedRequirements.length > 0 ? scopedRequirements : writeScopeTargets().map(target => ({ capability, target }))) access.authorize(actor, requirement.capability, requirement.target)
+        if (mutation) for (const requirement of scopedRequirements.length > 0 ? scopedRequirements : writeScopeTargets().map(target => ({ capability, target }))) {
+          if (actor.actor === 'desktop' && archivedManagementTargets.has(requirement.target.workbenchId)) access.authorizeDirectoryManagement(actor, requirement.target.workbenchId)
+          else access.authorize(actor, requirement.capability, requirement.target)
+        }
       }
       const execute = async () => {
       let value: unknown
@@ -142,7 +153,9 @@ export function installWorkbenchDirectoryRoute(connection: HostConnectionHandle,
         let operation = execute
         if (mutation && access && actor) for (const requirement of scopedRequirements.length > 0 ? scopedRequirements : writeScopeTargets().map(target => ({ capability, target }))) {
           const next = operation
-          operation = () => access.run(actor, requirement.capability, requirement.target, next)
+          operation = () => actor.actor === 'desktop' && archivedManagementTargets.has(requirement.target.workbenchId)
+            ? access.runDirectoryManagement(actor, requirement.target.workbenchId, next)
+            : access.run(actor, requirement.capability, requirement.target, next)
         }
         return operation()
       }

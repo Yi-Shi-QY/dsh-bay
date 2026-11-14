@@ -2,7 +2,7 @@
   "name": "dsh-bay-workspace",
   "description": "Private staging repository for DSH Bay (湾域) on DSH",
   "private": true,
-  "version": "0.2.2-alpha.18.3",
+  "version": "0.2.2-alpha.18.6",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Yi-Shi-QY/dsh-bay.git"
@@ -25,10 +25,13 @@
   },
   "scripts": {
     "build": "node scripts/build.mjs",
+    "check:dsh-dependencies": "node tools/dsh-adaptation/check-dependencies.mjs",
+    "scan:dsh-drift": "node tools/dsh-adaptation/scan-dsh-npm-drift.mjs",
+    "report:dsh-drift": "node tools/dsh-adaptation/render-drift-report.mjs",
     "check:compat": "node scripts/check-compatibility.mjs",
     "check:rc1-history": "node scripts/check-rc1.mjs",
     "verify:workbench-package": "node scripts/test.mjs packages/workbench-core/tests/workbench-package-service.spec.ts",
-    "verify": "pnpm check:compat && pnpm check:rc1-history && pnpm test && pnpm build",
+    "verify": "pnpm check:dsh-dependencies && pnpm check:compat && pnpm check:rc1-history && pnpm test && pnpm build",
     "test": "node scripts/test.mjs",
     "typecheck": "pnpm --filter dsh-bay build:types",
     "pack:core": "node scripts/pack.mjs"
@@ -60,6 +63,7 @@
     "shiki": "4.3.1",
     "simple-icons": "16.31.0",
     "typescript": "6.0.3",
+    "yaml": "2.9.1",
     "vitest": "4.1.8",
     "zustand": "4.4.7"
   }

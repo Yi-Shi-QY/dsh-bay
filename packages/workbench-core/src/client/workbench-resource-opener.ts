@@ -13,6 +13,17 @@ export type WorkbenchResourcePlacement = Record<string, unknown>
 /** Result of routing a native Conversation resource through its Area owner. */
 export type WorkbenchResourceRouteResult = 'handled' | 'native-fallback' | 'rejected'
 
+/** Bay task addresses carry the identity that DSH's tab body expects as navigation params. */
+export function workbenchScheduleTaskParams(address: string | undefined): { sessionId: string; id: string } | undefined {
+  const match = address?.match(/^dsh-resource:\/\/schedule-task\/session\/([^/?#]+)\/([^/?#]+)$/u)
+  if (match === undefined || match === null) return undefined
+  try {
+    return { sessionId: decodeURIComponent(match[1]!), id: decodeURIComponent(match[2]!) }
+  } catch {
+    return undefined
+  }
+}
+
 /** Session identity that emitted a native resource action. */
 export interface WorkbenchResourceSourceV1 {
   readonly sessionId: string

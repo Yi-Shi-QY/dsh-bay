@@ -105,7 +105,8 @@ export function createFloatingWorkspaceRuntime(): FloatingWorkspaceRuntime {
   const remove = (id: string, workbenchId?: string) => {
     const item = find(id, workbenchId)
     if (!item) return
-    cleanup(keyOf(item)); item.element?.remove(); instances.delete(keyOf(item)); guards.delete(keyOf(item)); publishContent()
+    try { cleanup(keyOf(item)) } catch (error) { console.warn('Floating Workbench tab cleanup failed', error) }
+    item.element?.remove(); instances.delete(keyOf(item)); guards.delete(keyOf(item)); publishContent()
     const space = workspace(item.workbenchId)
     if (space.activeId === id) space.activeId = [...instances.values()].find(row => row.workbenchId === item.workbenchId && row.location === 'floating')?.tab.id
   }

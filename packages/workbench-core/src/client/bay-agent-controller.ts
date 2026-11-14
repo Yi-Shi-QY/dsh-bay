@@ -2,6 +2,21 @@ import { BAY_AGENT_ROUTE } from '../bay-agent-contract.ts'
 import { workbenchFetch } from './workbench-access.ts'
 import type { BayAgentControllerSnapshotV1, BayAgentControllerV1, BayAgentWorkerRuntimeV1 } from '../foundation/workbench-bay-agent-work.ts'
 
+export interface BayAgentWorkbenchTargetRow {
+  workbenchId: string
+  archivedAt?: number
+}
+
+/** Bay Agent may only target a directory entry that is currently runnable. */
+export function bayAgentWorkbenchTarget(
+  selectedWorkbenchId: string | undefined,
+  rows: readonly BayAgentWorkbenchTargetRow[],
+): string {
+  if (selectedWorkbenchId === undefined) return ''
+  const row = rows.find(candidate => candidate.workbenchId === selectedWorkbenchId)
+  return row !== undefined && row.archivedAt === undefined ? selectedWorkbenchId : ''
+}
+
 /** Browser owns presentation only; Host owns lifecycle, delivery and persistence. */
 export function createRemoteBayAgentController(initialWorkbenchId: string, fetcher: typeof fetch = workbenchFetch, refreshSessions?: () => Promise<unknown>): BayAgentControllerV1 & { dispose(): void } {
   let workbenchId = initialWorkbenchId, disposed = false, sequence = 0, applied = 0
@@ -12,6 +27,7 @@ export function createRemoteBayAgentController(initialWorkbenchId: string, fetch
   const request = async (id: string, action: string, input: Record<string, unknown> = {}) => {
     const order = ++sequence
     try {
+      if (!id) throw new Error('请选择工作台。')
       const response = await fetcher(BAY_AGENT_ROUTE, { method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ workbenchId: id, action, ...input }) })
       const result = await response.json() as { snapshot: BayAgentControllerSnapshotV1; value?: unknown; error?: string }
       if (!response.ok || !result.snapshot || result.snapshot.workbenchId !== id) throw new Error(result.error ?? 'Bay Agent 宿主暂不可用。')
@@ -24,7 +40,7 @@ export function createRemoteBayAgentController(initialWorkbenchId: string, fetch
   }
   let refreshing = false
   const timer = setInterval(() => {
-    if (disposed || refreshing || !listeners.size) return
+    if (disposed || refreshing || !listeners.size || !workbenchId) return
     refreshing = true
     void request(workbenchId, 'snapshot').catch(() => {}).finally(() => { refreshing = false })
   }, 1800)

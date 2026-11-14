@@ -19,6 +19,7 @@ import { workbenchNativeSidebarForKind, workbenchNativeSidebarForResourceAddress
 import {
   workbenchConversationResourceBindingForAddress,
   workbenchResourceMatchesSession,
+  workbenchScheduleTaskParams,
 } from './workbench-resource-opener.ts'
 
 const nativeCloseHandlers = new Map<string, () => void>()
@@ -276,7 +277,11 @@ export function NativeSidebarAreaEditor({
   const nativeContentId = typeof nativeState?.nativeContentId === 'string' && nativeState.nativeContentId.length > 0
     ? nativeState.nativeContentId
     : resourceOnly ? undefined : contentId
-  const nativeParams = nativeState?.nativeParams
+  // An imported/restored Area must not rely on DSH's separate Sidebar tab-id
+  // history. Its durable resource address already names the exact task.
+  const nativeParams = useMemo(() => kind === 'schedule-task'
+    ? workbenchScheduleTaskParams(nativeContentId) ?? nativeState?.nativeParams
+    : nativeState?.nativeParams, [kind, nativeContentId, nativeState?.nativeParams])
   const resourceReady = resourceOnly === false
     || (nativeContentId !== undefined
       && workbenchNativeSidebarForResourceAddress(nativeContentId)?.kind === kind)

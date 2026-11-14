@@ -5,11 +5,11 @@ description: Design, implement, upgrade, validate, and package a durable DSH Wor
 
 # Develop Workbench Inner-Page Extensions
 
-Workbench Core 0.2.2-alpha.18.3 on DSH 0.2.2-rc.2 (upstream commit ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c) registers this Skill through DSH's global Skill provider registry. The official DSH Creator can discover it when Core is installed; this does not create or override a Workbench-specific Agent preset.
+Workbench Core 0.2.2-alpha.18.4 on DSH 0.2.2-rc.2 (upstream commit ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c) registers this Skill through DSH's global Skill provider registry. The official DSH Creator can discover it when Core is installed; this does not create or override a Workbench-specific Agent preset.
 
 In Creator, users can start this workflow from the `/create-workbench-extension` slash shortcut. It is a user-only alias for this Skill: it injects these same instructions into the Creator turn, while the canonical `workbench-extension-development` name remains available to the model's Skill catalog.
 
-Use this workflow for a durable extension that registers one or more Workbench editor pages. The target deliverable is a standard DSH Bundle/Client Plugin containing its Workbench module and editor declarations. DSH's native Plugin Manager owns installation, update, native enable/disable, and uninstall in a Profile; Workbench Core separately discovers and validates the extension, then requires the user's opt-in before exposing its inner pages. Workbench Core `0.2.2-alpha.18.3` carries declaration metadata through the DSH Slot inject face and declares the Plugin Inventory and Plugin Manager Remotes needed to verify installed and running extensions. Core Host also registers this Skill through DSH's global Skill provider registry, so the official DSH Creator can discover it without a Workbench-specific preset override. Automated coverage is in place, while real desktop Creator discovery and the broader update/uninstall migration loop remain pending. The Creator may write and validate the package, but must not represent a successful build or DSH installation as Workbench activation. A Dynamic Cordis runner may be used by a separately mounted programmatic consumer or UI control as a temporary, process-local experiment, but it is not a packaged Workbench extension. Choose the deliverable from the user's requested lifetime and outcome.
+Use this workflow for a durable extension that registers one or more Workbench editor pages. The target deliverable is a standard DSH Bundle/Client Plugin containing its Workbench module and editor declarations. DSH's native Plugin Manager owns installation, update, native enable/disable, and uninstall in a Profile; Workbench Core separately discovers and validates the extension, then requires the user's opt-in before exposing its inner pages. Workbench Core `0.2.2-alpha.18.4` carries declaration metadata through the DSH Slot inject face and declares the Plugin Inventory and Plugin Manager Remotes needed to verify installed and running extensions. Core Host also registers this Skill through DSH's global Skill provider registry, so the official DSH Creator can discover it without a Workbench-specific preset override. Automated coverage is in place, while real desktop Creator discovery and the broader update/uninstall migration loop remain pending. The Creator may write and validate the package, but must not represent a successful build or DSH installation as Workbench activation. A Dynamic Cordis runner may be used by a separately mounted programmatic consumer or UI control as a temporary, process-local experiment, but it is not a packaged Workbench extension. Choose the deliverable from the user's requested lifetime and outcome.
 
 ## DSH RC2 Agent collaboration
 
@@ -220,7 +220,7 @@ For a real offline check, run the template through the Host distribution prepara
 
 Before handing an extension to a Workbench user, record:
 
-- Workbench Core `0.2.2-alpha.18.3`, DSH `0.2.2-rc.2`, package name, module ID and all editor IDs.
+- Workbench Core `0.2.2-alpha.18.4`, DSH `0.2.2-rc.2`, package name, module ID and all editor IDs.
 - For every editor: root/session scope, project/Session requirement, unbound behavior, state schema/maxBytes/share policy, lifecycle and resource routes.
 - Exact DSH runtime/bundle/Slot identity mapping and the Workbench consent result.
 - Extension artifact runtime file list, dependency lock, SHA-256/integrity and whether the artifact was embedded in `offline-embedded` mode.

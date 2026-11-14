@@ -2,7 +2,7 @@
 
 更新时间：2026-11-11（文档与引用复核；未改变接口版本）
 规范版本：1.1
-适用基线：Workbench Core `0.2.2-alpha.18.3`、DSH `0.2.2-rc.2`（commit `ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c`）
+适用基线：Workbench Core `0.2.2-alpha.18.4`、DSH `0.2.2-rc.2`（commit `ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c`）
 状态：**Core 接口与自动化合同说明；正式桌面扩展生命周期验收仍未完成**
 
 本文是开发新的 Workbench 容器内页扩展时的主规范。可安装的主模板位于 `packages/workbench-core/presets/workbench-creator/skills/workbench-extension-development/templates/workbench-editor/`，Session 变体位于相邻的 `templates/workbench-editor-variants/session-client.js`。若模板与本文不一致，以对应目标 Core/DSH 版本的公开导出、类型、测试和锁定文件为准；不要复制本文以外版本的 Slot 参数或 API。
@@ -460,7 +460,7 @@ Core 目前会在身份映射失败时显示结构化诊断 code、registrant、
 
 ## 18. 当前实现与待验收状态
 
-Workbench Core `0.2.2-alpha.18.3` / DSH `0.2.2-rc.2` 提供 Slot inject metadata 读取、DSH runtime/bundle inventory 注入与唯一映射、声明校验、Profile-local Workbench consent、扩展状态过滤、撤销/缺失时布局引用保留、刷新竞争保护和身份诊断 UI，并由 Core Host 全局 Skill registry 提供 `workbench-extension-development`，供 DSH 原版 Cordis Creator 通过原生 Skill 工具发现。RC2 Agent Teams 默认关闭并按 root Session 保存选择；原生 SubAgent 工具支持具名及嵌套成员。Workbench 不另加 AgentTeam 控制入口，Bay Agent 的 Work Item / Assignment 生命周期仍独立。18.0 同时提供 Area 项目目录、多 Session 内页来源、浏览器/桌面共享的工作台状态，以及 `offline-embedded` 扩展制品收集。扩展发现、状态策略和模板离线制品校验已有自动化覆盖；原版 Creator 真实会话生成扩展、桌面安装/重启和跨机器完整包恢复仍需实测。
+Workbench Core `0.2.2-alpha.18.4` / DSH `0.2.2-rc.2` 提供 Slot inject metadata 读取、DSH runtime/bundle inventory 注入与唯一映射、声明校验、Profile-local Workbench consent、扩展状态过滤、撤销/缺失时布局引用保留、刷新竞争保护和身份诊断 UI，并由 Core Host 全局 Skill registry 提供 `workbench-extension-development`，供 DSH 原版 Cordis Creator 通过原生 Skill 工具发现。RC2 Agent Teams 默认关闭并按 root Session 保存选择；原生 SubAgent 工具支持具名及嵌套成员。Workbench 不另加 AgentTeam 控制入口，Bay Agent 的 Work Item / Assignment 生命周期仍独立。18.0 同时提供 Area 项目目录、多 Session 内页来源、浏览器/桌面共享的工作台状态，以及 `offline-embedded` 扩展制品收集。扩展发现、状态策略和模板离线制品校验已有自动化覆盖；原版 Creator 真实会话生成扩展、桌面安装/重启和跨机器完整包恢复仍需实测。
 
 本规范本身不表示任何第三方测试插件已经成功安装或激活。`packages/workbench-svgdeepseek-pet` 是历史测试扩展，**不是本规范或当前 Core 验收的前置条件**；相关源码、制品和证据仅用于历史追溯。
 
