@@ -1,4 +1,4 @@
-# DSH Bay｜湾域
+# DSH Bay｜湾
 
 DSH Bay is a multi-area workbench for DSH projects, native conversations, inner-page extensions, and Bay Agent tasks. This package contains the Host runtime, client integration, and extension development skill.
 

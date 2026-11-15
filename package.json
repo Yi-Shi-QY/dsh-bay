@@ -1,6 +1,6 @@
 {
   "name": "dsh-bay-workspace",
-  "description": "Private staging repository for DSH Bay (湾域) on DSH",
+  "description": "Private staging repository for DSH Bay (湾) on DSH",
   "private": true,
   "version": "0.2.2-alpha.18.7",
   "repository": {

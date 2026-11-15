@@ -40,7 +40,7 @@ if (buildInputs.packageName !== manifest.name) throw new Error('Build/package na
 const candidate = {
   status: 'private-staging',
   candidateId: buildInputs.candidateId,
-  product: 'DSH Bay / 湾域',
+  product: 'DSH Bay / 湾',
   packageName: manifest.name,
   version: manifest.version,
   dshGeneration: manifest.dsh.workbench.dshGeneration,

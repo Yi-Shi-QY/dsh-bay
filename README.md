@@ -1,4 +1,4 @@
-# DSH Bay｜湾域
+# DSH Bay｜湾
 
 DSH Bay 是面向 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的多区域工作台。它把项目文件、原生对话、工具内页与 Bay Agent 任务组织在同一个工作台中，并支持浏览器接管和完整工作台包迁移。
 
@@ -6,7 +6,7 @@ DSH Bay 是面向 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-har
 
 ## 从这里开始
 
-- [项目手册：定位、目标、功能与长期计划](docs/PROJECT-HANDBOOK.zh-CN.md)：了解湾域解决什么问题，以及后续开发顺序。
+- [项目手册：定位、目标、功能与长期计划](docs/PROJECT-HANDBOOK.zh-CN.md)：了解湾解决什么问题，以及后续开发顺序。
 - [使用教程](docs/USER-GUIDE.zh-CN.md)：从创建工作台到项目、会话、任务、浏览器与完整包迁移的操作步骤。
 - [文档导航](docs/README.md)：当前说明、开发入口与历史归档。
 - [当前架构](docs/ARCHITECTURE.zh-CN.md)：数据归属、宿主服务、会话、任务与完整包。

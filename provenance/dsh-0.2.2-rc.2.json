@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "candidateId": "dsh-bay-0.2.2-alpha.18.7-dsh-0.2.2-rc.2",
-  "product": "DSH Bay / 湾域",
+  "product": "DSH Bay / 湾",
   "workbenchVersion": "0.2.2-alpha.18.7",
   "dshGeneration": "0.2.2-rc.2",
   "derivedFrom": {

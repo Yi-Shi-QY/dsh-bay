@@ -124,7 +124,7 @@ describe('Workbench LAN share gateway', () => {
   it('serves a readable document on reload when the upstream compresses responses', async () => {
     const gatewayHost = selectPrivateIPv4()
     if (gatewayHost === undefined) return
-    const page = '<!doctype html><html data-workbench-document="v1"><head><title>湾域工作台</title></head><body>协作者可以继续对话</body></html>'
+    const page = '<!doctype html><html data-workbench-document="v1"><head><title>湾工作台</title></head><body>协作者可以继续对话</body></html>'
     const encodings: string[] = []
     // DSH's web server runs the `compression` middleware: it gzips whenever
     // the request accepts gzip, exactly like a browser reload does.
@@ -157,7 +157,7 @@ describe('Workbench LAN share gateway', () => {
       expect(reload.status).toBe(200)
       expect(reload.headers.get('content-encoding')).toBeNull()
       const html = await reload.text()
-      expect(html).toContain('<title>湾域工作台</title>')
+      expect(html).toContain('<title>湾工作台</title>')
       expect(html).toContain('协作者可以继续对话')
       expect(html).toContain('__WORKBENCH_WINDOW_VIEW__')
       expect(encodings.every(value => !/gzip/u.test(value))).toBe(true)
