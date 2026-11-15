@@ -252,11 +252,18 @@ function assertUniqueStrings(values: readonly string[] | undefined, name: string
   }
 }
 
+function assertModuleOwnedAgentKitId(id: string, moduleId: string, kind: ToolKindV1, name: string): void {
+  if ((kind === 'tool' || kind === 'skill') && !id.startsWith(`${moduleId}.`)) {
+    throw new Error(`${name} must start with ${moduleId}.`)
+  }
+}
+
 export function validateToolContributionV1(value: ToolContributionV1): void {
   if (!isRecord(value)) throw new Error('Tool contribution must be an object')
   assertString(value.id, 'Tool contribution id', ID)
   if (!TOOL_KINDS.includes(value.kind)) throw new Error(`Unsupported tool kind: ${String(value.kind)}`)
   assertString(value.moduleId, 'Tool contribution moduleId', MODULE_ID)
+  assertModuleOwnedAgentKitId(value.id, value.moduleId, value.kind, 'Tool contribution id')
   if (value.editorId !== undefined) assertString(value.editorId, 'Tool contribution editorId', ID)
   assertString(value.version, 'Tool contribution version')
   if (value.artifactDigest !== undefined && !SHA256.test(value.artifactDigest)) throw new Error('Tool contribution artifactDigest is invalid')
@@ -307,6 +314,11 @@ export function validateContainerEditorContributionV1(value: ContainerEditorCont
       if (!['mcp', 'cli', 'tool', 'skill'].includes(kind)) throw new Error(`Unsupported container editor provider: ${kind}`)
       if (!Array.isArray(ids)) throw new Error(`Container editor provider ${kind} must be an array`)
       assertUniqueStrings(ids, `Container editor provider ${kind}`)
+      if (kind === 'tool' || kind === 'skill') {
+        for (const id of ids) {
+          if (typeof id === 'string' && !id.startsWith(`${value.moduleId}.`)) throw new Error(`Container editor provider ${kind} ids must start with ${value.moduleId}.`)
+        }
+      }
     }
   }
   if (value.type === 'standalone-provider') {

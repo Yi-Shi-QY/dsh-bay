@@ -3,6 +3,7 @@ tools/dsh-adaptation/.cache/
 tools/dsh-adaptation/reports/
 lib/
 .tmp-*/
+.tmp-*
 tmp/
 output/
 prototypes/

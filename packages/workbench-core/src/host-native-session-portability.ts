@@ -35,6 +35,8 @@ export interface NativeSessionRemap {
   sourceRoot: string
   targetRoot: string
   sourceCwd?: string
+  /** Rewrites agent preset ids when the workbench id changes. */
+  agentPreset?: (presetId: string) => string
 }
 export type NativeEventRemapper = (event: SessionEvent, context: NativeSessionRemap) => SessionEvent
 
@@ -89,6 +91,9 @@ export function remapNativeEvent(event: SessionEvent, context: NativeSessionRema
       if (!object(file)) throw new Error('交付文件记录无效。')
       return { ...file, path: remapSessionFilePath(file.path, context) }
     })
+  } else if (row.type === 'agent-preset/selected') {
+    if (typeof row.data.agentPreset !== 'string') throw new Error('会话模式记录无效。')
+    if (context.agentPreset) row.data.agentPreset = context.agentPreset(row.data.agentPreset)
   } else if (row.type.startsWith('team/') || row.type.startsWith('tool-workflow/') || row.type === 'workspace/changes') {
     throw new Error('该会话资源需要已注册的迁移适配器：' + row.type)
   }
@@ -192,7 +197,8 @@ export class NativeSessionPortability {
     if (await fileDigest(resolvePortablePath(directory, row.log)) !== row.sha256) throw new Error('会话日志摘要不一致。')
     const header = materializeCreateHeader({ ...row.header, id: SessionId(mappedSession(row.key, context)),
       ...(row.header.parentSession ? { parentSession: SessionId(mappedSession(row.header.parentSession, context)) } : {}),
-      ...(row.relativeCwd === undefined ? {} : { cwd: resolvePortablePath(context.targetRoot, row.relativeCwd) }) })
+      ...(row.relativeCwd === undefined ? {} : { cwd: resolvePortablePath(context.targetRoot, row.relativeCwd) }),
+      ...(row.header.agentPreset && context.agentPreset ? { agentPreset: context.agentPreset(row.header.agentPreset) } : {}) })
     if (row.header.id !== row.key || (row.header.cwd !== undefined && row.relativeCwd !== portableRelativePath(snapshot.sourceRoot, row.header.cwd))) throw new Error('会话路径或身份清单不一致。')
     const events: SessionEvent[] = []
     for await (const event of readEvents(resolvePortablePath(directory, row.log))) {

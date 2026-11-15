@@ -1,3 +1,5 @@
+import { AGENT_ASSEMBLY_SERVICE } from './agent-assembly-model.ts'
+import type { HostAgentAssemblyStore } from './host-agent-assembly.ts'
 import { readFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -47,6 +49,7 @@ export function installDistributionRoutes(ctx:{get<T>(name:string,strict?:boolea
   const distributionOptions: HostDistributionOptions = {profile,native,settings,credentials:ctx.get<CredentialProvider>('credentials',false),resolve,
     directory: ctx.get<HostWorkbenchDirectory>(WORKBENCH_DIRECTORY_SERVICE, false),
     access: ctx.get<HostWorkbenchAccess>(WORKBENCH_ACCESS_SERVICE, false),
+    agents: () => ctx.get<HostAgentAssemblyStore>(AGENT_ASSEMBLY_SERVICE, false),
     peerAvailable:(name,range)=>{
       if(!name.startsWith('@deepseek-ai/')&&!['react','react-dom'].includes(name))return false
       try { const p=resolver.packageOf(name,import.meta.url);if(!p?.version)return false

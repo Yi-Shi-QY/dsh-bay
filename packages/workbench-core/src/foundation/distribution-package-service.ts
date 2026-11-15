@@ -1,3 +1,4 @@
+import type { PortableAgentAssemblyV1 } from '../agent-assembly-model.ts'
 import { CORE_PORTABLE_EDITORS, type DistributionClientV4, type DistributionImportStatus, type DistributionImportDestination } from '../distribution-contract.ts'
 import { projectLayoutPackage, restoreLayoutPackage, inspectLayoutPackage, type PortableLayoutV2 } from './workbench-layout-package.ts'
 import { inspectWorkbenchPackageV4, buildWorkbenchPackageV4, type WorkbenchPackageModeV4 } from './workbench-package-v4.ts'
@@ -12,7 +13,7 @@ import { WORKBENCH_CORE_VERSION, WORKBENCH_PACKAGE_NAME } from '../release-compa
 import { areasOf } from './document-v3.ts'
 import type { WorkbenchPackageDependencyV4 } from './workbench-package-v4.ts'
 
-export function createDistributionPackageService(options:{client:DistributionClientV4;settings:WorkbenchSettingsScope<WorkbenchSettingsV4>;directory:WorkbenchDirectory;editors:WorkbenchEditorCatalog;rawEditors:WorkbenchEditorCatalog;registry:WorkbenchExtensionRegistryV1;canExport(id:string):boolean;canImport():boolean}) {
+export function createDistributionPackageService(options:{client:DistributionClientV4;settings:WorkbenchSettingsScope<WorkbenchSettingsV4>;directory:WorkbenchDirectory;editors:WorkbenchEditorCatalog;rawEditors:WorkbenchEditorCatalog;registry:WorkbenchExtensionRegistryV1;canExport(id:string):boolean;canImport():boolean;agents?:(workbenchId:string)=>Promise<PortableAgentAssemblyV1|undefined>}) {
   const core=(row:WorkbenchEditorCatalogRow):WorkbenchEditorCatalogRow=>{
     if(!(CORE_PORTABLE_EDITORS as readonly string[]).includes(row.id))return row
     return {...row,distribution:{version:1,portableId:'workbench.core',packageVersion:WORKBENCH_CORE_VERSION,exportPolicy:'reference',sourcePolicy:'binary-only',provides:{editorIds:[row.id]},requires:[],permissions:[],packageName:WORKBENCH_PACKAGE_NAME},
@@ -101,6 +102,8 @@ export function createDistributionPackageService(options:{client:DistributionCli
       // Templates carry reusable configuration, never work progress or local model choices.
       delete layout.orchestration
       delete layout.modelPreference
+      const agents = await options.agents?.(id)
+      if (agents && agents.definitions.length) layout.agents = agents
       if (!includeBackground) delete layout.context
       else if (layout.context) layout.context.areas = {}
       layout.schemaVersion = layout.context === undefined ? 2 : 3

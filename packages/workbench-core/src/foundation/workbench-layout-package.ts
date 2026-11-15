@@ -1,3 +1,4 @@
+import { validatePortableAgents, type PortableAgentAssemblyV1 } from '../agent-assembly-model.ts'
 import { browserSafeUuid } from '../browser-safe-id.ts'
 import type { WorkbenchEditorCatalogRow } from './catalog.ts'
 import { areasOf, validateWorkbenchDocumentV3, type WorkbenchDocumentV3, type WorkbenchNodeV3 } from './document-v3.ts'
@@ -26,6 +27,8 @@ export interface PortableLayoutV2 {
   context?: PortableWorkbenchContextV1
   modelPreference?: PortableWorkbenchV1['modelPreference']
   orchestration?: PortableBayAgentOrchestrationV1
+  /** Assembled agents, carried by template packages. */
+  agents?: PortableAgentAssemblyV1
 }
 export interface LayoutPackageManifestV3 {
   schemaVersion: 3
@@ -112,7 +115,7 @@ export function projectLayoutPackage(
 }
 
 export function validatePortableLayout(value: unknown): asserts value is PortableLayoutV2 {
-  if (!record(value) || !keys(value, ['schemaVersion', 'format', 'retention', 'name', 'description', 'tags', 'document', 'modules', 'warnings', 'context', 'modelPreference', 'orchestration'])
+  if (!record(value) || !keys(value, ['schemaVersion', 'format', 'retention', 'name', 'description', 'tags', 'document', 'modules', 'warnings', 'context', 'modelPreference', 'orchestration', 'agents'])
     || ![2, 3].includes(value.schemaVersion as number) || value.format !== 'dsh-portable-workbench' || value.retention !== 'all-retained-tabs'
     || typeof value.name !== 'string' || !value.name.trim() || value.name.length > 160 || typeof value.description !== 'string' || value.description.length > 4000
     || !Array.isArray(value.tags) || value.tags.length > 32 || value.tags.some(tag => typeof tag !== 'string' || tag.length > 64)
@@ -152,6 +155,7 @@ export function validatePortableLayout(value: unknown): asserts value is Portabl
     || Object.keys(value.modelPreference).some(key => !['provider', 'model', 'label', 'reasoningEffort'].includes(key))
     || Object.values(value.modelPreference).some(item => item !== undefined && (typeof item !== 'string' || item.length > 256)))) throw new Error('模型配置无效。')
   if (value.orchestration !== undefined) validatePortableBayAgentOrchestration(value.orchestration)
+  if (value.agents !== undefined) validatePortableAgents(value.agents)
   if ((value.schemaVersion === 2 && value.context !== undefined) || (value.schemaVersion === 3 && value.context === undefined)) throw new Error('布局版本与 Context 不一致。')
   if (!record(value.document) || !keys(value.document, ['version', 'root', 'activeAreaId']) || value.document.version !== 3) throw new Error('布局版本无效。')
   visit(value.document.root, 0)

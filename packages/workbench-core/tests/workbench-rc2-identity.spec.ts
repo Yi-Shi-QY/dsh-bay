@@ -12,7 +12,7 @@ describe('Workbench DSH RC2 identity', () => {
     const root = json('package.json')
     const core = json('packages/workbench-core/package.json')
     const provenance = json('provenance/dsh-0.2.2-rc.2.json')
-    expect(WORKBENCH_CORE_VERSION).toBe('0.2.2-alpha.18.6')
+    expect(WORKBENCH_CORE_VERSION).toBe('0.2.2-alpha.18.7')
     expect(WORKBENCH_DSH_GENERATION).toBe('0.2.2-rc.2')
     expect(WORKBENCH_UPSTREAM_COMMIT).toBe('ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c')
     expect(core.engines.dsh).toBe(WORKBENCH_DSH_ENGINE_RANGE)

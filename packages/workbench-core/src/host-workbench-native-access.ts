@@ -15,6 +15,7 @@ import type { RemoteAccessBinding, RemoteAccessAction, RemoteAccessCondition } f
 import type { ToolExecution } from '@deepseek-ai/dsh-tools'
 import type { UserMessage } from '@deepseek-ai/dsh-session'
 import type { HostWorkbenchAccess } from './host-workbench-access.ts'
+import type { AgentKitToolEffectV1 } from './agent-kit-contract.ts'
 import type { WorkbenchAccessContext, WorkbenchAccessTarget, WorkbenchCapability } from './workbench-access-contract.ts'
 import type {} from '@deepseek-ai/dsh-api-gateway'
 import type {} from '@deepseek-ai/dsh-api-remote-access'
@@ -112,6 +113,14 @@ export interface WorkbenchPromptAcceptedV1 {
   readonly accessId?: string
 }
 
+/**
+ * Which presets a non-desktop actor may see and select. DSH presets stay
+ * visible; assembled `bay:` presets show only inside their own workbench,
+ * only while registered, and never to a guest when `guestAccess` is `none`.
+ * Without an assembly store every `bay:` preset is hidden.
+ */
+export type PresetOffer = (workbenchId: string, presetId: string, guest: boolean) => boolean
+
 export function createGuestNativeTransport(ctx: Context, access: HostWorkbenchAccess) {
   const connection = ctx.get('connection', false), gateway = ctx.get('typertGateway', false), remoteAccess = ctx.get('remoteAccess', false)
   if (!connection || !gateway || !remoteAccess) return undefined
@@ -132,6 +141,18 @@ export function createGuestNativeTransport(ctx: Context, access: HostWorkbenchAc
   const wss = new WebSocketServer({ noServer: true, maxPayload: LIMIT, perMessageDeflate: false })
   let disposed = false
 
+  const offers: PresetOffer = (workbenchId, presetId, guest) => {
+    const store = ctx.get('workbenchAgentAssembly', false) as { offers?: PresetOffer } | undefined
+    return store?.offers ? store.offers(workbenchId, presetId, guest) : !presetId.startsWith('bay:')
+  }
+  const presetAllowed = (value: WorkbenchAccessContext, presetId: unknown) =>
+    typeof presetId === 'string' && offers(value.workbenchId!, presetId, value.actor === 'lan-guest')
+  const filterPresetRoster = async (response: Response, value: WorkbenchAccessContext): Promise<Response> => {
+    const body = await response.json() as { type?: string; rpcId?: string; result?: { ok?: boolean; value?: { presets?: { id?: unknown }[] } } }
+    const presets = body.result?.ok ? body.result.value?.presets : undefined
+    if (Array.isArray(presets)) body.result!.value!.presets = presets.filter(row => presetAllowed(value, row?.id))
+    return Response.json(body, { status: response.status })
+  }
   const current = (input: WorkbenchAccessContext | string) => {
     if (disposed) throw failure('工作台访问服务已停止。')
     const value = access.getContext(typeof input === 'string' ? input : input.accessId)
@@ -278,6 +299,13 @@ export function createGuestNativeTransport(ctx: Context, access: HostWorkbenchAc
     if (['read', 'read_image'].includes(exec.name)) { capability = 'read-files'; rawPath = typeof args.file_path === 'string' ? args.file_path : undefined }
     if (['grep', 'glob'].includes(exec.name)) { capability = 'read-files'; rawPath = typeof args.path === 'string' ? args.path : '.' }
     if (['write', 'edit', 'str_replace_editor'].includes(exec.name)) { capability = exec.name === 'str_replace_editor' && args.command === 'view' ? 'read-files' : 'write-files'; rawPath = typeof args.file_path === 'string' ? args.file_path : typeof args.path === 'string' ? args.path : undefined }
+    if (capability === undefined) {
+      const kit = ctx.get('workbenchAgentKit', false) as { effectForName?: (name: string) => AgentKitToolEffectV1 | undefined } | undefined
+      const effect = kit?.effectForName?.(exec.name)
+      // Custom read tools are safe under a read-only guest grant. Writes and
+      // external effects still take the normal one-shot Host approval path.
+      if (effect === 'read') return true
+    }
     // Composite programs, patches, commands, plugins, memory and delegation are
     // deliberately sent to the operator unless an adapter knows every target.
     if (!capability) return false
@@ -513,6 +541,7 @@ export function createGuestNativeTransport(ctx: Context, access: HostWorkbenchAc
           // client baseline. Keep the Host lease as the source of truth for
           // every mutation, including mutations without a prompt inspect.
           access.authorize(current(input), endpoint === 'session/prompt' ? 'message' : 'tasks', targetFor(current(input), targetId))
+          if (endpoint === 'agentPresets/select' && !presetAllowed(current(input), args.agentPreset)) throw failure('这个模式不属于分享的工作台，或不对访客开放。')
           const promptId = mutationRequest.requestId
           if (endpoint === 'session/prompt' && current(input).actor === 'browser-owner' && typeof promptId === 'string') {
             const previous = browserOwnerPrompts.get(promptId)
@@ -528,13 +557,16 @@ export function createGuestNativeTransport(ctx: Context, access: HostWorkbenchAc
           return Response.json({ type: 'server-response', rpcId, result: { ok: true, value } })
         }
         const headers = new Headers({ 'content-type': 'application/json' })
-        return await handler.fetch(new Request(request.url, { method: 'POST', body: bytes, headers, signal: request.signal }), peerFor(input))
+        const response = await handler.fetch(new Request(request.url, { method: 'POST', body: bytes, headers, signal: request.signal }), peerFor(input))
+        return endpoint === 'agentPresets/list' ? filterPresetRoster(response, current(input)) : response
       } catch (error) {
         const result = { ok: false, error: gateway.wireStream.failure(error) }
         return rpcId === undefined ? Response.json(result, { status: 403 }) : Response.json({ type: 'server-response', rpcId, result })
       }
     },
     openStream,
+    /** Exposed for tests: whether a non-desktop actor may use a preset. */
+    presetAllowed,
     /** Subscribe to accepted prompts, including the desktop owner's. */
     onPromptAccepted(listener: (input: WorkbenchPromptAcceptedV1) => void) { promptListeners.add(listener); return () => { promptListeners.delete(listener) } },
     notifyPromptAccepted,

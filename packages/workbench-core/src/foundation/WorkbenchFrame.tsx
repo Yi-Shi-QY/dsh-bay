@@ -193,7 +193,7 @@ import {
 } from '../client/workbench-window-controller.ts'
 import type { WorkbenchToolGatewayManagerV1 } from '../tool-gateway.ts'
 import type { WorkbenchToolUsageServiceV1 } from '../tool-usage.ts'
-import { WorkbenchToolGatewayDialog } from './WorkbenchToolGatewayDialog.tsx'
+import { WorkbenchAgentAssemblyDialog } from './WorkbenchAgentAssemblyDialog.tsx'
 import type { WorkbenchShareControllerV1, WorkbenchShareSnapshotV1 } from '../client/workbench-share-controller.ts'
 import { DESKTOP_WORKBENCH_SURFACE_V1, type WorkbenchSurfaceContextV1, type WorkbenchSurfaceContextV2 } from '../client/workbench-surface-context.ts'
 import type { WorkbenchCollaborationClientV1 } from '../client/workbench-collaboration-client.ts'
@@ -3395,7 +3395,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
                               setWorkbenchMenuOpenId(undefined); setWorkbenchMenuPosition(undefined)
                               workbenchMenuAnchorRef.current = undefined
                               setToolGatewayOpenId(row.workbenchId)
-                            }}><IconSettingsOutlineMedium size={16} /><span>工具集成</span></button>}
+                            }}><IconSettingsOutlineMedium size={16} /><span>Agent 组装</span></button>}
                             <WorkbenchBrowserAction
                               workbenchId={row.workbenchId}
                               workbenchName={row.name}
@@ -3786,12 +3786,11 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
       {toolGatewayOpenId !== undefined && props.toolGateway !== undefined ? (() => {
         const row = workbenchDirectorySnapshot.rows.find(item => item.workbenchId === toolGatewayOpenId)
         if (row === undefined) return null
-        return <WorkbenchToolGatewayDialog
+        return <WorkbenchAgentAssemblyDialog
           gateway={props.toolGateway.forWorkbench(toolGatewayOpenId)}
           workbenchId={toolGatewayOpenId}
           workbenchName={row.name}
           editors={editors}
-          {...(props.toolUsageService === undefined ? {} : { usageService: props.toolUsageService })}
           returnFocusRef={toolGatewayReturnFocusRef}
           onClose={() => setToolGatewayOpenId(undefined)}
         />

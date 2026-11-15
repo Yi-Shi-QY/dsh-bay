@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "kind": "dsh-bay-dependency-map",
   "product": "DSH Bay",
-  "candidate": "0.2.2-alpha.18.6",
+  "candidate": "0.2.2-alpha.18.7",
   "dshGeneration": "0.2.2-rc.2",
   "upstreamCommit": "ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c",
   "purpose": "Record direct declarations, host-provided DSH closure, upstream package paths, source mirrors, resource identities and verification entry points for recurring local diff and npm drift scans.",
@@ -378,6 +378,27 @@
       ],
       "changeSignals": ["resource address scheme change", "desktop user-agent marker change", "task/subagent navigation change"],
       "verification": ["pnpm test", "DSH desktop acceptance"]
+    },
+    {
+      "id": "assembled-agent-preset-rows",
+      "kind": "dsh-preset-plugin-module",
+      "impact": "P0",
+      "evidence": ["packages/workbench-core/src/host-agent-preset.ts", "docs/AGENT-ASSEMBLY-DESIGN.zh-CN.md"],
+      "members": [
+        "@deepseek-ai/dsh-web-app",
+        "@deepseek-ai/dsh-persona",
+        "@deepseek-ai/dsh-agent-instructions",
+        "@deepseek-ai/dsh-tool-ask-user",
+        "@deepseek-ai/dsh-tool-bash",
+        "@deepseek-ai/dsh-tool-fs",
+        "@deepseek-ai/dsh-tool-fs-search",
+        "@deepseek-ai/dsh-tool-pwsh",
+        "@deepseek-ai/dsh-tool-skill",
+        "@deepseek-ai/dsh-tool-todo",
+        "@deepseek-ai/dsh-tool-web"
+      ],
+      "changeSignals": ["standard or minimal preset rows change in @deepseek-ai/dsh-web-app/presets/*.patch.yml", "plugin module rename or config schema change"],
+      "verification": ["pnpm test packages/workbench-core/tests/host-agent-assembly.spec.ts", "DSH desktop acceptance"]
     }
   ],
   "sourceCopies": [

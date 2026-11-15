@@ -241,6 +241,18 @@ export class HostWorkbenchDirectory {
       writeFileSync(path.join(folder, '区域说明.md'), renderAreaContextMarkdown(areaContextOf(context)), 'utf8')
     }
   }
+  /** One revision per file. Written through the same serial writer as workbench.json. */
+  async writeAgentDefinition(id: string, agentId: string, revision: number, value: unknown): Promise<void> {
+    if (!/^[a-z][a-z0-9-]{1,62}$/u.test(agentId) || !Number.isInteger(revision) || revision < 1 || revision > 999999) throw new Error('Agent 标识或修订号无效。')
+    await this.serial(async () => { atomicJson(path.join(this.rootPath(id), '.bay', 'agents', `${agentId}@${revision}.json`), value) })
+  }
+  /** Which revisions are the live DSH modes. The file is internal and never listed as an agent. */
+  async writeAgentSelection(id: string, value: unknown): Promise<void> {
+    await this.serial(async () => { atomicJson(path.join(this.rootPath(id), '.bay', 'agents', 'selection.json'), value) })
+  }
+  async writeAgentSuggestion(id: string, value: unknown): Promise<void> {
+    await this.serial(async () => { atomicJson(path.join(this.rootPath(id), '.bay', 'agents', 'suggested.json'), value) })
+  }
   rootPath(id: string): string { const root = this.registry.registrations[id]?.rootPath; if (!root || !this.records.has(id)) throw new Error('工作台目录未登记或已失联。'); return root }
   async resolveDirectory(id: string, relativePath: string, create = false): Promise<string> {
     if (relativePath.split('/').some(part => part.toLowerCase() === '.bay')) throw new Error('内部工作台目录不能作为区域项目。')

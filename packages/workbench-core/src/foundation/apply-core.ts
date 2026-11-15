@@ -1,3 +1,4 @@
+import { fetchPortableAgents } from '../agent-assembly-model.ts'
 import { browserSafeUuid } from '../browser-safe-id.ts'
 import { installWorkbenchSidebarShortcuts } from '../client/workbench-sidebar-shortcuts.tsx'
 import { workbenchFetch } from '../client/workbench-access.ts'
@@ -607,7 +608,7 @@ export function applyWorkbenchCoreFoundation(
     return operation
   }
   const settingsPage = {
-    ...(windowView === undefined ? { distributionPackage: createWorkbenchPackageService({version:4,client: createDistributionClient(), settings, directory, editors: editorCatalog, rawEditors: slotEditorCatalog, registry: extensionRegistry, canExport: id => settingsTargetWritable(settingsContext, id, windowController), canImport: () => settingsContext.mode === 'desktop'}) } : {}),
+    ...(windowView === undefined ? { distributionPackage: createWorkbenchPackageService({version:4,client: createDistributionClient(), settings, directory, editors: editorCatalog, rawEditors: slotEditorCatalog, registry: extensionRegistry, canExport: id => settingsTargetWritable(settingsContext, id, windowController), canImport: () => settingsContext.mode === 'desktop', agents: id => fetchPortableAgents(id)}) } : {}),
     layoutPackage: createWorkbenchLayoutPackageService({ settings, directory, editors: editorCatalog, journal: createLayoutImportJournal(),
       canExport: id => settingsTargetWritable(settingsContext, id, windowController), canImport: () => settingsContext.mode === 'desktop' }),
     settingsContext,

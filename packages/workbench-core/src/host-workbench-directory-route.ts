@@ -12,6 +12,10 @@ import { areasOf } from './foundation/document-v3.ts'
 import { allocateSessionMarker, validateSessionLabel } from './foundation/session-markers.ts'
 import { validSessionMarker, workbenchSessionLocation } from './host-workbench-session-markers.ts'
 
+/** Assembled presets a browser owner or guest may name when creating a session. Set by agent assembly. */
+let presetOffered: (workbenchId: string, presetId: string, guest: boolean) => boolean = (_workbenchId, presetId) => !presetId.startsWith('bay:')
+export function setDirectoryRoutePresetOffer(offer: typeof presetOffered | undefined) { presetOffered = offer ?? ((_workbenchId, presetId) => !presetId.startsWith('bay:')) }
+
 export function installWorkbenchDirectoryRoute(connection: HostConnectionHandle, directory: HostWorkbenchDirectory, ensureMain: (id: string) => Promise<unknown>, memory?: HostWorkbenchMemory,
   createSession?: (input: { workbenchId: string; areaId: string; requestId: string; agentPreset: string; workspaceId: string }) => Promise<string>, access?: HostWorkbenchAccess,
   readExtensionInventory?: () => Promise<unknown>) {
@@ -55,6 +59,7 @@ export function installWorkbenchDirectoryRoute(connection: HostConnectionHandle,
       if (access && actor) {
         if (['create', 'create-preflight'].includes(String(body.action)) && actor.actor !== 'desktop') throw new WorkbenchAccessError('create-denied', '请在 DSH 中选择父目录并新建工作台。')
         if (mutation && actor.actor !== 'desktop' && (typeof body.requestId !== 'string' || !body.requestId)) throw new WorkbenchAccessError('request-id-required', '修改操作缺少请求标识。', 400)
+        if (body.action === 'create-session' && actor.actor !== 'desktop' && typeof body.agentPreset === 'string' && typeof body.workbenchId === 'string' && !presetOffered(body.workbenchId, body.agentPreset, actor.actor === 'lan-guest')) throw new WorkbenchAccessError('agent-preset-denied', '这个模式不属于分享的工作台，或不对访客开放。')
         if (body.action === 'register-session' && actor.actor !== 'desktop') throw new WorkbenchAccessError('session-registration-denied', '请通过区域新建会话或打开已登记的会话。')
         if (body.action === 'prepare-creator-repair' && actor.actor !== 'desktop') throw new WorkbenchAccessError('creator-repair-desktop-required', '请在 DSH 客户端中打开插件修复会话。')
         if (patch) {

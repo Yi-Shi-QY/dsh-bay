@@ -12,7 +12,7 @@ import type { WorkbenchRecordV2 } from '../src/foundation/persistence.ts'
 
 const cleanup: (() => unknown)[] = []
 afterEach(async () => { for (const fn of cleanup.splice(0).reverse()) await fn() })
-async function fixture() {
+async function fixture(options: { sharedFetch?: (request: Request, peer: any) => Promise<Response>; services?: Record<string, unknown> } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'bay-native-access-')); cleanup.push(() => rm(root, { recursive: true, force: true }))
   const directory = new HostWorkbenchDirectory(join(root, 'profile'), { create: async () => ({ id: 'workspace' }) } as never)
   for (const id of ['one', 'other']) {
@@ -32,7 +32,7 @@ async function fixture() {
     browserPeer: { principal: { kind: 'owner' } },
     fetch: { register: (route: any) => { routes.set(route.path, route); return async () => { routes.delete(route.path) } } },
     createPeer: ({ principal }: any) => { const controller = new AbortController(); const peer = { principal, signal: controller.signal, dispose: () => controller.abort() }; peers.push(peer); return peer },
-    createSharedFetchHandler: () => ({ fetch: vi.fn(async (_request: Request, peer: any) => Response.json({ kind: peer.principal.kind })) }),
+    createSharedFetchHandler: () => ({ fetch: vi.fn(options.sharedFetch ?? (async (_request: Request, peer: any) => Response.json({ kind: peer.principal.kind }))) }),
   }
   const invoke = vi.fn(async ({ namespace, method, args, peer }: any) => {
     const sessionId = args.request?.sessionId ?? args.sessionId ?? args.agentId ?? args.workspaceFileScopeId
@@ -49,6 +49,7 @@ async function fixture() {
     } },
     sessionPersistence: { stat: async (id: string) => ({ header: { cwd: join(root, id === 'main' ? 'one' : id.split('-')[0]!, id === 'main' ? '' : 'project') } }), open: async () => ({ read: async (offset = 0) => ({ events: offset ? [] : [{ content: [{ type: 'image', attachment: { attachmentId: 'mine' } }] }] }), [Symbol.asyncDispose]: async () => {} }) },
     workingDirectory: { get: () => join(root, 'one', 'project') },
+    ...options.services,
   }
   const ctx = { get: (key: string) => services[key], on: (event: string, fn: Function) => { hooks.set(event, fn); return () => hooks.delete(event) }, tools: services.tools } as unknown as Context
   const transport = createGuestNativeTransport(ctx, access)!; cleanup.push(() => transport.dispose())
@@ -185,6 +186,15 @@ it('shares native operations through one Host grant and invalidates execution on
   expect(await f.step([], 1)).toEqual({ kind: 'reject' })
 })
 
+it('lets a read-only guest use a mounted read-effect AgentKit tool without extra approval', async () => {
+  const f = await fixture({ services: { workbenchAgentKit: { effectForName: (name: string) => name === 'workbench_quote_lookup' ? 'read' : undefined } } })
+  await f.step([f.message('guest')])
+  const exec = f.tool('workbench_quote_lookup', { quoteId: 'q-1' })
+  expect(await f.hooks.get('tools/pre-execute')!(exec, async () => ({ kind: 'allow' }))).toEqual({ kind: 'allow' })
+  expect(f.transport.pending('one')).toHaveLength(0)
+  expect(f.guards[0]!(exec)).toBeUndefined()
+})
+
 it('fences native owner mutation routes while preserving unrelated native Sessions', async () => {
   const f = await fixture()
   cleanup.push(installWorkbenchNativeMutationRoutes(f.ctx, f.access, f.transport))
@@ -277,4 +287,23 @@ it('streams only uploads for authorized Sessions and rechecks access as bytes ar
   expect((await upload('other-session')).status).toBe(403)
   expect((await upload('main')).status).toBe(200)
   expect(uploadStream).toHaveBeenCalledTimes(2)
+})
+
+it('hides other workbenches and guest-blocked assembled presets from the native picker and refuses to select them', async () => {
+  const open = new Set(['bay:one:open@1'])
+  const roster = { presets: [{ id: 'standard', isDefault: true }, { id: 'bay:one:open@1', isDefault: false }, { id: 'bay:one:secret@1', isDefault: false }, { id: 'bay:other:x@1', isDefault: false }] }
+  const f = await fixture({
+    sharedFetch: async () => Response.json({ type: 'server-response', rpcId: 'rpc', result: { ok: true, value: roster } }),
+    services: { workbenchAgentAssembly: { offers: (workbenchId: string, presetId: string, guest: boolean) => !presetId.startsWith('bay:') || (workbenchId === 'one' && (!guest || open.has(presetId)) && !presetId.startsWith('bay:other:')) } },
+  })
+  const listed = await f.http('agentPresets/list', {}) as { result: { value: { presets: { id: string }[] } } }
+  expect(listed.result.value.presets.map(row => row.id)).toEqual(['standard', 'bay:one:open@1'])
+  const denied = await f.http('agentPresets/select', { agentId: 'one-session', agentPreset: 'bay:one:secret@1' })
+  expect(denied).toMatchObject({ result: { ok: false } })
+  expect(f.invoke).not.toHaveBeenCalled()
+  const foreign = await f.http('agentPresets/select', { agentId: 'one-session', agentPreset: 'bay:other:x@1' })
+  expect(foreign).toMatchObject({ result: { ok: false } })
+  // Positive control: the same guest may select an open preset, so the denials above came from the preset check.
+  expect(await f.http('agentPresets/select', { agentId: 'one-session', agentPreset: 'bay:one:open@1' })).toMatchObject({ result: { ok: true } })
+  expect(f.invoke).toHaveBeenCalledTimes(1)
 })

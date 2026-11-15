@@ -1,3 +1,4 @@
+import type { PortableAgentAssemblyV1 } from './agent-assembly-model.ts'
 import { generateKeyPairSync, createPrivateKey, createPublicKey, sign, createHash } from 'node:crypto'
 import { readFile, mkdir, writeFile, readdir, realpath } from 'node:fs/promises'
 import { join, isAbsolute, resolve as resolvePath } from 'node:path'
@@ -42,6 +43,8 @@ export interface HostDistributionOptions {
   fetchArtifact?(dependency: WorkbenchPackageDependencyV4): Promise<Uint8Array>
   directory?: HostWorkbenchDirectory | undefined
   access?: Pick<HostWorkbenchAccess, 'run'> | undefined
+  /** Writes template agents into the imported workbench. The source registration choice becomes a suggestion. */
+  agents?: (() => { importPortable(workbenchId: string, agents: PortableAgentAssemblyV1, source: 'template-signed' | 'template-unsigned'): Promise<unknown> } | undefined) | undefined
 }
 const txId = /^distribution-[a-f0-9-]{36}$/u
 const hash = /^[a-f0-9]{64}$/u
@@ -146,11 +149,21 @@ export function createHostDistributionService(options: HostDistributionOptions) 
     for (const d of row.dependencies) { try { await installer.check(d) } catch(e) { blockers.push((e as Error).message) } }
     return blockers
   }
+  // Agents come from the re-verified archive, not the transaction file. Existing
+  // revisions are skipped, so this is safe to repeat on every retry.
+  const importAgents=async(row:Transaction)=>{
+    const agents=options.directory&&options.agents?.()
+    if(!agents)return
+    const layout=(await previewFor(row)).layout
+    if(layout.agents)await agents.importPortable(row.workbenchId,layout.agents,row.mode==='layout-only'?'template-unsigned':'template-signed')
+  }
   const reconcileCommit=async(row:Transaction)=>{
     const record=settingsSnapshot().value?.workbenches[row.workbenchId]
     if(!record)return false
     if(record.offlineOrigin?.archiveSha256!==row.archiveSha256)throw new Error('导入目标已被其他工作台占用。')
     if (options.directory && (!row.destination || options.directory.rootPath(row.workbenchId) !== join(row.destination.parentPath, row.destination.folderName))) throw new Error('导入目标文件夹与原事务不一致。')
+    // A crash between directory.create and the agent write lands here on retry.
+    await importAgents(row)
     row.state=row.pendingPageIds?.length||areasOf(record.document.root).some(a=>a.moduleHistory.some(p=>p.pendingBinding))?'needs-input':'ready'
     await save(row);return true
   }
@@ -404,6 +417,7 @@ export function createHostDistributionService(options: HostDistributionOptions) 
           await options.directory.create({ requestId: row.transactionId, ...row.destination!, record: { ...record, packageOrigin }, open: false, extensionConsents: consents })
         } else await options.settings.mutate('workbench-layout',[{op:'set',path:[],value:next}],revision)
       }
+      await importAgents(row)
       row.state=pendingPageIds.length||actual.some(a=>a.moduleHistory.some(p=>p.pendingBinding))?'needs-input':'ready';row.blockers=[];await save(row);return publicRow(row)
     })},
     restorePending(id:string,document:WorkbenchDocumentV3,expectedDocument:WorkbenchDocumentV3,restoredPageIds:string[]){return serialized(id,async()=>{

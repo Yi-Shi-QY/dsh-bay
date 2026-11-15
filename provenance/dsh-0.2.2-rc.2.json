@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "candidateId": "dsh-bay-0.2.2-alpha.18.6-dsh-0.2.2-rc.2",
+  "candidateId": "dsh-bay-0.2.2-alpha.18.7-dsh-0.2.2-rc.2",
   "product": "DSH Bay / 湾域",
-  "workbenchVersion": "0.2.2-alpha.18.6",
+  "workbenchVersion": "0.2.2-alpha.18.7",
   "dshGeneration": "0.2.2-rc.2",
   "derivedFrom": {
     "repository": "dsh-bay",
@@ -94,18 +94,18 @@
     "patch": "665aef8a2b9fc094d847dc261c690c8bf14d35f2bf46513ed560beb03cf491a0"
   },
   "artifact": {
-    "path": "releases/alpha18.6-rc2-archive-fix-private/dsh-bay-0.2.2-alpha.18.6.tgz",
-    "size": 1408268,
-    "sha256": "ee9c7b1207103fe21a30658da0f58f016cfb57778d4055f8c54eeb154e7556d9",
-    "integrity": "sha512-m7/TWICLtDOHNr7M6r9AJlmZurY2qmSNpYKcr/kRYGiqGQ9UONmCY87PJeSbWL/hnSuo2ceYdWh2F+6XPNsJxQ=="
+    "path": "releases/alpha18.7-rc2-private/dsh-bay-0.2.2-alpha.18.7.tgz",
+    "size": 1436776,
+    "sha256": "cbe1dcd9992f17d6c54de56b54bd3551c0a63afe370c7dc06ce9aefaf17f4d1c",
+    "integrity": "sha512-vpBSdxmzSxNfeH8Qj69XF/HNI4aL7e/XgI0JaWKnWY7VXEQ1NkqgVQQq01RIsfVqiqqyoobNqIl4hym5UFroKA=="
   },
   "validation": {
     "sourceConsistency": "passed-pnpm-check-compat; 36-sidebar-workspace-files-and-4-private-renderer-files",
     "coreTests": "passed-177-files-1197-tests",
     "typecheck": "passed-pnpm-pack-core-host-client-declarations",
     "build": "passed-pnpm-pack-core; host-client-declarations-built",
-    "distributionAcceptance": "private-alpha.18.6-package-created-and-digest-verified; not-installed",
-    "desktopAcceptance": "user-installed-alpha.18.5-and-reproduced-archive-restore-remove-failure; alpha.18.6-pending-installation",
+    "distributionAcceptance": "private-alpha.18.7-package-pending",
+    "desktopAcceptance": "user-installed-alpha.18.5-and-reproduced-archive-restore-remove-failure; alpha.18.6-pending-installation; alpha.18.7-pending-installation",
     "secondDeviceAcceptance": "not-run"
   },
   "publication": {

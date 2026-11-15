@@ -27,8 +27,10 @@ function tool(overrides: Partial<ToolContributionV1> = {}): ToolContributionV1 {
 describe('Workbench Tool Gateway Alpha.15', () => {
   it('accepts all four tool kinds and rejects invalid identity', () => {
     for (const kind of ['mcp', 'cli', 'tool', 'skill'] as const) {
-      expect(() => validateToolContributionV1(tool({ id: `example.${kind}`, kind }))).not.toThrow()
+      const id = kind === 'tool' || kind === 'skill' ? `workbench.github.${kind}` : `example.${kind}`
+      expect(() => validateToolContributionV1(tool({ id, kind }))).not.toThrow()
     }
+    expect(() => validateToolContributionV1(tool({ id: 'github.search', kind: 'tool' }))).toThrow('must start with workbench.github.')
     expect(() => validateToolContributionV1(tool({ id: 'bad id' }))).toThrow('id is invalid')
     expect(() => validateToolContributionV1(tool({ artifactDigest: 'bad' }))).toThrow('artifactDigest')
   })
@@ -52,7 +54,7 @@ describe('Workbench Tool Gateway Alpha.15', () => {
     })).toThrow('cannot require')
     expect(() => validateContainerEditorContributionV1({
       id: 'editor.standalone-tools', moduleId: 'workbench.example', editorId: 'example.standalone-tools',
-      type: 'standalone', binding: { kind: 'none' }, provides: { tool: ['example.tool'] },
+      type: 'standalone', binding: { kind: 'none' }, provides: { tool: ['workbench.example.tool'] },
     })).toThrow('cannot expose')
   })
 
@@ -125,7 +127,8 @@ describe('Workbench Tool Gateway Alpha.15', () => {
   it('adapts all provider kinds and isolates policy by Workbench', async () => {
     const adapters = createToolProviderAdaptersV1()
     for (const kind of ['mcp', 'cli', 'tool', 'skill'] as const) {
-      const { kind: _kind, ...source } = tool({ id: `adapter.${kind}` })
+      const id = kind === 'tool' || kind === 'skill' ? `workbench.github.adapter.${kind}` : `adapter.${kind}`
+      const { kind: _kind, ...source } = tool({ id })
       expect(adapters[kind].adapt(source)).toMatchObject({ kind })
     }
     let active = 'one'

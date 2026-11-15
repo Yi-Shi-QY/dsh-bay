@@ -1,6 +1,6 @@
 # DSH Bay 封包与发布
 
-更新日期：2026-11-13。当前私有候选为 `dsh-bay@0.2.2-alpha.18.6`，目标 DSH `0.2.2-rc.2`。本轮只生成私有候选；桌面实机和第二设备验收状态见 [VALIDATION.md](VALIDATION.md)。
+更新日期：2026-11-13。当前私有候选为 `dsh-bay@0.2.2-alpha.18.7`，目标 DSH `0.2.2-rc.2`。本轮只生成私有候选；桌面实机和第二设备验收状态见 [VALIDATION.md](VALIDATION.md)。
 
 ## 私有实验包流程
 
@@ -23,8 +23,8 @@ pnpm pack:core
 默认输出：
 
 ```text
-releases/alpha18.6-rc2-private/
-├─ dsh-bay-0.2.2-alpha.18.6.tgz
+releases/alpha18.7-rc2-private/
+├─ dsh-bay-0.2.2-alpha.18.7.tgz
 └─ candidate.json
 ```
 

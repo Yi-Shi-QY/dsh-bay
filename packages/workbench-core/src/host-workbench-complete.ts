@@ -1,3 +1,4 @@
+import { remapAgentPresetId } from './agent-assembly-model.ts'
 import { hydrateProjects } from './host-workbench-projects.ts'
 import { createHash, randomUUID } from 'node:crypto'
 import { createReadStream, createWriteStream, existsSync, readFileSync, readdirSync } from 'node:fs'
@@ -46,6 +47,8 @@ export type CompleteOptions = {
   bootId?: string
   /** Quiesce managed execution before snapshotting; false restores its prior policy. */
   setBarrier?: (workbenchId: string, active: boolean) => Promise<void> | void
+  /** Registers the imported workbench's selected agent revisions right after publication. */
+  agents?: () => { adoptCopiedSelection(workbenchId: string): Promise<void>; restoreWorkbench(workbenchId: string): Promise<unknown> } | undefined
 }
 
 const jobs = new Map<string, CompletePackageJob>()
@@ -426,7 +429,10 @@ export function installWorkbenchCompleteRoute(connection: HostConnectionHandle, 
     }
     signal?.throwIfAborted()
     const envelope = JSON.parse(await readFile(path.join(stage, 'workbench', '.bay', 'workbench.json'), 'utf8')) as FileWorkbenchV1
+    const sourceWorkbenchId = envelope.record.workbenchId
     envelope.record.workbenchId = job.workbenchId
+    const agentPreset = (presetId: string) => remapAgentPresetId(presetId, sourceWorkbenchId, job.workbenchId)
+    for (const entry of Object.values(envelope.record.sessionCatalog ?? {})) if (entry.agentPreset) entry.agentPreset = agentPreset(entry.agentPreset)
     if (job.name) envelope.record.name = job.name
     envelope.record.executionPaused = true
     const snapshot = JSON.parse(await readFile(path.join(stage, 'native', 'native-sessions.json'), 'utf8')) as NativeSessionSnapshot
@@ -444,6 +450,8 @@ export function installWorkbenchCompleteRoute(connection: HostConnectionHandle, 
       const current = options.directory.sessionMap(job.workbenchId)
       if (options.directory.rootPath(job.workbenchId) !== target || Object.keys(current).length !== Object.keys(logicalSessions).length
         || Object.entries(logicalSessions).some(([key, id]) => current[key] !== id)) throw new Error('已发布工作台与导入作业身份不一致。')
+      await options.agents?.()?.adoptCopiedSelection(job.workbenchId)
+      await options.agents?.()?.restoreWorkbench(job.workbenchId)
       return finishImport(job, manifest)
     }
     const extensionLocks = manifest.extensions ?? job.extensions?.map(row => row.extension) ?? []
@@ -488,7 +496,7 @@ export function installWorkbenchCompleteRoute(connection: HostConnectionHandle, 
     update(options.profile, job, { stage: 'sessions', sessionMap, sourceRoot: snapshot.sourceRoot, manifestSha256 })
     const native = new NativeSessionPortability(options.persistence, options.attachments, adapters)
     signal?.throwIfAborted()
-    const remap = { sessionIds: sessionMap, sourceRoot: snapshot.sourceRoot, targetRoot: target }
+    const remap = { sessionIds: sessionMap, sourceRoot: snapshot.sourceRoot, targetRoot: target, agentPreset }
     await native.importSnapshot(snapshot, path.join(stage, 'native'), remap, signal)
     update(options.profile, job, { stage: 'extension-data' })
     if (manifest.version === 6) await migrations.restoreData(extensionLocks, JSON.parse(await readFile(path.join(stage, 'extension-data.json'), 'utf8')), { jobId: job.id, workbenchId: job.workbenchId, root: target, remap })
@@ -522,6 +530,9 @@ export function installWorkbenchCompleteRoute(connection: HostConnectionHandle, 
     }
     update(options.profile, job, { stage: 'publish', publicationReady: true })
     await options.directory.publishImported(target, envelope, logicalSessions)
+    // The source's registration choice is a suggestion; the receiving person registers.
+    await options.agents?.()?.adoptCopiedSelection(job.workbenchId)
+    await options.agents?.()?.restoreWorkbench(job.workbenchId)
     return finishImport(job, manifest)
   }
 

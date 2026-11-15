@@ -1,4 +1,5 @@
 import { installBayAgentHost } from './host-bay-agent.ts'
+import { installAgentAssemblyHost } from './host-agent-assembly-service.ts'
 import { installWorkbenchDirectoryHost } from './host-workbench-directory-service.ts'
 import { installWorkbenchNativeAccess } from './host-workbench-native-service.ts'
 import { installLayoutImportJournalRoute } from './host-layout-import-journal.ts'
@@ -7,6 +8,7 @@ import { installDistributionRoutes } from './host-distribution-route.ts'
 import { CompleteMigrationRegistry, WORKBENCH_COMPLETE_MIGRATIONS } from './host-complete-migrations.ts'
 export { CompleteMigrationRegistry, WORKBENCH_COMPLETE_MIGRATIONS, type CompleteMigrationProvider } from './host-complete-migrations.ts'
 export * from './module-contract.ts'
+export * from './agent-kit-contract.ts'
 export {
   isWorkbenchExtensionDeclarationV1,
   validateWorkbenchExtensionDeclarationV1,
@@ -118,6 +120,8 @@ export function apply(ctx: WorkbenchCoreHostContextV1): void {
   installWorkbenchCoreProfileServices(context as WorkbenchCoreHostContextV1 & { get<T = unknown>(name: string): T | undefined; provide(name: string, value: unknown): unknown })
   const disposeDirectoryHost = installWorkbenchDirectoryHost(context as never)
   if (!context.get?.(WORKBENCH_COMPLETE_MIGRATIONS, false)) context.provide(WORKBENCH_COMPLETE_MIGRATIONS, new CompleteMigrationRegistry())
+  // Assembled presets must be registered again before Bay resolves any session that names one.
+  const disposeAgentAssembly = installAgentAssemblyHost(context as never)
   const disposeBayAgent = installBayAgentHost(context as never)
   const disposeNativeAccess = installWorkbenchNativeAccess(context as never)
   const runtime = createWorkbenchCoreRuntime({ core: WORKBENCH_CORE_MANIFEST })
@@ -166,5 +170,5 @@ export function apply(ctx: WorkbenchCoreHostContextV1): void {
     disposeHostRoutes = installHostRoutes(context)
     installWorkbenchCreatorSkillProvider(context.get?.('skills') as never)
   }
-  context.effect?.(() => () => { disposeCreatorSkill?.(); disposeNativeAccess?.(); disposeBayAgent?.(); disposeHostRoutes?.(); disposeDirectoryHost?.(); runtime.dispose() }, 'workbench-core: runtime')
+  context.effect?.(() => () => { disposeCreatorSkill?.(); disposeNativeAccess?.(); disposeAgentAssembly?.(); disposeBayAgent?.(); disposeHostRoutes?.(); disposeDirectoryHost?.(); runtime.dispose() }, 'workbench-core: runtime')
 }

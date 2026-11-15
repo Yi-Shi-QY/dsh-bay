@@ -13,6 +13,39 @@
 - Map upstream package paths to Bay consumers and verification steps, compare
   npm tarball integrity to lockfile baselines, and archive weekly scan reports.
 
+## 0.2.2-alpha.18.7 — Assembled agents
+
+- Add the Agent assembly drawer. A person builds an agent from DSH blocks
+  (AGENTS.md, terminal, files, web, skill, agent loop), workbench tools and
+  extra instructions; tool integration is now a tab inside it.
+- Save every revision as `.bay/agents/<agentId>@<revision>.json`. Saving no
+  longer registers; a person picks which revisions are live DSH modes, and the
+  choice is kept in `.bay/agents/selection.json` and replayed on Host start.
+- Unregistering a revision that sessions still use lists those sessions.
+  Revisions whose tools left the catalog show as unavailable and cannot be
+  registered.
+- Bay Agent dispatch offers only the current workbench's registered agents.
+  LAN guests also lose agents whose guest access is `none`, and cannot save,
+  register or export agents.
+- Complete packages register imported agents right after publication and move
+  `bay:<workbench>:` preset ids in the session catalog, session headers,
+  `agent-preset/selected` events and task snapshots to the new workbench id.
+- Template packages carry assembled agents and their registration choice in
+  `workbench.json`. Imports (template and complete) only record the source's
+  choice as a suggestion; the receiving person registers. Unsigned layout-only
+  packages are flagged.
+- Add the Host `workbenchAgentKit` service. Extensions register tool and skill
+  executors there; Core mounts only the entries an assembled revision selected
+  into that agent's own scope. A revision whose selected entries have no Host
+  executor cannot be registered.
+- Filter `agentPresets/list` and check `agentPresets/select` and
+  `create-session` for browser owners and LAN guests, so the native picker
+  cannot reach other workbenches' or guest-blocked agents.
+- Register assembled presets before Bay Agent resolves native sessions.
+- Unregister warnings also list unfinished tasks. Stored definitions are
+  validated strictly instead of being repaired.
+- 18.6 and earlier reject 18.7 template packages that carry agents.
+
 ## 0.2.2-alpha.18.6 — Workbench archive lifecycle
 
 - Allow the DSH desktop to restore or remove archived workbenches through the

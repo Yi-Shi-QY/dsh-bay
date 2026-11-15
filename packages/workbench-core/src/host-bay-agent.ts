@@ -37,6 +37,8 @@ import { WORKBENCH_SESSION_RUNTIME } from './host-workbench-directory-service.ts
 import { WORKBENCH_ACCESS_SERVICE } from './workbench-access-contract.ts'
 import { WorkbenchAccessError } from './host-workbench-access.ts'
 import { currentWorkbenchExecutionOrigin, withWorkbenchExecutionOrigin } from './host-workbench-native-access.ts'
+import { AGENT_ASSEMBLY_READY, AGENT_ASSEMBLY_SERVICE } from './agent-assembly-model.ts'
+import type { HostAgentAssemblyStore } from './host-agent-assembly.ts'
 
 declare module '@deepseek-ai/dsh-llm' { interface MessageSourceMap { 'bay-agent': { kind: 'bay-agent'; form: 'relay'; principal?: { kind: 'bay-workbench'; actor: 'lan-guest' | 'browser-owner'; accessId: string; workbenchId: string; participantId?: string; collaborationId?: string; displayName?: string; inheritedAccessIds?: readonly string[] } } } }
 
@@ -255,6 +257,13 @@ export class BayAgentHost {
       .filter(row => row.id !== 'bay-agent' && !row.broken)
       .map(row => ({ id: row.id, name: row.name ?? row.id, description: row.description?.trim() || '未提供模式介绍' }))
   }
+  /** Modes one workbench may dispatch to; assembled agents from other workbenches stay hidden. */
+  private modesFor(id: string) {
+    const store = this.ctx.get(AGENT_ASSEMBLY_SERVICE, false) as HostAgentAssemblyStore | undefined
+    const guest = currentWorkbenchExecutionOrigin()?.actor === 'lan-guest'
+    const offered = (modeId: string) => store ? store.offers(id, modeId, guest) : !modeId.startsWith('bay:')
+    return { modes: this.modes.filter(mode => offered(mode.id)), capabilities: this.modeCapabilities.filter(mode => offered(mode.id)) }
+  }
   async ensure(id: string) {
     await this.presetReady
     await this.refreshModeCapabilities()
@@ -281,7 +290,7 @@ export class BayAgentHost {
     this.errors.delete(id)
     return sessionId
   }
-  snapshot(id: string) { return { ...this.controller(id).getSnapshot(), agentModes: this.modes, agentModeCapabilities: this.modeCapabilities, areas: this.plane.inspect(id).areas.filter(row => !row.archived).map((row, index) => ({ areaId: row.areaId, label: row.label || `区域 ${index + 1}` })), ...(this.errors.has(id) ? { error: this.errors.get(id) } : {}) } }
+  snapshot(id: string) { const offered = this.modesFor(id); return { ...this.controller(id).getSnapshot(), agentModes: offered.modes, agentModeCapabilities: offered.capabilities, areas: this.plane.inspect(id).areas.filter(row => !row.archived).map((row, index) => ({ areaId: row.areaId, label: row.label || `区域 ${index + 1}` })), ...(this.errors.has(id) ? { error: this.errors.get(id) } : {}) } }
   async createUserSession(input: { workbenchId: string; areaId: string; requestId: string; agentPreset: string; workspaceId: string }): Promise<string> {
     if (!this.directory) throw new Error('工作台目录服务不可用。')
     const key = input.workbenchId + ':' + input.requestId
@@ -345,6 +354,8 @@ export class BayAgentHost {
     } catch { return undefined }
   }
   private async ensureNative(id: string, preset: string, workspaceId?: string) {
+    // Resolving a session that names a `bay:` preset before it is registered again fails recovery.
+    await (this.ctx.get(AGENT_ASSEMBLY_READY, false) as Promise<void> | undefined)
     const found = await this.sessions.resolveAgent(id as never)
     if ('error' in found) {
       if (found.error.code !== 'session/not-found') throw found.error
@@ -451,7 +462,7 @@ export class BayAgentHost {
       const record = this.record(workbenchId)
       const ids = new Set([record.bayAgentSession?.workspaceId, ...Object.values(record.projects ?? record.areaProjects ?? {}).map(project => project.workspaceId)])
       await this.refreshModeCapabilities()
-      return { workbench: this.plane.inspect(workbenchId), tasks: this.snapshot(workbenchId), orchestration: this.controller(workbenchId).getOrchestrationProjection(), modes: this.modes, modeCapabilities: this.modeCapabilities,
+      return { workbench: this.plane.inspect(workbenchId), tasks: this.snapshot(workbenchId), orchestration: this.controller(workbenchId).getOrchestrationProjection(), modes: this.modesFor(workbenchId).modes, modeCapabilities: this.modesFor(workbenchId).capabilities,
         workspaces: this.ctx.get('workspaceRegistry', false)?.list().filter(row => ids.has(row.id)).map(row => ({ workspaceId: row.id, title: row.title, path: row.path })) ?? [] }
     })
     register('bay_history', 'Read a bounded, filtered history of Bay Agent orchestration events. Use this when the current projection is not enough; Session transcripts remain in their native conversations.', { workItemId: textProperty, assignmentId: textProperty, afterSeq: { type: 'integer', minimum: 0 }, limit: { type: 'integer', minimum: 1, maximum: 100 } }, [], async args => {
@@ -503,7 +514,8 @@ export class BayAgentHost {
   async createWork(id: string, args: Record<string, unknown>) {
     const areaId = string(args.areaId, 'areaId'), objective = string(args.objective, 'objective')
     if (!this.plane.inspect(id).areas.some(area => area.areaId === areaId && !area.archived)) throw new Error('area-not-found')
-    const modes = await this.availableWorkerModes()
+    await this.refreshModeCapabilities()
+    const modes = this.modesFor(id).modes
     if (args.agentPreset === undefined) return modes.length
       ? { status: 'mode-selection-required', taskCreated: false, modes, nextAction: 'Choose a mode and call bay_dispatch again with agentPreset set to its id.' }
       : { status: 'no-worker-modes', taskCreated: false, modes: [] }
@@ -596,6 +608,7 @@ export function installBayAgentHost(ctx: Context): (() => void) | undefined {
   const completeMigrations = ctx.get(WORKBENCH_COMPLETE_MIGRATIONS, false) as CompleteMigrationRegistry | undefined
   const disposeComplete = directory && workspaces ? installWorkbenchCompleteRoute(connection, { profile: profile.dir, directory, persistence: ctx.sessionPersistence, attachments: ctx.get('attachments', false) as never, sessions, workspaces, orchestration: host.store,
     extensions: () => ctx.get(WORKBENCH_COMPLETE_EXTENSIONS, false) as CompleteExtensions | undefined,
+    agents: () => ctx.get(AGENT_ASSEMBLY_SERVICE, false) as HostAgentAssemblyStore | undefined,
     ...(completeMigrations ? { migrations: completeMigrations } : {}), ...(access ? { access } : {}) }) : undefined
   const readJson = async (request: Request) => {
     const reader = request.body?.getReader(); if (!reader) throw new Error('body required')

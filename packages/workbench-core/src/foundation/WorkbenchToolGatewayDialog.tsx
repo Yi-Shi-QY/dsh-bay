@@ -45,9 +45,11 @@ function rangeWindow(range: RangeId): { from: string; to: string } {
 }
 function percentage(value: number, total: number): string { return total === 0 ? '暂无' : `${Math.round(value / total * 100)}%` }
 
-export function WorkbenchToolGatewayDialog({ gateway, workbenchId, workbenchName, onClose, editors = [], returnFocusRef }: {
+export function WorkbenchToolGatewayDialog({ gateway, workbenchId, workbenchName, onClose, editors = [], returnFocusRef, embedded = false }: {
   gateway: WorkbenchToolGatewayV1; workbenchId: string; workbenchName: string; onClose: () => void
   editors?: readonly WorkbenchEditorCatalogRow[]; returnFocusRef?: RefObject<HTMLElement>
+  /** Rendered inside the agent assembly dialog, without its own overlay. */
+  embedded?: boolean
 }) {
   const [revision, setRevision] = useState(0)
   const [tab, setTab] = useState<TabId>('visibility')
@@ -76,11 +78,12 @@ export function WorkbenchToolGatewayDialog({ gateway, workbenchId, workbenchName
   const attentionCount = entries.filter(entry => entry.availability !== 'available').length
 
   useEffect(() => {
+    if (embedded) return undefined
     closeRef.current?.focus()
     const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') { event.preventDefault(); onCloseRef.current() } }
     window.addEventListener('keydown', onKeyDown)
     return () => { window.removeEventListener('keydown', onKeyDown); returnFocusRef?.current?.focus() }
-  }, [returnFocusRef])
+  }, [embedded, returnFocusRef])
   useEffect(() => {
     if (tab !== 'usage') return
     const refresh = () => {
@@ -113,15 +116,16 @@ export function WorkbenchToolGatewayDialog({ gateway, workbenchId, workbenchName
     } catch (cause) { setError(cause instanceof Error ? cause.message : '模块工具状态保存失败，请重试。') }
     finally { setBusyModuleId(undefined) }
   }
-  return <div className={css.overlay} data-workbench-tool-gateway-overlay onMouseDown={event => { if (event.target === event.currentTarget) onClose() }}>
-    <aside className={css.dialog} role="dialog" aria-modal="true" aria-labelledby="workbench-tool-gateway-title" data-workbench-tool-gateway-dialog>
-      <header className={css.header}><div className={css.headerCopy}><span className={css.eyebrow}>工作台工具目录 · revision {gateway.revision}</span><h2 id="workbench-tool-gateway-title">工具集成</h2><p>{workbenchName} <code>{workbenchId}</code></p></div><button ref={closeRef} className={css.close} type="button" aria-label="关闭工具集成" title="关闭" onClick={onClose}><IconCloseOutlineMedium size={17} /></button></header>
+  const content = <>
+      {embedded ? null : <header className={css.header}><div className={css.headerCopy}><span className={css.eyebrow}>工作台工具目录 · revision {gateway.revision}</span><h2 id="workbench-tool-gateway-title">工具集成</h2><p>{workbenchName} <code>{workbenchId}</code></p></div><button ref={closeRef} className={css.close} type="button" aria-label="关闭工具集成" title="关闭" onClick={onClose}><IconCloseOutlineMedium size={17} /></button></header>}
       <div className={css.summary} aria-label="工具目录摘要"><Summary label="模块" value={modules.length} /><Summary label="工具" value={entries.length} /><Summary label="已启用" value={enabledCount} tone="success" /><Summary label="需处理" value={attentionCount} tone={attentionCount > 0 ? 'warning' : 'neutral'} /><Summary label="统计" value="Gateway" text /></div>
       <nav className={css.tabs} role="tablist" aria-label="工具集成工作区"><Tab id="visibility" active={tab === 'visibility'} onClick={() => setTab('visibility')}>工具开关</Tab><Tab id="usage" active={tab === 'usage'} onClick={() => setTab('usage')}>运行统计</Tab><Tab id="api" active={tab === 'api'} onClick={() => setTab('api')}>统一接口</Tab></nav>
       {error === undefined ? null : <div className={css.error} role="alert">{error}</div>}
       <div className={css.body}>{tab === 'visibility' ? <VisibilityPanel entries={entries} modules={modules} editors={editors} expandedModules={expandedModules} onRefresh={() => setRevision(value => value + 1)} onToggleModule={toggleModule} onToggle={toggle} onExpand={key => setExpandedModules(current => { const next = new Set(current); if (next.has(key)) next.delete(key); else next.add(key); return next })} busyToolId={busyToolId} busyModuleId={busyModuleId} /> : tab === 'usage' ? <UsagePanel usage={usage} usageError={usageError} range={range} onRangeChange={next => { setRange(next); setUsage(undefined); setExpandedToolId(undefined) }} expandedToolId={expandedToolId} onExpandTool={toolId => setExpandedToolId(current => current === toolId ? undefined : toolId)} editors={editors} /> : <ApiPanel entries={entries} gateway={gateway} onCopied={() => setRevision(value => value + 1)} />}</div>
-      <footer className={css.footer}><span>权限最终由 DSH Runtime / Host 决定，已开始的 Session 不会被工作台强制终止。</span><button type="button" className={css.done} onClick={onClose}>完成</button></footer>
-    </aside>
+      {embedded ? null : <footer className={css.footer}><span>权限最终由 DSH Runtime / Host 决定，已开始的 Session 不会被工作台强制终止。</span><button type="button" className={css.done} onClick={onClose}>完成</button></footer>}
+    </>
+  return embedded ? <div className={css.embedded} data-workbench-tool-gateway-embedded>{content}</div> : <div className={css.overlay} data-workbench-tool-gateway-overlay onMouseDown={event => { if (event.target === event.currentTarget) onClose() }}>
+    <aside className={css.dialog} role="dialog" aria-modal="true" aria-labelledby="workbench-tool-gateway-title" data-workbench-tool-gateway-dialog>{content}</aside>
   </div>
 }
 

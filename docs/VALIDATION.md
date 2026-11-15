@@ -2,6 +2,20 @@
 
 更新日期：2026-11-13（Asia/Shanghai）。本页是当前验证入口；旧 [17.5 记录](archive/2026-11-11/VALIDATION.md) 已归档。各节摘要仅对应该节制品，不能交叉用于校验其他构建。
 
+
+## 0.2.2-alpha.18.7（2026-11-15，专用 Agent 组装）
+
+| 项 | 结果 |
+|---|---|
+| `pnpm typecheck` | 通过 |
+| `node scripts/test.mjs` | 179 个文件、1219 个用例通过 |
+| `check:dsh-dependencies`、`check:compat`、`check:rc1-history` | 通过 |
+| 私有候选包 | `releases/alpha18.7-rc2-private/dsh-bay-0.2.2-alpha.18.7.tgz`，SHA-256 见同目录 `candidate.json` |
+| DSH 桌面实机 | 未进行 |
+| 第二设备（局域网访客） | 未进行 |
+
+实机待验收项见 `AGENT-ASSEMBLY-AUDIT.zh-CN.md` 第 7 节。下方 18.6 记录保持原样。
+
 ## 2026-11-13 18.6 DSH 0.2.2-rc.2 工作台归档恢复修复候选
 
 用户在 DSH 中安装 `alpha.18.5` 后报告，归档工作台仍无法恢复，删除也提示“操作未完成，请检查目标状态并重试”。真实目录路由集成测试复现相同失败：Host 的执行阶段已使用桌面专用归档管理检查，但执行前的预授权仍走普通工作台访问检查；普通检查会把已归档工作台视为不可用，因此恢复与删除在修改目录前被拒绝。

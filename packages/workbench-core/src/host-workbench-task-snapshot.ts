@@ -1,3 +1,4 @@
+import { remapAgentPresetId } from './agent-assembly-model.ts'
 import { upgradeTaskProjects } from './host-workbench-task-projects.ts'
 import type { BayAgentWorkStateV1 } from './foundation/workbench-bay-agent-work.ts'
 import type { WorkbenchRecordV2 } from './foundation/persistence.ts'
@@ -80,17 +81,18 @@ function validate(snapshot: CompleteTaskSnapshot, record: WorkbenchRecordV2) {
 }
 
 /** Rewrite schema-owned references; natural-language summaries remain historical text. */
-function references(value: unknown, sessions: Readonly<Record<string, string>>, workbenchId: string): unknown {
-  if (Array.isArray(value)) return value.map(child => references(child, sessions, workbenchId))
+function references(value: unknown, sessions: Readonly<Record<string, string>>, workbenchId: string, sourceWorkbenchId = workbenchId): unknown {
+  if (Array.isArray(value)) return value.map(child => references(child, sessions, workbenchId, sourceWorkbenchId))
   if (!value || typeof value !== 'object') return value
   const result: Record<string, unknown> = {}
   for (const [key, child] of Object.entries(value)) {
     if (key === 'workspaceId') continue
     if (key === 'workbenchId') { result[key] = workbenchId; continue }
+    if (key === 'agentPreset' && typeof child === 'string') { result[key] = remapAgentPresetId(child, sourceWorkbenchId, workbenchId); continue }
     if (['sessionId', 'workerSessionId'].includes(key) && typeof child === 'string') {
       if (!sessions[child]) throw new Error('编排事件缺少可迁移的会话映射：' + child)
       result[key] = sessions[child]
-    } else result[key] = references(child, sessions, workbenchId)
+    } else result[key] = references(child, sessions, workbenchId, sourceWorkbenchId)
   }
   return result
 }
@@ -105,7 +107,7 @@ export function exportTaskSnapshot(record: WorkbenchRecordV2, state: BayAgentWor
 
 export function restoreTaskSnapshot(snapshot: CompleteTaskSnapshot, record: WorkbenchRecordV2, sessions: Record<string, string>, now: number): BayAgentWorkStateV1 {
   validate(snapshot, record)
-  const state = references(snapshot.state, sessions, record.workbenchId) as BayAgentWorkStateV1
+  const state = references(snapshot.state, sessions, record.workbenchId, snapshot.workbenchId) as BayAgentWorkStateV1
   for (const item of state.workItems) {
     item.importedFrom = { workbenchId: snapshot.workbenchId, status: item.status }
     if (['running', 'queued'].includes(item.status)) item.status = 'waiting'

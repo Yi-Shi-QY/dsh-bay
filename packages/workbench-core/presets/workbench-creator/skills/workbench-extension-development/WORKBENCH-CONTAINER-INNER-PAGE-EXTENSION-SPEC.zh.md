@@ -510,3 +510,36 @@ inject 返回的 workbenchEditor 同时提供 portability.exportState/importStat
 工作台文件信封 schemaVersion 为 2，projectModelVersion 为 1；项目元数据 schemaVersion 为 1，完整包外层为 V6，导入器继续支持当前 18.0 V5。旧读取器须拒绝未知信封版本。扩展自己的 state.version 与上述版本独立，仅在扩展状态结构变化时升级。
 
 必须回归：关闭所有区域 → 重新关联原项目 → 手动打开内页；同项目两个区域；区域换绑后原会话仍读原项目；浮动与区域转移；零区域完整包导入。关闭视图只能释放本视图资源，不能删除项目文件或会话、取消其他视图的任务。
+
+## 22. 给专用 Agent 提供工具和 Skill（0.2.2-alpha.18.7）
+
+专用 Agent 组装时勾选的工具和 Skill，只有扩展在 Host 端注册了执行器才会生效。只在客户端工具目录登记的条目，组装页会标为"不可用"，Host 拒绝注册使用它的修订。
+
+在扩展的 Host 插件里，通过 Cordis 服务 `workbenchAgentKit` 注册：
+
+```js
+export const inject = ['workbenchAgentKit']
+export function apply(ctx) {
+  const kit = ctx.get('workbenchAgentKit', false)
+  if (!kit) return
+  ctx.effect(() => kit.register({
+    moduleId: 'workbench.quote',
+    tools: [{
+      id: 'workbench.quote.lookup',        // 必须以 moduleId 加点开头，并与客户端工具目录 id 相同
+      description: '按客户读取报价单',
+      input: { type: 'object', properties: { customer: { type: 'string' } }, required: ['customer'] },
+      effect: 'read',                      // read | write | external
+      async execute(args, call) { /* call.workbenchId、call.guest、call.signal */ return { rows: [] } },
+    }],
+    skills: [{ id: 'workbench.quote.flow', description: '报价流程', content: '# 报价流程\n…' }],
+  }))
+}
+```
+
+规则：
+
+- 注册的工具和 Skill 默认对任何 Agent 都不可见。Core 只把某个专用 Agent 修订勾选的条目挂进该 Agent 自己的作用域，Agent 结束或切换模式时撤下。
+- 工具在模型侧的名字是 id 中非 `[A-Za-z0-9_-]` 的字符换成 `_`；Skill 名字是 id 转成小写短横线形式。
+- 执行器必须按 `call.workbenchId` 限定数据范围，并遵守 `call.signal`。
+- 访客调用时 `call.guest` 为真。`guestAccess: read-only` 的 Agent 只能调用 `effect: 'read'` 的工具；`none` 一律拒绝。原生的协作者审批仍然生效。
+- Skill 只在 Agent 启用了"Skill"积木时挂载。

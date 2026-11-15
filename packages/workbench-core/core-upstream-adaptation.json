@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
-  "migration": "dsh-0.2.2-rc.1-to-workbench-0.2.2-alpha.18.6-on-dsh-0.2.2-rc.2",
-  "candidate": "dsh-bay-0.2.2-alpha.18.6-dsh-0.2.2-rc.2",
+  "migration": "dsh-0.2.2-rc.1-to-workbench-0.2.2-alpha.18.7-on-dsh-0.2.2-rc.2",
+  "candidate": "dsh-bay-0.2.2-alpha.18.7-dsh-0.2.2-rc.2",
   "upstream": {
     "repository": "https://github.com/deepseek-ai/deepseek-harness.git",
     "tag": "dsh-v0.2.2-rc.2",
@@ -14,7 +14,7 @@
     }
   },
   "delivery": {
-    "workbenchVersion": "0.2.2-alpha.18.6",
+    "workbenchVersion": "0.2.2-alpha.18.7",
     "dshEngineRange": ">=0.2.2-rc.2 <0.2.3",
     "mode": "core-only",
     "defaultInstall": [
