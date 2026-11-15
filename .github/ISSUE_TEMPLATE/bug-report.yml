@@ -1,0 +1,51 @@
+name: 问题反馈
+description: 反馈在受支持的 DSH Bay 环境中可复现的问题。
+title: "[问题] "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        请勿粘贴凭据、Session 对话记录、完整工作台导出包、私有链接或未脱敏日志。安全漏洞请使用私密安全报告渠道。
+  - type: input
+    id: bay-version
+    attributes:
+      label: DSH Bay 版本
+      placeholder: 0.1.0-beta.1
+    validations:
+      required: true
+  - type: input
+    id: dsh-version
+    attributes:
+      label: DSH 版本
+      placeholder: 0.2.2-rc.2
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: 操作系统与运行环境
+      placeholder: Windows 11，桌面房主或局域网访客
+    validations:
+      required: true
+  - type: textarea
+    id: scenario
+    attributes:
+      label: 使用场景与复现步骤
+      description: 请提供最短且可重复的问题步骤。
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期结果与实际结果
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 脱敏后的日志或截图
+      description: 附件前请移除密钥、用户数据、绝对路径和内网地址。
+    validations:
+      required: false

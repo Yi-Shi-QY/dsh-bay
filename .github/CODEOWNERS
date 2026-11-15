@@ -1,0 +1,9 @@
+# Default review ownership for the public snapshot.
+* @Yi-Shi-QY
+
+# Changes affecting release identity, provenance or security require the maintainer.
+/SECURITY.md @Yi-Shi-QY
+/GOVERNANCE.md @Yi-Shi-QY
+/provenance/ @Yi-Shi-QY
+/packages/workbench-core/package.json @Yi-Shi-QY
+/.github/workflows/ @Yi-Shi-QY
