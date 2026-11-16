@@ -1,0 +1,83 @@
+name: DSH and npm dependency drift
+
+on:
+  schedule:
+    - cron: '0 2 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.28.5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.x
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Fetch DSH tags and scan npm metadata
+        id: scan
+        continue-on-error: true
+        run: pnpm scan:dsh-drift --remote --output=tools/dsh-adaptation/reports/dsh-drift.json
+      - name: Generate standalone HTML report
+        if: always()
+        run: pnpm report:dsh-drift --input=tools/dsh-adaptation/reports/dsh-drift.json --output=tools/dsh-adaptation/reports/dsh-drift.html
+      - name: Add scan summary
+        if: always()
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs'
+          const file = 'tools/dsh-adaptation/reports/dsh-drift.json'
+          const summary = process.env.GITHUB_STEP_SUMMARY
+          if (!fs.existsSync(file)) {
+            fs.appendFileSync(summary, 'Dependency drift scan did not produce a report.\n')
+            process.exit(0)
+          }
+          const report = JSON.parse(fs.readFileSync(file, 'utf8'))
+          const lines = [
+            '## DSH and npm dependency drift',
+            '',
+            `Status: **${report.status}**`,
+            `DSH: ${report.baseline.dshGeneration} -> ${report.github.latestTag ?? 'unavailable'}`,
+            `Upstream commits ahead: ${report.github.comparison?.aheadBy ?? 'unavailable'}`,
+            `npm packages scanned: ${report.npm.packages.length} (${report.npm.status})`,
+            `Lockfile integrity coverage: ${report.summary.integrityCoverage.pinned}/${report.summary.integrityCoverage.total}`,
+            `Findings: ${report.findings.length}`,
+            '',
+            '| Severity | Count |',
+            '| --- | --- |',
+            ...Object.entries(report.summary.findingsBySeverity).map(([severity, count]) => `| ${severity} | ${count} |`),
+            '',
+            'The JSON data and standalone HTML report are attached as a workflow artifact.',
+          ]
+          fs.appendFileSync(summary, `${lines.join('\n')}\n`)
+          NODE
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dsh-dependency-drift-${{ github.run_id }}
+          path: |
+            tools/dsh-adaptation/reports/dsh-drift.json
+            tools/dsh-adaptation/reports/dsh-drift.html
+          if-no-files-found: warn
+          retention-days: 90
+      - name: Fail when the scan is incomplete
+        if: always()
+        env:
+          SCAN_OUTCOME: ${{ steps.scan.outcome }}
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs'
+          const reportPath = 'tools/dsh-adaptation/reports/dsh-drift.json'
+          const htmlPath = 'tools/dsh-adaptation/reports/dsh-drift.html'
+          if (process.env.SCAN_OUTCOME === 'failure' || !fs.existsSync(reportPath) || !fs.existsSync(htmlPath)) process.exit(1)
+          const report = JSON.parse(fs.readFileSync(reportPath, 'utf8'))
+          if (report.status === 'partial') process.exit(1)
+          NODE

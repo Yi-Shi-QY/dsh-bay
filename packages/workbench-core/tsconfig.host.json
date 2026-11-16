@@ -1,0 +1,42 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "paths": {},
+    "rootDir": "src",
+    "outDir": "lib/types",
+    "tsBuildInfoFile": "lib/tsconfig.host.tsbuildinfo",
+    "disableSourceOfProjectReferenceRedirect": true
+  },
+  "include": [
+    "src/*.ts",
+    "src/foundation/model.ts",
+    "src/foundation/area-identity.ts",
+    "src/foundation/project-identity.ts",
+    "src/foundation/document-v3.ts",
+    "src/foundation/persistence.ts",
+    "src/foundation/session-markers.ts",
+    "src/foundation/catalog.ts",
+    "src/foundation/editor-menu-preferences.ts",
+    "src/foundation/workbench-editor-icons.ts",
+    "src/foundation/workbench-slot-contracts.ts",
+    "src/foundation/workbench-distribution.ts",
+    "src/foundation/workbench-inventory.ts",
+    "src/foundation/workbench-layout-package.ts",
+    "src/foundation/workbench-package-v4.ts",
+    "src/foundation/workbench-sharing.ts",
+    "src/foundation/workbench-portability.ts",
+    "src/foundation/workbench-context.ts",
+    "src/foundation/workbench-context-portability.ts",
+    "src/foundation/workbench-control-plane.ts",
+    "src/foundation/workbench-bay-agent-adapter.ts",
+    "src/foundation/workbench-bay-agent-work.ts",
+    "src/foundation/workbench-superagent-adapter.ts",
+    "src/foundation/workbench-ai.ts",
+    "src/foundation/background-ai-preferences.ts",
+    "src/foundation/workbench-package-trust.ts"
+  ],
+  "exclude": [
+    "src/client/**",
+    "src/offline-package-service.ts"
+  ]
+}

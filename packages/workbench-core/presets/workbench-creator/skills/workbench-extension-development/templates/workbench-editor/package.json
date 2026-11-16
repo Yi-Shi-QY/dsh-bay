@@ -1,0 +1,79 @@
+{
+  "name": "@local/workbench-editor-example",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": ["@deepseek-ai/dsh-client-ui-slots", "@deepseek-ai/dsh-client-modules"]
+    },
+    "workbench": {
+      "schemaVersion": 1,
+      "moduleId": "workbench.editor-example",
+      "kind": "extension",
+      "delivery": "direct-source",
+      "version": "0.1.0",
+      "coreCompatibility": ">=0.1.0-beta.1 <0.1.1",
+      "dshGeneration": "0.2.2-rc.2",
+      "upstreamCommit": "ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c",
+      "activation": "restart-only",
+      "scope": "root",
+      "editorIds": [
+        "workbench.example"
+      ],
+      "permissions": [],
+      "requiredCapabilities": [],
+      "editors": [
+        {
+          "editorId": "workbench.example",
+          "scope": "root",
+          "label": "示例内页",
+          "requiredBinding": "none",
+          "binding": {
+            "requirement": "none",
+            "unbound": "available",
+            "sharing": "none"
+          },
+          "state": {
+            "schemaVersion": 1,
+            "maxBytes": 16384,
+            "restore": "if-valid",
+            "share": "portable"
+          },
+          "runtime": {
+            "background": "pause",
+            "collapsed": "dispose",
+            "reacquire": "on-visible"
+          },
+          "presentation": {
+            "floating": true
+          }
+        }
+      ],
+      "platforms": ["win32", "darwin", "linux"],
+      "distribution": {
+        "version": 1,
+        "exportPolicy": "embed",
+        "runtimeFiles": [
+          "package.json",
+          "index.js",
+          "client.js",
+          "cordis.patch.yml",
+          "LICENSE"
+        ],
+        "requires": [],
+        "runtimeKind": "client-only"
+      }
+    }
+  },
+  "license": "MIT"
+}

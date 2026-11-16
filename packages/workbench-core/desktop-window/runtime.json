@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "version": "44.9.0",
+  "sha256": "c99a56d653220a8bf209b0b9ae2424ec1f1580946d1bf3395a968eb211a4f1b5",
+  "externalRoot": "DSH Workbench/companion-runtime",
+  "installPolicy": "separate-companion-runtime"
+}

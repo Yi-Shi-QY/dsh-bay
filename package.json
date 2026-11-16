@@ -1,0 +1,70 @@
+{
+  "name": "dsh-bay-workspace",
+  "description": "Open-source DSH Bay workspace for developing, validating and sharing DSH plugins",
+  "private": true,
+  "version": "0.1.0-beta.1",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Yi-Shi-QY/dsh-bay.git"
+  },
+  "homepage": "https://github.com/Yi-Shi-QY/dsh-bay",
+  "bugs": {
+    "url": "https://github.com/Yi-Shi-QY/dsh-bay/issues"
+  },
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "workbench",
+    "dsh-bay"
+  ],
+  "type": "module",
+  "packageManager": "pnpm@11.28.5",
+  "engines": {
+    "node": ">=24.9.0"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "check:dsh-dependencies": "node tools/dsh-adaptation/check-dependencies.mjs",
+    "scan:dsh-drift": "node tools/dsh-adaptation/scan-dsh-npm-drift.mjs",
+    "report:dsh-drift": "node tools/dsh-adaptation/render-drift-report.mjs",
+    "check:public": "node scripts/check-public-tree.mjs",
+    "check:compat": "node scripts/check-compatibility.mjs",
+    "verify:workbench-package": "node scripts/test.mjs packages/workbench-core/tests/workbench-package-service.spec.ts",
+    "verify": "pnpm check:public && pnpm check:dsh-dependencies && pnpm check:compat && pnpm test && pnpm typecheck && pnpm build",
+    "test": "node scripts/test.mjs",
+    "typecheck": "pnpm --filter dsh-bay build:types",
+    "pack:core": "node scripts/pack.mjs"
+  },
+  "devDependencies": {
+    "@deepseek-ai/dsh": "0.2.2-rc.2",
+    "@testing-library/dom": "10.4.1",
+    "@testing-library/react": "16.3.2",
+    "@types/node": "^24.0.0",
+    "@types/react": "~18.3.1",
+    "@types/react-dom": "^18.3.1",
+    "@xterm/addon-fit": "0.11.0",
+    "@xterm/xterm": "6.0.0",
+    "acorn": "8.15.0",
+    "anser": "2.3.5",
+    "diff": "9.0.0",
+    "esbuild": "0.27.4",
+    "immer": "10.1.1",
+    "jsdom": "29.1.1",
+    "katex": "0.16.47",
+    "lightningcss": "1.32.0",
+    "mdast-util-from-markdown": "2.0.3",
+    "mdast-util-gfm": "3.1.0",
+    "mdast-util-math": "3.0.0",
+    "micromark-extension-gfm": "3.0.0",
+    "micromark-extension-math": "3.1.0",
+    "micromark-util-sanitize-uri": "2.0.1",
+    "playwright": "1.58.2",
+    "shiki": "4.3.1",
+    "simple-icons": "16.31.0",
+    "typescript": "6.0.3",
+    "yaml": "2.9.1",
+    "vitest": "4.1.8",
+    "zustand": "4.4.7"
+  }
+}

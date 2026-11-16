@@ -1,0 +1,77 @@
+{
+  "schemaVersion": 3,
+  "migration": "dsh-0.2.2-rc.1-to-workbench-0.1.0-beta.1-on-dsh-0.2.2-rc.2",
+  "candidate": "dsh-bay-0.1.0-beta.1-dsh-0.2.2-rc.2",
+  "upstream": {
+    "repository": "https://github.com/deepseek-ai/deepseek-harness.git",
+    "tag": "dsh-v0.2.2-rc.2",
+    "commit": "ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c",
+    "acquisition": {
+      "status": "git-tag-and-npm-metadata-verified",
+      "verification": "git ls-remote tag and npm gitHead match",
+      "sourceOfTypes": "exact 0.2.2-rc.2 npm packages",
+      "sourceFiles": "Sidebar and Workspace source mirrored from exact package tarballs"
+    }
+  },
+  "delivery": {
+    "workbenchVersion": "0.1.0-beta.1",
+    "dshEngineRange": ">=0.2.2-rc.2 <0.2.3",
+    "mode": "core-only",
+    "defaultInstall": [
+      "dsh-bay"
+    ],
+    "excluded": [
+      "@dsh-workbench/conversation-suite",
+      "@dsh-workbench/svgdeepseek-pet"
+    ],
+    "more": "deferred-workbench-official-only",
+    "pluginManager": "native-dsh-settings-entry"
+  },
+  "adaptations": [
+    {
+      "id": "workspace-menu-anchor",
+      "status": "rebased-to-rc2-source",
+      "owner": "generated/upstream/ui-workspace/WorkspacePicker.tsx",
+      "change": "Uses RC2 Menu anchorRef contract; no removed getAnchorRect prop remains"
+    },
+    {
+      "id": "area-local-session-placement",
+      "status": "retained",
+      "owner": "generated/upstream/ui-workspace/WorkspaceBrowser.tsx",
+      "change": "Session creation and navigation continue through the Workbench Area-local adapter"
+    },
+    {
+      "id": "workspace-default-label-and-locale",
+      "status": "retained-core-adaptation",
+      "owner": "generated/upstream/ui-workspace/WorkspacePicker.tsx",
+      "change": "Uses the Core-local default-workspace helper in WorkspacePicker and WorkspaceBrowser, and keeps the locale Context type merge"
+    },
+    {
+      "id": "official-more-boundary",
+      "status": "retained",
+      "owner": "packages/workbench-core/src/client/native-area-slot-renderer.tsx",
+      "change": "Defers only official entry-customization inside Workbench projections; DSH owners are unchanged"
+    },
+    {
+      "id": "rc2-scoped-area-renderer",
+      "status": "rebased-to-rc2-source",
+      "owner": "src/foundation/renderer/provenance.json",
+      "change": "HOC content, inline anchors and keyed member hooks follow RC2; scoped host caches, late Factory registration and nested Session store bindings preserve Area ownership."
+    }
+  ],
+  "nativeDshChanges": {
+    "sessionTeamMode": "RC2 keeps Agent Teams as a saved per-Session opt-in; Workbench does not add a second control surface",
+    "namedNestedSubagents": "DSH owns name-based controls and browsing; Workbench resource routes still use Session ids and parent-child addresses",
+    "toolErrorsAndSessionAppend": "No direct Session.append consumer found in Core; portability writes through the Session Persistence handle in bounded event batches",
+    "sessionFormat": "No Workbench storage migration introduced in this candidate"
+  },
+  "sourceMaterialization": {
+    "sourceMirror": "generated/upstream/rc2-source",
+    "sourceDigest": "e9b1d5923b0a8d6541399db3421c85f72015e53eb117201ecc83e4eba16b80eb",
+    "sourceFiles": 36,
+    "adaptedFiles": 3,
+    "runtimeExtras": 3,
+    "patchDigest": "665aef8a2b9fc094d847dc261c690c8bf14d35f2bf46513ed560beb03cf491a0",
+    "verification": "all source files match RC2 runtime copies except registered adaptations; all extras are explicit"
+  }
+}

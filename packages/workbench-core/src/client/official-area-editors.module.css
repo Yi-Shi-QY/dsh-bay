@@ -1,0 +1,160 @@
+/* DSH 0.2.0 official-area adapters.
+ *
+ * These classes style only the Workbench-owned chrome around DSH-owned
+ * services. Conversation, Session and sidebar-right implementations remain
+ * provided by DSH; this file supplies the same control cadence and focus
+ * treatment when those services are placed in an Area.
+ */
+
+.officialArea {
+  --workbench-official-ease: var(--ds-ease-in-out, cubic-bezier(0.22, 1, 0.36, 1));
+  --workbench-official-fast: 120ms;
+  --workbench-official-menu: 150ms;
+  min-width: 0;
+  min-height: 0;
+}
+
+.areaToolbar,
+.browserToolbar {
+  flex: none;
+  transition:
+    background-color var(--workbench-official-fast) var(--workbench-official-ease),
+    border-color var(--workbench-official-fast) var(--workbench-official-ease);
+}
+
+.areaToolbar button,
+.browserToolbar button {
+  transition:
+    color var(--workbench-official-fast) var(--workbench-official-ease),
+    background-color var(--workbench-official-fast) var(--workbench-official-ease),
+    border-color var(--workbench-official-fast) var(--workbench-official-ease),
+    box-shadow var(--workbench-official-fast) var(--workbench-official-ease),
+    transform var(--workbench-official-fast) var(--workbench-official-ease);
+}
+
+.areaToolbar button:hover:not(:disabled),
+.browserToolbar button:hover:not(:disabled) {
+  color: var(--dsw-alias-label-primary, currentColor) !important;
+  background: var(--dsw-alias-interactive-bg-hover, color-mix(in srgb, currentColor 9%, transparent)) !important;
+}
+
+.areaToolbar button:active:not(:disabled),
+.browserToolbar button:active:not(:disabled),
+.browserToolbar button[aria-pressed='true'] {
+  background: var(--dsw-alias-interactive-bg-active, color-mix(in srgb, currentColor 14%, transparent)) !important;
+  transform: translateY(1px);
+}
+
+.areaToolbar button:focus-visible,
+.browserToolbar button:focus-visible,
+.fileTreeRow:focus-visible,
+.toolbarTitle:focus-visible,
+.toolbarForm input:focus-visible,
+.browserToolbar input:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--dsw-alias-state-business-primary, #4f7ee8) 62%, transparent) !important;
+  outline-offset: 1px;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--dsw-alias-state-business-primary, #4f7ee8) 16%, transparent) !important;
+}
+
+.areaToolbar button:disabled,
+.browserToolbar button:disabled {
+  cursor: not-allowed !important;
+  opacity: .44;
+}
+
+.toolbarTitle {
+  transition: color var(--workbench-official-fast) var(--workbench-official-ease), background-color var(--workbench-official-fast) var(--workbench-official-ease);
+  border-radius: var(--dsw-radius-sm, 6px) !important;
+}
+
+.toolbarTitle:hover {
+  color: var(--dsw-alias-label-primary, currentColor) !important;
+  background: var(--dsw-alias-interactive-bg-hover, color-mix(in srgb, currentColor 9%, transparent)) !important;
+}
+
+.toolbarForm {
+  align-items: center;
+}
+
+.toolbarForm input,
+.browserToolbar input {
+  transition:
+    background-color var(--workbench-official-fast) var(--workbench-official-ease),
+    border-color var(--workbench-official-fast) var(--workbench-official-ease),
+    box-shadow var(--workbench-official-fast) var(--workbench-official-ease);
+}
+
+.browserToolbar input:hover:not(:focus-visible) {
+  border-color: var(--dsw-alias-border-l2-darkmode-thin, var(--dsw-alias-border-l2, #9aa2b2)) !important;
+}
+
+.browserToolbar input:focus-visible {
+  border-color: var(--dsw-alias-state-business-primary, #4f7ee8) !important;
+}
+
+.browserNotice {
+  transition: background-color var(--workbench-official-fast) var(--workbench-official-ease), color var(--workbench-official-fast) var(--workbench-official-ease);
+}
+
+.fileTreeRow {
+  transition:
+    color var(--workbench-official-fast) var(--workbench-official-ease),
+    background-color var(--workbench-official-fast) var(--workbench-official-ease),
+    transform var(--workbench-official-fast) var(--workbench-official-ease);
+}
+
+.fileTreeRow:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover, color-mix(in srgb, currentColor 8%, transparent)) !important;
+}
+
+.fileTreeRow:active:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-active, color-mix(in srgb, currentColor 13%, transparent)) !important;
+  transform: translateX(1px);
+}
+
+.resourcePreview {
+  border-left: 1px solid var(--dsw-alias-border-l2, color-mix(in srgb, currentColor 14%, transparent));
+  box-shadow: -10px 0 24px color-mix(in srgb, #000 16%, transparent);
+  animation: workbenchOfficialDetailsIn var(--workbench-official-menu) var(--workbench-official-ease) both;
+}
+
+.resourcePreview > header {
+  background: var(--ds-specific-sidebar-fill, var(--dsw-specific-sidebar-fill, transparent));
+}
+
+@keyframes workbenchOfficialDetailsIn {
+  from { opacity: 0; transform: translateX(8px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+[data-workbench-official-area='terminal'] {
+  color-scheme: dark;
+}
+
+@media (max-width: 620px) {
+  .browserToolbar {
+    align-content: center;
+  }
+
+  .browserToolbar input {
+    min-width: 96px !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .areaToolbar,
+  .browserToolbar,
+  .areaToolbar button,
+  .browserToolbar button,
+  .toolbarTitle,
+  .toolbarForm input,
+  .browserToolbar input,
+  .browserNotice,
+  .fileTreeRow {
+    transition: none;
+  }
+
+  .resourcePreview {
+    animation: none;
+  }
+}

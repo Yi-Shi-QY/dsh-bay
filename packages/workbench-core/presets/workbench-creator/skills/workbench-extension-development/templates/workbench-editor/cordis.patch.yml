@@ -1,0 +1,3 @@
+- insert:
+    - id: workbench-editor-example
+      name: '@local/workbench-editor-example'

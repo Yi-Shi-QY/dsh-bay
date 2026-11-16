@@ -1,0 +1,198 @@
+{
+  "name": "dsh-bay",
+  "description": "DSH Bay multi-area workbench for developing, validating and sharing DSH plugins",
+  "version": "0.1.0-beta.1",
+  "private": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Yi-Shi-QY/dsh-bay.git"
+  },
+  "homepage": "https://github.com/Yi-Shi-QY/dsh-bay",
+  "bugs": {
+    "url": "https://github.com/Yi-Shi-QY/dsh-bay/issues"
+  },
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "dsh-bay",
+    "workbench"
+  ],
+  "engines": {
+    "node": ">=24.9.0",
+    "dsh": ">=0.2.2-rc.2 <0.2.3"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "types": "./lib/types/client/index.d.ts",
+      "default": "./lib/client.js"
+    },
+    "./package.json": "./package.json",
+    "./dsh.bundle.patch.yml": "./dsh.bundle.patch.yml"
+  },
+  "scripts": {
+    "build:types:host": "tsc -b tsconfig.host.json",
+    "build:types:client": "tsc -b tsconfig.client.json",
+    "build:types": "pnpm run build:types:host && pnpm run build:types:client",
+    "bundle": "tsdown",
+    "build": "node ../../scripts/build.mjs workbench-core"
+  },
+  "dependencies": {
+    "tar": "7.5.22",
+    "ws": "8.21.3"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "~4.1.0",
+    "@deepseek-ai/cordis-plugin-loader": "~1.1.0",
+    "@deepseek-ai/dsh-agent": ">=0.2.2-rc.2 <0.2.3",
+    "@deepseek-ai/dsh-agent-preset": ">=0.2.2-rc.2 <0.2.3",
+    "@deepseek-ai/dsh-agent-preset-registry": ">=0.2.2-rc.2 <0.2.3",
+    "@deepseek-ai/dsh-api-gateway": ">=0.2.2-rc.2 <0.2.3",
+    "@deepseek-ai/dsh-api-remote-access": ">=0.2.2-rc.2 <0.2.3",
+    "@deepseek-ai/dsh-api-remotes": ">=0.2.2-rc.2 <0.2.3",
+    "@deepseek-ai/dsh-api-session-controller": ">=0.2.2-rc.2 <0.2.3",
+    "@deepseek-ai/dsh-api-terminal-controller": ">=0.2.2-rc.2 <0.2.3",
+    "@deepseek-ai/dsh-api-workspace-controller": ">=0.2.2-rc.2 <0.2.3",
+    "@deepseek-ai/dsh-api-workspace-files": ">=0.2.2-rc.2 <0.2.3",
+    "@deepseek-ai/dsh-app-boot": ">=0.2.2-rc.2 <0.2.3",
+    "@deepseek-ai/dsh-atomic-write": ">=0.2.2-rc.2 <0.2.3",
+    "@deepseek-ai/dsh-client-connection": ">=0.2.2-rc.2 <0.2.3",
+    "@deepseek-ai/dsh-client-locale": ">=0.2.2-rc.2 <0.2.3",
+    "@deepseek-ai/dsh-client-modules": ">=0.2.2-rc.2 <0.2.3",
+    "@deepseek-ai/dsh-client-resources": ">=0.2.2-rc.2 <0.2.3",
+    "@deepseek-ai/dsh-client-shortcuts": ">=0.2.2-rc.2 <0.2.3",
+    "@deepseek-ai/dsh-client-store": ">=0.2.2-rc.2 <0.2.3",
+    "@deepseek-ai/dsh-client-ui-context-menu": ">=0.2.2-rc.2 <0.2.3",
+    "@deepseek-ai/dsh-client-ui-conversation": ">=0.2.2-rc.2 <0.2.3",
+    "@deepseek-ai/dsh-client-ui-layout": ">=0.2.2-rc.2 <0.2.3",
+    "@deepseek-ai/dsh-client-ui-primitives": ">=0.2.2-rc.2 <0.2.3",
+    "@deepseek-ai/dsh-client-ui-renderer": ">=0.2.2-rc.2 <0.2.3",
+    "@deepseek-ai/dsh-client-ui-session": ">=0.2.2-rc.2 <0.2.3",
+    "@deepseek-ai/dsh-client-ui-settings": ">=0.2.2-rc.2 <0.2.3",
+    "@deepseek-ai/dsh-client-ui-sidebar": ">=0.2.2-rc.2 <0.2.3",
+    "@deepseek-ai/dsh-client-ui-sidebar-right": ">=0.2.2-rc.2 <0.2.3",
+    "@deepseek-ai/dsh-client-ui-slots": ">=0.2.2-rc.2 <0.2.3",
+    "@deepseek-ai/dsh-client-ui-theme": ">=0.2.2-rc.2 <0.2.3",
+    "@deepseek-ai/dsh-client-ui-workspace": ">=0.2.2-rc.2 <0.2.3",
+    "@deepseek-ai/dsh-cordis-client-runner": ">=0.2.2-rc.2 <0.2.3",
+    "@deepseek-ai/dsh-cordis-host-runner": ">=0.2.2-rc.2 <0.2.3",
+    "@deepseek-ai/dsh-credentials": ">=0.2.2-rc.2 <0.2.3",
+    "@deepseek-ai/dsh-host-webserver": ">=0.2.2-rc.2 <0.2.3",
+    "@deepseek-ai/dsh-llm": ">=0.2.2-rc.2 <0.2.3",
+    "@deepseek-ai/dsh-plugin-manager": ">=0.2.2-rc.2 <0.2.3",
+    "@deepseek-ai/dsh-session": ">=0.2.2-rc.2 <0.2.3",
+    "@deepseek-ai/dsh-session-format-v3-to-v4": ">=0.2.2-rc.2 <0.2.3",
+    "@deepseek-ai/dsh-settings": ">=0.2.2-rc.2 <0.2.3",
+    "@deepseek-ai/dsh-skill": ">=0.2.2-rc.2 <0.2.3",
+    "@deepseek-ai/dsh-skill-filesystem": ">=0.2.2-rc.2 <0.2.3",
+    "@deepseek-ai/dsh-system-prompt": ">=0.2.2-rc.2 <0.2.3",
+    "@deepseek-ai/dsh-tool-cordis": ">=0.2.2-rc.2 <0.2.3",
+    "@deepseek-ai/dsh-tools": ">=0.2.2-rc.2 <0.2.3",
+    "@deepseek-ai/dsh-typert-protocol": ">=0.2.2-rc.2 <0.2.3",
+    "@deepseek-ai/dsh-util-workspace-path": ">=0.2.2-rc.2 <0.2.3",
+    "@deepseek-ai/dsh-working-directory": ">=0.2.2-rc.2 <0.2.3",
+    "@deepseek-ai/schemastery": "~3.19.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "~18.3.1",
+    "@types/react-dom": "^18.3.1",
+    "@types/use-sync-external-store": "^1.5.0",
+    "@xterm/addon-fit": "0.11.0",
+    "@xterm/xterm": "6.0.0",
+    "@zip.js/zip.js": "2.8.6",
+    "clsx": "^2.1.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tar": "7.5.22",
+    "use-sync-external-store": "1.2.0"
+  },
+  "dsh": {
+    "workbench": {
+      "schemaVersion": 1,
+      "moduleId": "workbench.core",
+      "kind": "official-builtin",
+      "delivery": "core-bundled",
+      "coreCompatibility": "0.1.0-beta.1",
+      "activation": "restart-only",
+      "dshGeneration": "0.2.2-rc.2",
+      "candidateId": "dsh-bay-0.1.0-beta.1-dsh-0.2.2-rc.2",
+      "productLine": "DSH Bay 0.1.0-beta.1",
+      "upstreamCommit": "ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c",
+      "morePolicy": "deferred-official-only",
+      "defaultInstall": [
+        "dsh-bay"
+      ],
+      "excludedModules": [
+        "@dsh-workbench/conversation-suite",
+        "@dsh-workbench/svgdeepseek-pet"
+      ],
+      "sourceDigest": "e9b1d5923b0a8d6541399db3421c85f72015e53eb117201ecc83e4eba16b80eb"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-api-remotes",
+        "@deepseek-ai/dsh-client-modules",
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-sidebar",
+        "@deepseek-ai/dsh-client-ui-sidebar-right",
+        "@deepseek-ai/dsh-client-shortcuts",
+        "@deepseek-ai/dsh-client-resources",
+        "@deepseek-ai/dsh-client-ui-slots",
+        "@deepseek-ai/dsh-api-session-controller",
+        "@deepseek-ai/dsh-api-workspace-controller",
+        "@deepseek-ai/dsh-api-workspace-files",
+        "@deepseek-ai/dsh-api-terminal-controller",
+        "@deepseek-ai/dsh-client-ui-renderer",
+        "@deepseek-ai/dsh-client-ui-session",
+        "@deepseek-ai/dsh-client-ui-workspace",
+        "@deepseek-ai/dsh-client-ui-theme",
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-cordis-client-runner",
+        "@deepseek-ai/dsh-client-ui-context-menu"
+      ],
+      "platform": "web",
+      "immediately": true,
+      "external": [
+        "@deepseek-ai/dsh-client-store",
+        "@deepseek-ai/dsh-client-ui-primitives",
+        "@deepseek-ai/dsh-client-ui-slots",
+        "react-dom/client"
+      ],
+      "officialMore": "host-only-rc2-ui-entry-customization"
+    },
+    "bundle": {
+      "patch": "./dsh.bundle.patch.yml"
+    }
+  },
+  "license": "MIT",
+  "files": [
+    "lib/index.js",
+    "lib/client.js",
+    "lib/types/**/*.d.ts",
+    "core-foundation-copy-manifest.json",
+    "core-upstream-adaptation.json",
+    "rc2-sidebar-workspace-source-index.json",
+    "THIRD_PARTY_NOTICES.txt",
+    "dsh.bundle.patch.yml",
+    "README.md",
+    "LICENSE",
+    "presets/workbench-creator/skills/workbench-extension-development/**",
+    "package.json",
+    "lib/build-inputs.json"
+  ]
+}

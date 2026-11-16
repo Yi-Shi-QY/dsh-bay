@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "upstreamCommit": "ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c",
+  "upstreamTag": "dsh-v0.2.2-rc.2",
+  "upstreamPackage": "@deepseek-ai/dsh-client-ui-sidebar",
+  "upstreamVersion": "0.2.2-rc.2",
+  "upstreamGeneration": "0.2.2-rc.2",
+  "entries": [
+    {
+      "source": "ui-sidebar/src/client",
+      "destination": "workbench-sidebar/generated/upstream/ui-sidebar",
+      "copyMode": "exact-rc2-source-mirror"
+    },
+    {
+      "source": "ui-workspace/src/client",
+      "destination": "workbench-sidebar/generated/upstream/ui-workspace",
+      "copyMode": "exact-rc2-source-mirror-then-apply-recorded-core-adaptations"
+    }
+  ],
+  "adaptations": [
+    "Use the RC2 SidebarRoot and WorkspaceBrowser source as the controlled rebase baseline",
+    "Route Workbench session operations through explicit Area-local placement outside the upstream browser",
+    "Use the RC2 anchorRef menu contract and keep default workspace title helpers local to the bundled Core",
+    "Add the locale Context merge required by the Workbench package typecheck",
+    "Keep official entry-customization More deferred from Workbench projections",
+    "Preserve the RC1 source snapshot and validation record as immutable historical evidence"
+  ],
+  "officialOwnersReplaced": [],
+  "sourceDigest": "e9b1d5923b0a8d6541399db3421c85f72015e53eb117201ecc83e4eba16b80eb",
+  "patchDigestFormat": "sha256 of codepoint-sorted adapted path NUL normalized-source-sha256 NUL normalized-runtime-sha256 LF records followed by sorted runtime-extra path NUL dash NUL normalized-runtime-sha256 LF records",
+  "baselinePatchDigest": "e9b1d5923b0a8d6541399db3421c85f72015e53eb117201ecc83e4eba16b80eb",
+  "patchDigest": "665aef8a2b9fc094d847dc261c690c8bf14d35f2bf46513ed560beb03cf491a0",
+  "migration": {
+    "targetUpstreamCommit": "ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c",
+    "targetGeneration": "0.2.2-rc.2",
+    "sourceMaterialization": "36 RC2 source files hash-verified; three explicit Core adaptations and three runtime extras are registered",
+    "historicalRc3Supplement": "not carried into the RC2 runtime; no live import depends on it"
+  },
+  "sourceMirror": "generated/upstream/rc2-source",
+  "sourceMaterialization": "exact RC2 source mirror present; runtime destination retains only the three reviewed Core adaptations",
+  "adaptedFiles": [
+    "ui-workspace/contract/slots.ts",
+    "ui-workspace/WorkspacePicker.tsx",
+    "ui-workspace/rows/WorkspaceBrowser.tsx"
+  ],
+  "runtimeExtras": [
+    {
+      "path": "ui-workspace/WorkspaceBrowser.module.css",
+      "destinations": "all-sidebar-runtime-destinations",
+      "reason": "Workbench browser wrapper retains its stable legacy path while the RC2 implementation is under ui-workspace/rows/"
+    },
+    {
+      "path": "ui-workspace/WorkspaceBrowser.tsx",
+      "destinations": "all-sidebar-runtime-destinations",
+      "reason": "Core retains its wrapper path for the Workbench-specific Area-local navigation adapter"
+    },
+    {
+      "path": "ui-workspace/default-workspace.ts",
+      "destinations": "all-sidebar-runtime-destinations",
+      "reason": "The WorkspacePicker path uses a Core-local helper so the browser bundle does not request an un-injected workspace-controller subpath"
+    }
+  ]
+}

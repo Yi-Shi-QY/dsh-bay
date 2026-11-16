@@ -1,0 +1,22 @@
+.picker { display: grid; min-width: 0; gap: 6px; padding: 0; }
+.results { display: grid; max-height: min(380px, 55vh); gap: 6px; overflow: auto; }
+.results > [role='group'] { display: grid; gap: 2px; }
+.picker .category { display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0; padding: 7px 6px; border: 0; border-radius: 6px; background: transparent; color: var(--dsw-alias-label-secondary, #888); font: inherit; font-size: 11px; font-weight: 550; text-align: left; cursor: pointer; }
+.category > svg, .chevron { flex: none; }
+.categoryName { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.category small { font-size: 10px; font-weight: 400; font-variant-numeric: tabular-nums; }
+.category:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover, #8881); }
+.category:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary, #4d6bfe); outline-offset: -2px; }
+.picker .category:disabled { opacity: 1; cursor: default; }
+.chevron { display: flex; transition: transform 120ms ease; }
+.chevron[data-expanded=true] { transform: rotate(90deg); }
+.entries { display: grid; gap: 2px; margin-left: 12px; padding-left: 5px; border-left: 1px solid var(--dsw-alias-border-l2, #8883); }
+@media (prefers-reduced-motion: reduce) { .chevron { transition: none; } }
+.option { display: flex; align-items: center; gap: 9px; width: 100%; min-width: 0; min-height: 32px; padding: 7px 8px; border: 0; border-radius: 6px; color: var(--dsw-alias-label-primary); background: transparent; font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+.option > span:last-child { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.option:hover:not(:disabled), .option:focus-visible { background: var(--dsw-alias-interactive-bg-hover); }
+.option:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary, #4d6bfe); outline-offset: -2px; }
+.option:disabled { cursor: not-allowed; opacity: .45; }
+.icon { display: inline-flex; width: 20px; height: 20px; flex: none; color: var(--dsw-alias-label-secondary); }
+.icon svg { width: 100%; height: 100%; }
+.noResults { padding: 10px 8px; color: var(--dsw-alias-label-secondary); font-size: 12px; }

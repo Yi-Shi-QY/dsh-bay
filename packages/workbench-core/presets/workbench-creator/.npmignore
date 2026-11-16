@@ -1,0 +1,4 @@
+# Historical custom preset: current releases use the native DSH cordis mode.
+# Keep only the extension development skill and its templates in the package.
+/dsh.bundle.patch.yml
+/preset.yml
