@@ -105,6 +105,39 @@ export async function verifyNativeResolvedArtifactFiles(packageRoot: string, fil
   }
 }
 
+/**
+ * Read-only counterpart of verifyNativeResolvedArtifactFiles for packaging.
+ * A package installed from a development checkout carries source, tests and
+ * previews the published runtime file list never declared. Those must not
+ * fail an export; the caller reports them and packages only the declared
+ * files. Declared files are still compared byte for byte.
+ */
+export async function describeInstalledArtifactDrift(packageRoot: string, files: ReadonlyMap<string, Buffer>): Promise<{ unexpected: string[] }> {
+  const root = await realpath(packageRoot)
+  const queue = [{ directory: root, prefix: '' }]
+  const unexpected: string[] = []
+  let entries = 0
+  while (queue.length > 0) {
+    const { directory, prefix } = queue.shift()!
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      if (++entries > MAX_ENTRIES) throw new Error('Workbench installed package has too many entries')
+      const path = `${prefix}${entry.name}`
+      if (entry.isSymbolicLink() || (!entry.isDirectory() && !entry.isFile())) throw new Error('Workbench installed package has an unsafe entry')
+      if (entry.isDirectory()) queue.push({ directory: join(directory, entry.name), prefix: `${path}/` })
+      else if (!files.has(path)) unexpected.push(path)
+    }
+  }
+  for (const [path, bytes] of files) {
+    const target = await filePath(root, path, false)
+    const stat = await lstat(target)
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size !== bytes.length
+      || createHash('sha256').update(await readFile(target)).digest('hex') !== createHash('sha256').update(bytes).digest('hex')) {
+      throw new Error('Installed Workbench Module file bytes do not match the trusted artifact')
+    }
+  }
+  return { unexpected }
+}
+
 /** Atomic replacement avoids modifying pnpm's shared hardlinked store bytes. */
 export async function repairWorkbenchArtifactFiles(profile: string, packageRoot: string, files: ReadonlyMap<string, Buffer>): Promise<void> {
   const root = await installedRoot(profile, packageRoot)

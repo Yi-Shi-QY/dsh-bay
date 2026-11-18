@@ -270,6 +270,13 @@ export function applyWorkbenchCoreFoundation(
       return () => { for (const stop of stops) stop(); desktopCollaboration.dispose() }
     }, 'workbench: desktop owner collaboration')
   }
+  // Imported histories are written straight to Session persistence, so no
+  // `session/created` frame announces them; pull the list once explicitly.
+  if (typeof window !== 'undefined') ctx.effect(() => {
+    const refresh = () => { void sessions.refresh().catch(() => {}) }
+    window.addEventListener('workbench-bundle-imported', refresh)
+    return () => window.removeEventListener('workbench-bundle-imported', refresh)
+  }, 'workbench: refresh Sessions after bundle import')
   const frameCollaborationClient = collaborationClient ?? desktopCollaboration?.client
   const browserController = suppliedWindowController === undefined
     ? createBrowserWindowController({

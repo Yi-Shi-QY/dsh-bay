@@ -42,6 +42,25 @@ export async function fetchLockedDistributionArtifact(d: WorkbenchPackageDepende
   if(metadata.name!==d.packageName||metadata.version!==d.version||metadata.dist?.integrity!==d.integrity||!metadata.dist.tarball)throw new Error('Registry 版本或完整性与签名依赖锁不一致。')
   return read(new URL(metadata.dist.tarball),64*1024*1024)
 }
+/** Registers the extension collector the workbench bundle route embeds pages with. */
+export function registerWorkbenchExtensionService(ctx: { get<T>(name: string, strict?: boolean): T | undefined; provide?(name: string, value: unknown): unknown }): void {
+  if (ctx.get(WORKBENCH_COMPLETE_EXTENSIONS, false)) return
+  const profile = ctx.get<ProfileContext>('profileContext', false), native = ctx.get<DistributionNativeManager>('pluginManager', false), settings = ctx.get<SettingsProvider>('settings', false), resolver = ctx.get<PackageResolver>('pluginPackages', false)
+  if (!profile || !native || !settings || !resolver) return
+  const resolve = (name: string) => { try { const found = resolver.packageOf(name, import.meta.url); return found?.name === name ? found.dir : undefined } catch { return undefined } }
+  const migrations = ctx.get<CompleteMigrationRegistry>(WORKBENCH_COMPLETE_MIGRATIONS, false) ?? new CompleteMigrationRegistry()
+  ctx.provide?.(WORKBENCH_COMPLETE_EXTENSIONS, createCompleteExtensions({
+    profile, native, settings, credentials: ctx.get<CredentialProvider>('credentials', false), resolve,
+    directory: ctx.get<HostWorkbenchDirectory>(WORKBENCH_DIRECTORY_SERVICE, false),
+    access: ctx.get<HostWorkbenchAccess>(WORKBENCH_ACCESS_SERVICE, false),
+    agents: () => ctx.get<HostAgentAssemblyStore>(AGENT_ASSEMBLY_SERVICE, false),
+    peerAvailable: (name, range) => {
+      if (!name.startsWith('@deepseek-ai/') && !['react', 'react-dom'].includes(name)) return false
+      try { const found = resolver.packageOf(name, import.meta.url); return found?.version === range } catch { return false }
+    },
+    fetchArtifact: dependency => fetchLockedDistributionArtifact(dependency, profile.dir),
+  }, migrations))
+}
 export function installDistributionRoutes(ctx:{get<T>(name:string,strict?:boolean):T|undefined;provide?(name:string,value:unknown):unknown}):(()=>void)|undefined {
   const connection=ctx.get<HostConnectionHandle>('connection',false),profile=ctx.get<ProfileContext>('profileContext',false),native=ctx.get<DistributionNativeManager>('pluginManager',false),settings=ctx.get<SettingsProvider>('settings',false),resolver=ctx.get<PackageResolver>('pluginPackages',false)
   if(!connection?.fetch||!profile||!native||!settings||!resolver)return undefined

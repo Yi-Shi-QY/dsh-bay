@@ -34,6 +34,7 @@ import { installWorkbenchSyncRoute } from './host-workbench-sync-route.ts'
 import { createRc3WorkbenchSessionCheckpointSource, type Rc3WorkbenchSessionCheckpointDeps } from './workbench-session-checkpoint.ts'
 import { createRc3WorkbenchSessionCheckpointRestorer } from './host-workbench-session-checkpoint.ts'
 import { WORKBENCH_SESSION_RUNTIME } from './host-workbench-directory-service.ts'
+import { WORKBENCH_COMPLETE_EXTENSIONS, type CompleteExtensions } from './host-complete-extensions.ts'
 import { WORKBENCH_ACCESS_SERVICE } from './workbench-access-contract.ts'
 import { WorkbenchAccessError } from './host-workbench-access.ts'
 import { currentWorkbenchExecutionOrigin, withWorkbenchExecutionOrigin } from './host-workbench-native-access.ts'
@@ -619,7 +620,14 @@ export function installBayAgentHost(ctx: Context): (() => void) | undefined {
     const attachments = ctx.get('attachments', false)
     return persistence ? createRc3WorkbenchSessionCheckpointRestorer(persistence, attachments) : undefined
   })()
-  const disposeBundle = directory ? installWorkbenchBundleRoute(connection, { directory, ...(checkpoint ? { checkpoint } : {}), ...(checkpointRestorer ? { checkpointRestorer } : {}), ...(access ? { access } : {}) }) : undefined
+  const extensions = () => ctx.get(WORKBENCH_COMPLETE_EXTENSIONS, false) as CompleteExtensions | undefined
+  const saveExtensionConsents = async (consents: Record<string, import('./workbench-extension-access.ts').WorkbenchExtensionConsentV1>) => {
+    if (!directory) throw new Error('工作台目录服务不可用，无法保存扩展权限。')
+    const current = directory.getSnapshot()
+    const saved = await directory.patch({ operation: 'set', path: ['extensionConsents'], value: { ...current.value.extensionConsents, ...consents }, expectedRevision: current.revision })
+    if (saved.status !== 'committed') throw new Error('扩展权限保存发生版本冲突，请重试导入。')
+  }
+  const disposeBundle = directory ? installWorkbenchBundleRoute(connection, { directory, ...(checkpoint ? { checkpoint } : {}), ...(checkpointRestorer ? { checkpointRestorer } : {}), ...(access ? { access } : {}), extensions, saveExtensionConsents }) : undefined
   const disposeSync = directory ? installWorkbenchSyncRoute(connection, { directory, ...(checkpoint ? { checkpoint } : {}), ...(access ? { access } : {}) }) : undefined
   const readJson = async (request: Request) => {
     const reader = request.body?.getReader(); if (!reader) throw new Error('body required')

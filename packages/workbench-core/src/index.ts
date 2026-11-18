@@ -3,6 +3,7 @@ import { installAgentAssemblyHost } from './host-agent-assembly-service.ts'
 import { installWorkbenchDirectoryHost } from './host-workbench-directory-service.ts'
 import { installWorkbenchNativeAccess } from './host-workbench-native-service.ts'
 import { installFloatingUiSettings } from './host-floating-ui-settings.ts'
+import { registerWorkbenchExtensionService } from './host-distribution-route.ts'
 import { CompleteMigrationRegistry, WORKBENCH_COMPLETE_MIGRATIONS } from './host-complete-migrations.ts'
 export { CompleteMigrationRegistry, WORKBENCH_COMPLETE_MIGRATIONS, type CompleteMigrationProvider } from './host-complete-migrations.ts'
 export * from './module-contract.ts'
@@ -150,6 +151,7 @@ export function apply(ctx: WorkbenchCoreHostContextV1): void {
     const disposeIdentity = installWorkbenchModuleIdentityRoute(routeContext as never)
     const disposeCenter = installWorkbenchModuleCenterRoutes(routeContext as never)
     const disposeFloatingUi = installFloatingUiSettings(routeContext as never)
+    registerWorkbenchExtensionService(routeContext as never)
     const disposeDirectSource = installWorkbenchHostDirectSourceInstallRoute(routeContext as never)
     const disposeBrowserWindows = installWorkbenchBrowserWindowController(routeContext as never)
     return () => {

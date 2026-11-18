@@ -5,10 +5,18 @@ import { runProfilePnpm, saveManifest } from '@deepseek-ai/dsh-plugin-manager/op
 import type { ProfileContext } from '@deepseek-ai/dsh-app-boot'
 import type { WorkbenchPackageDependencyV4 } from './foundation/workbench-package-v4.ts'
 import { artifactHash, readRuntimeFiles, runtimeDigest } from './host-distribution-artifacts.ts'
-import {verifyNativeResolvedArtifactFiles} from './host-artifact-files.ts'
+import {verifyNativeResolvedArtifactFiles, describeInstalledArtifactDrift} from './host-artifact-files.ts'
 
 export class DistributionInstallError extends Error {
   constructor(message:string, readonly repaired:boolean) { super(message) }
+}
+
+/** A readable install failure: the last meaningful pnpm lines plus where the full log lives. */
+export function installFailure(packageName: string, result: { output?: string; timedOut?: boolean; logPath?: string }): string {
+  const lines = (result.output ?? '').split(/\r?\n/u).map(line => line.trim())
+    .filter(line => line && !/^(Progress:|Packages:|\+|✓|Done in)/u.test(line))
+  const tail = lines.slice(-3).join(' ').slice(0, 600)
+  return `扩展 ${packageName} 安装失败${result.timedOut ? '（pnpm 长时间无输出，已终止）' : ''}${tail ? '：' + tail : '。'}${result.logPath ? ` 完整日志：${result.logPath}` : ''}`
 }
 
 export interface DistributionNativeManager {
@@ -22,6 +30,16 @@ export function createDistributionInstaller(options: { profile: ProfileContext; 
     const files=await readRuntimeFiles(root,d.runtimeFiles)
     await verifyNativeResolvedArtifactFiles(root,files)
     if (runtimeDigest(await readRuntimeFiles(root, d.runtimeFiles)) !== d.digest) throw new Error(`已安装扩展内容不一致：${d.packageName} ${d.version}。版本号相同，但属于不同构建；本次不会覆盖本机插件。`)
+  }
+  // Export packaging only. Extra files a development checkout leaves next to
+  // the declared runtime files are reported, not rejected; declared bytes are
+  // still checked. Install, enable and removal keep the strict verification.
+  const packaged = async (d: WorkbenchPackageDependencyV4): Promise<string[]> => {
+    const root = options.resolve(d.packageName) ?? join(options.profile.dir, 'node_modules', d.packageName)
+    const files = await readRuntimeFiles(root, d.runtimeFiles)
+    const drift = await describeInstalledArtifactDrift(root, files)
+    if (runtimeDigest(files) !== d.digest) throw new Error(`已安装扩展内容不一致：${d.packageName} ${d.version}。版本号相同，但属于不同构建；本次不会覆盖本机插件。`)
+    return drift.unexpected
   }
   const check = async (d: WorkbenchPackageDependencyV4) => {
     const bundles = await options.native.listBundles()
@@ -42,7 +60,7 @@ export function createDistributionInstaller(options: { profile: ProfileContext; 
     ...options.profile.packageManager, ...(signal ? { signal } : {}),
     args: [...options.profile.packageManager?.args ?? [], '--config.ignore-scripts=true', '--config.ignore-pnpmfile=true', '--config.auto-install-peers=false', ...network ? [] : ['--config.offline=true']],
   })
-  return { check, verified,
+  return { check, verified, packaged,
     async install(d: WorkbenchPackageDependencyV4, path: string, before: () => Promise<void>, signal?: AbortSignal) {
       return withFileLock(join(options.profile.dir, 'package.json'), async () => {
         const existing = await check(d)
@@ -51,14 +69,24 @@ export function createDistributionInstaller(options: { profile: ProfileContext; 
         const saved = await Promise.all(['package.json','pnpm-lock.yaml'].map(async name => ({ name, bytes: await readFile(join(options.profile.dir,name)).catch(() => undefined) })))
         await before()
         try {
-          const result = await run(['add', path, '--save-exact'], false, signal)
-          if (result.exitCode !== 0 || result.timedOut) throw new Error('原生离线安装未完成；未联网补齐依赖。')
+          // The extension tarball itself is verified by digest above. Offline is
+          // tried first; pnpm may still need the registry for the rest of the
+          // Profile (lockfile policy checks, metadata of other packages), so a
+          // failed offline run is retried online before giving up.
+          let result = await run(['add', path, '--save-exact'], false, signal)
+          if (result.exitCode !== 0 && !result.timedOut) {
+            signal?.throwIfAborted()
+            result = await run(['add', path, '--save-exact', '--prefer-offline'], true, signal)
+          }
+          if (result.exitCode !== 0 || result.timedOut) throw new Error(installFailure(d.packageName, result))
           await verified(d)
           return { reused: false, previousEnabled: false }
         } catch (error) {
           for (const f of saved) { const path = join(options.profile.dir,f.name); if (f.bytes) await writeFileAtomic(path, f.bytes.toString('utf8'), { mode: 0o600 }); else await unlink(path).catch(() => {}) }
-          const repair = await run(['install', saved[1]?.bytes ? '--frozen-lockfile' : '--config.lockfile=false'], false)
-          if (repair.exitCode !== 0 || repair.timedOut) throw new DistributionInstallError('原生安装失败，Profile 修复未完成。',false)
+          const restoreArgs = ['install', saved[1]?.bytes ? '--frozen-lockfile' : '--config.lockfile=false']
+          let repair = await run(restoreArgs, false)
+          if (repair.exitCode !== 0 && !repair.timedOut) repair = await run([...restoreArgs, '--prefer-offline'], true)
+          if (repair.exitCode !== 0 || repair.timedOut) throw new DistributionInstallError(`原生安装失败，Profile 修复未完成。${error instanceof Error ? error.message : ''}${repair.logPath ? ` 修复日志：${repair.logPath}` : ''}`,false)
           throw new DistributionInstallError(error instanceof Error?error.message:'原生安装失败，已恢复原设置。',true)
         }
       })

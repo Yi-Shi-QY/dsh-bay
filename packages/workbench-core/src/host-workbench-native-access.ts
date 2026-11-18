@@ -236,7 +236,10 @@ export function createGuestNativeTransport(ctx: Context, access: HostWorkbenchAc
   }
   const inspect = async (endpoint: string, payload: unknown, input: WorkbenchAccessContext) => {
     const value = current(input), args = obj(obj(payload).args), request = obj(args.request)
-    if (endpoint === '$events') return
+    // `$events/result` carries a Client's answer to a forwarded waterfall
+    // (user questions, tool approvals). The Gateway itself only accepts it
+    // from owner Peers bound to the event stream that received the request.
+    if (endpoint === '$events' || endpoint === '$events/result') return
     if (!/^[A-Za-z][A-Za-z0-9]*\/[A-Za-z][A-Za-z0-9]*$/u.test(endpoint)) throw failure('无效的原生接口。')
     if (FILE_READS.includes(endpoint as RemoteAccessAction)) {
       const sessionId = args.workspaceFileScopeId

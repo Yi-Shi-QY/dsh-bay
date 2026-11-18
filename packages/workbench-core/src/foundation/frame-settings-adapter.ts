@@ -345,6 +345,17 @@ export function createProjectNeutralFrameSettings(
       ...(snapshot.revision === undefined ? {} : { expectedRevision: snapshot.revision }) })
       .catch(() => ({ status: 'unavailable' as const }))
   }
+  const recordUpdate = async (workbenchId: string, transform: (record: import('./persistence.ts').WorkbenchRecordV2) => import('./persistence.ts').WorkbenchRecordV2): Promise<WorkbenchDirectoryOperationResult> => {
+    if (options.isBrowserOwned?.(workbenchId) === true) return { status: 'unavailable' }
+    for (let attempt = 0; ; attempt++) {
+      const snapshot = source.getSnapshot(), current = snapshot.value?.workbenches[workbenchId]
+      if (snapshot.status !== 'ready' || !snapshot.writable) return { status: 'unavailable' }
+      if (current === undefined) return { status: 'rejected', reason: 'not-found' }
+      const result = await patchWorkbenchSettings(source, { operation: 'set', path: ['workbenches', workbenchId], value: transform(current),
+        ...(snapshot.revision === undefined ? {} : { expectedRevision: snapshot.revision }) })
+      if (result.status !== 'conflict' || attempt >= 2) return result
+    }
+  }
   const flush = async (): Promise<boolean> => {
     try { return beforeLifecycleTransition === undefined || await beforeLifecycleTransition() }
     catch { return false }
@@ -628,12 +639,13 @@ export function createProjectNeutralFrameSettings(
       const name = acceptedName(requested.name)
       if (name === undefined) return Promise.resolve({ status: 'rejected', reason: 'invalid-name' })
       if (Object.values(value.workbenches).some(record => record.workbenchId !== workbenchId && nameKey(record.name) === nameKey(name))) return Promise.resolve({ status: 'rejected', reason: 'duplicate-name' })
-      return rootUpdate(next => {
-        const existing = next.workbenches[workbenchId]
-        if (existing === undefined) return next
+      // Metadata touches one record only. Submitting the whole directory made
+      // a rename lose to any unrelated revision bump (autosave, session
+      // markers, polling), so patch the record and rebase on conflicts.
+      return recordUpdate(workbenchId, existing => {
         const { tags: previousTags, ...withoutTags } = existing
         const tags = normalizeWorkbenchTags(requested.tags ?? previousTags)
-        return { ...next, workbenches: { ...next.workbenches, [workbenchId]: { ...withoutTags, name, description: requested.description.trim(), ...(tags.length === 0 ? {} : { tags }), updatedAt: Date.now() } } }
+        return { ...withoutTags, name, description: requested.description.trim(), ...(tags.length === 0 ? {} : { tags }), updatedAt: Date.now() }
       })
     },
     updateWorkbenchBackground: async (workbenchId, background) => {

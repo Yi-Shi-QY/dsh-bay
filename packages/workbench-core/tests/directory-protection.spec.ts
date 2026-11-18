@@ -16,6 +16,13 @@ function fixture() {
   }
   const patch: PatchableV4Scope['patch'] = vi.fn(async operation => {
     if (operation.expectedRevision !== snapshot.revision) return { status: 'conflict', expectedRevision: operation.expectedRevision, actualRevision: snapshot.revision }
+    if (operation.operation === 'set' && operation.path.length === 2 && operation.path[0] === 'workbenches') {
+      // Metadata edits patch exactly one existing record.
+      const id = operation.path[1]!
+      if (snapshot.value!.workbenches[id] === undefined) throw new Error('Record patch targets a missing Workbench')
+      snapshot = { ...snapshot, value: { ...snapshot.value!, workbenches: { ...snapshot.value!.workbenches, [id]: operation.value as WorkbenchSettingsV4['workbenches'][string] } }, revision: snapshot.revision! + 1 }
+      return { status: 'committed', revision: snapshot.revision! }
+    }
     if (operation.operation !== 'set' || operation.path.length !== 0) throw new Error('Expected an atomic directory update')
     snapshot = { ...snapshot, value: operation.value as WorkbenchSettingsV4, revision: snapshot.revision! + 1 }
     return { status: 'committed', revision: snapshot.revision! }
@@ -353,6 +360,24 @@ describe('Core directory data protection', () => {
     const before = structuredClone(f.value())
     f.patch.mockResolvedValueOnce({ status: 'conflict', expectedRevision: 2, actualRevision: 3 })
     expect(await f.directory.remove('other')).toMatchObject({ status: 'conflict' })
+    expect(f.value()).toEqual(before)
+  })
+
+  it('renames by patching only that record and rebases over an unrelated revision bump', async () => {
+    const f = fixture(), other = structuredClone(f.value().workbenches.other)
+    f.patch.mockResolvedValueOnce({ status: 'conflict', expectedRevision: 1, actualRevision: 2 })
+    expect(await f.directory.rename('main', 'Renamed')).toMatchObject({ status: 'committed' })
+    expect(f.patch).toHaveBeenCalledTimes(2)
+    expect(f.patch).toHaveBeenLastCalledWith(expect.objectContaining({ operation: 'set', path: ['workbenches', 'main'] }))
+    expect(f.value().workbenches.main?.name).toBe('Renamed')
+    expect(f.value().workbenches.other).toEqual(other)
+  })
+
+  it('gives up renaming after three conflicting attempts without changing data', async () => {
+    const f = fixture(), before = structuredClone(f.value())
+    for (let index = 0; index < 3; index++) f.patch.mockResolvedValueOnce({ status: 'conflict', expectedRevision: 1, actualRevision: 2 })
+    expect(await f.directory.rename('main', 'Renamed')).toMatchObject({ status: 'conflict' })
+    expect(f.patch).toHaveBeenCalledTimes(3)
     expect(f.value()).toEqual(before)
   })
 

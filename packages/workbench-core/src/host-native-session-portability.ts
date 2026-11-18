@@ -94,7 +94,11 @@ export function remapNativeEvent(event: SessionEvent, context: NativeSessionRema
   } else if (row.type === 'agent-preset/selected') {
     if (typeof row.data.agentPreset !== 'string') throw new Error('会话模式记录无效。')
     if (context.agentPreset) row.data.agentPreset = context.agentPreset(row.data.agentPreset)
-  } else if (row.type.startsWith('team/') || row.type.startsWith('tool-workflow/') || row.type === 'workspace/changes') {
+  } else if (row.type === 'workspace/changes') {
+    // Only `{ turn }`: the summary it points to stays on the source Host and
+    // is simply unavailable on the recipient. Nothing identity-bound to remap.
+    if (!object(row.data) || !Number.isSafeInteger(row.data.turn)) throw new Error('工作区变更记录无效。')
+  } else if (row.type.startsWith('team/') || row.type.startsWith('tool-workflow/')) {
     throw new Error('该会话资源需要已注册的迁移适配器：' + row.type)
   }
   return copy

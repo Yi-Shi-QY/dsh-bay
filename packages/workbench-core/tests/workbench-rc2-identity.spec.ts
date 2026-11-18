@@ -11,7 +11,9 @@ describe('Workbench DSH runtime identity', () => {
   it('pins the runtime package and DSH dependency set to one candidate', () => {
     const root = json('package.json')
     const core = json('packages/workbench-core/package.json')
-    expect(WORKBENCH_CORE_VERSION).toBe('0.1.1')
+    expect(core.version).toBe(WORKBENCH_CORE_VERSION)
+    expect(root.version).toBe(WORKBENCH_CORE_VERSION)
+    expect(core.dsh.workbench.coreCompatibility).toBe(WORKBENCH_CORE_VERSION)
     expect(WORKBENCH_DSH_GENERATION).toBe('0.2.2-rc.3')
     expect(WORKBENCH_UPSTREAM_COMMIT).toBe('ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c')
     expect(core.engines.dsh).toBe(WORKBENCH_DSH_ENGINE_RANGE)
@@ -25,7 +27,7 @@ describe('Workbench DSH runtime identity', () => {
     expect(core.dsh.workbench).toMatchObject({
       dshGeneration: WORKBENCH_DSH_GENERATION,
       upstreamCommit: WORKBENCH_UPSTREAM_COMMIT,
-      candidateId: 'dsh-bay-0.1.1-dsh-0.2.2-rc.3',
+      candidateId: `dsh-bay-${WORKBENCH_CORE_VERSION}-dsh-${WORKBENCH_DSH_GENERATION}`,
     })
     for (const section of ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies']) {
       for (const [name, version] of Object.entries(core[section] ?? {})) {

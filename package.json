@@ -2,7 +2,7 @@
   "name": "dsh-bay-workspace",
   "description": "Open-source DSH Bay workspace for developing, validating and sharing DSH plugins",
   "private": true,
-  "version": "0.1.1",
+  "version": "0.1.2-0.1.1.1",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Yi-Shi-QY/dsh-bay.git"

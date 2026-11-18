@@ -14,14 +14,17 @@ import { hashFile } from './host-workbench-complete-files.ts'
 import { resolvePortablePath } from './host-native-session-portability.ts'
 import { workbenchExtensionContractFingerprint, type WorkbenchExtensionConsentV1 } from './workbench-extension-access.ts'
 import { orderedDistributionDependencies, sameDistributionArtifact } from './foundation/workbench-package-v4.ts'
+import type { WorkbenchBundleExtensionProblemV1 } from './workbench-bundle-contract.ts'
 
 export const WORKBENCH_COMPLETE_EXTENSIONS = 'workbenchCompleteExtensions'
 const coreEditors = new Set<string>([...CORE_PORTABLE_EDITORS, 'workbench.project-overview'])
 export const completeExternalEditors = (record: WorkbenchRecordV2): string[] => [...new Set(areasOf(record.document.root).flatMap(area => area.moduleHistory.map(page => page.editorId)).filter(id => !coreEditors.has(id)))]
 export interface CompleteExtensions {
-  collect(record: WorkbenchRecordV2, directory: string, platform: CompletePlatform, requiredPackages?: readonly string[]): Promise<CompleteExtensionLock[]>
+  collect(record: WorkbenchRecordV2, directory: string, platform: CompletePlatform, requiredPackages?: readonly string[], options?: { packaging?: boolean }): Promise<{ locks: CompleteExtensionLock[]; notices: { packageName: string; reason: string }[] }>
   check(extensions: CompleteExtensionLock[], platform: CompletePlatform, packageDirectory?: string): Promise<CompleteExtensionCheck[]>
   install(extensions: CompleteExtensionLock[], directory: string, jobId: string, signal?: AbortSignal): Promise<{ restartRequired: boolean; transactionId?: string; consents?: Record<string, WorkbenchExtensionConsentV1> }>
+  /** Every inner-page extension that would stop `collect`, listed instead of failing on the first. */
+  exportProblems?(record: WorkbenchRecordV2, platform: CompletePlatform): Promise<WorkbenchBundleExtensionProblemV1[]>
 }
 
 /** Reuses the DSH distribution installer; the complete archive is never buffered. */
@@ -70,7 +73,38 @@ export function createCompleteExtensions(options: HostDistributionOptions, migra
     return result
   }
   return { check,
-    async collect(record, directory, platform, requiredPackages = []) {
+    async exportProblems(record, platform) {
+      const editors = completeExternalEditors(record)
+      if (editors.length === 0) return []
+      const problems: WorkbenchBundleExtensionProblemV1[] = []
+      const declaring = new Map<string, { packageName: string; raw: Record<string, any> }>()
+      for (const bundle of (await options.native.listBundles()).filter(row => row.installed)) {
+        const root = options.resolve(bundle.name)
+        if (!root) continue
+        let raw: Record<string, any>
+        try { raw = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8')) } catch { continue }
+        const workbench = raw.dsh?.workbench
+        const ids = [...(Array.isArray(workbench?.editors) ? workbench.editors.map((row: { editorId?: unknown }) => row?.editorId) : []), ...(Array.isArray(workbench?.editorIds) ? workbench.editorIds : [])]
+        for (const id of ids) if (typeof id === 'string' && editors.includes(id) && !declaring.has(id)) declaring.set(id, { packageName: bundle.name, raw })
+      }
+      const checked = new Set<string>()
+      for (const editorId of editors) {
+        const found = declaring.get(editorId)
+        if (!found) { problems.push({ editorIds: [editorId], moduleId: editorId, reason: '没有找到提供这个内页的已安装扩展。' }); continue }
+        if (checked.has(found.packageName)) continue
+        checked.add(found.packageName)
+        const moduleId = typeof found.raw.dsh?.workbench?.moduleId === 'string' ? found.raw.dsh.workbench.moduleId : found.packageName
+        const editorIds = editors.filter(id => declaring.get(id)?.packageName === found.packageName)
+        try {
+          inspectDistributionManifest(found.raw)
+          if (!platformDeclaration(found.raw).includes(platform)) throw new Error('扩展没有声明支持当前系统。')
+        } catch (error) {
+          problems.push({ packageName: found.packageName, moduleId, ...(typeof found.raw.version === 'string' ? { version: found.raw.version } : {}), editorIds, reason: error instanceof Error ? error.message : String(error) })
+        }
+      }
+      return problems
+    },
+    async collect(record, directory, platform, requiredPackages = [], collectOptions) {
       const editors = new Set(completeExternalEditors(record))
       const bundles = await options.native.listBundles()
       const manifests = new Map<string, { root: string; manifest: ReturnType<typeof inspectDistributionManifest> }>()
@@ -82,7 +116,7 @@ export function createCompleteExtensions(options: HostDistributionOptions, migra
         manifests.set(bundle.name, { root, manifest: inspectDistributionManifest(raw) })
       }
       for (const editor of editors) if (![...manifests.values()].some(row => row.manifest.dsh.workbench.editors!.some(value => value.editorId === editor))) throw new Error('未找到内页的扩展分发声明：' + editor)
-      const queue = [...new Set([...manifests.keys(), ...requiredPackages])], result: CompleteExtensionLock[] = []
+      const queue = [...new Set([...manifests.keys(), ...requiredPackages])], result: CompleteExtensionLock[] = [], notices: { packageName: string; reason: string }[] = []
       await mkdir(path.join(directory, 'extensions'), { recursive: true })
       for (let i = 0; i < queue.length; i++) {
         const packageName = queue[i]!
@@ -101,7 +135,11 @@ export function createCompleteExtensions(options: HostDistributionOptions, migra
         const prepared = source?.endsWith('.tgz')
           ? await (async () => { const bytes = new Uint8Array(await readFile(path.resolve(options.profile.dir, source))); return { bytes, ...await inspectDistributionArtifact(bytes, options.peerAvailable, { allowForbiddenIdentity: true }) } })()
           : await prepareDistributionArtifact(item.root, options.peerAvailable, { allowForbiddenIdentity: true })
-        await installer.verified(prepared.dependency)
+        // Packaging a development checkout must not fail because the source
+        // tree holds files the published runtime list never declared.
+        const unexpected = collectOptions?.packaging && installer.packaged ? await installer.packaged(prepared.dependency) : undefined
+        if (unexpected === undefined) await installer.verified(prepared.dependency)
+        else if (unexpected.length > 0) notices.push({ packageName, reason: `安装目录含 ${unexpected.length} 个清单外的文件，已跳过：${unexpected.slice(0, 5).join('、')}${unexpected.length > 5 ? ' 等' : ''}` })
         const extension: CompleteExtensionLock = { packageName, moduleId: prepared.dependency.moduleId, version: prepared.dependency.version, artifactSha256: prepared.dependency.archiveSha256,
           permissions: prepared.dependency.permissions, editorIds: prepared.dependency.editorScopes.map(row => row.editorId), exportPolicy: declaration.exportPolicy,
           platforms, migrations: { events: [], workbenchData: [] }, distribution: prepared.dependency }
@@ -113,7 +151,7 @@ export function createCompleteExtensions(options: HostDistributionOptions, migra
         result.push(extension)
       }
       const order = orderedDistributionDependencies(result.map(row => row.distribution!))
-      return order.map(dependency => result.find(row => row.packageName === dependency.packageName)!)
+      return { locks: order.map(dependency => result.find(row => row.packageName === dependency.packageName)!), notices }
     },
     async install(extensions, directory, jobId, signal) {
       const root = path.join(options.profile.dir, '.dsh-workbench', 'complete-extension-installs', jobId)

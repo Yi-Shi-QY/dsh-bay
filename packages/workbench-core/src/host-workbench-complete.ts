@@ -365,7 +365,7 @@ export function installWorkbenchCompleteRoute(connection: HostConnectionHandle, 
       const portability = new NativeSessionPortability(options.persistence, options.attachments, migrations.exportAdapters(name => eventPackages.add(name)))
       await portability.exportSnapshot(Object.values(ids), root, native, signal)
       if (eventPackages.size && !extensionService) throw new Error('会话事件依赖的扩展分发服务尚未就绪。')
-      const extensions = await extensionService?.collect(definition.record, stage, targetPlatform, [...eventPackages]) ?? []
+      const extensions = (await extensionService?.collect(definition.record, stage, targetPlatform, [...eventPackages], { packaging: true }))?.locks ?? []
       migrations.assertExportOwners(extensions, eventPackages)
       migrations.adapters(extensions) // Verify that exported locks name the registered migration builds.
       await writeFile(path.join(stage, 'extension-data.json'), JSON.stringify(await migrations.exportData(extensions, { workbenchId, root })), 'utf8')
@@ -784,7 +784,7 @@ export function installWorkbenchCompleteRoute(connection: HostConnectionHandle, 
           const service = options.extensions?.()
           if (!service) throw new Error('Host 扩展分发服务尚未就绪。')
           const envelope = JSON.parse(await readFile(path.join(job.stageDir, 'workbench/.bay/workbench.json'), 'utf8')) as FileWorkbenchV1
-          const extensions = await service.collect(envelope.record, job.stageDir, platform(process.platform))
+          const extensions = (await service.collect(envelope.record, job.stageDir, platform(process.platform))).locks
           update(options.profile, job, { extensions: await service.check(extensions, platform(process.platform), job.stageDir), extensionPlanDigest: sha(JSON.stringify(extensions)), stage: 'awaiting-extensions' })
           return view(job)
         })

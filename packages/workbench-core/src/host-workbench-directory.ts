@@ -519,6 +519,15 @@ export class HostWorkbenchDirectory {
       workspaceMap[relative] = (await this.workspaces.create(folder)).id
     }
     for (const key of Object.keys(envelope.record.sessionCatalog ?? {})) if (!sessionMap[key]) throw new Error('导入会话映射缺失。')
+    // Restored Sessions were written straight to persistence, so no Workspace
+    // accounts for them yet. Without membership they resolve as unavailable.
+    for (const [key, entry] of Object.entries(envelope.record.sessionCatalog ?? {})) {
+      try {
+        const folder = await realpath(resolvePortablePath(actualRoot, entry.relativePath))
+        const workspace = await this.workspaces.create(folder) as unknown as { attachSession?:(sessionId: string) => Promise<void> }
+        await workspace.attachSession?.(sessionMap[key]!)
+      } catch { /* Membership is display metadata; the restored history stays intact. */ }
+    }
     const registry = clone(this.registry)
     registry.registrations[id] = { rootPath: actualRoot, workspaces: workspaceMap, sessions: clone(sessionMap) }
     if (options.open !== false) {

@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { gzipSync } from 'node:zlib'
 import { Header } from 'tar'
 import { afterEach, describe, expect, it } from 'vitest'
-import { readWorkbenchArtifactFiles, repairWorkbenchArtifactFiles, verifyWorkbenchArtifactFiles, verifyNativeResolvedArtifactFiles } from '../src/host-artifact-files.ts'
+import { readWorkbenchArtifactFiles, repairWorkbenchArtifactFiles, verifyWorkbenchArtifactFiles, verifyNativeResolvedArtifactFiles, describeInstalledArtifactDrift } from '../src/host-artifact-files.ts'
 
 const roots: string[] = []
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }) })
@@ -83,5 +83,16 @@ describe('installed Module byte verification and exact repair', () => {
     await writeFile(join(f.packageRoot, 'injected.js'), 'unexpected')
     await expect(verifyNativeResolvedArtifactFiles(f.packageRoot, f.files)).rejects.toThrow('unexpected file')
     expect(await readFile(join(f.packageRoot, 'injected.js'), 'utf8')).toBe('unexpected')
+  })
+
+  it('reports files a development checkout adds without failing, but still rejects altered declared bytes', async () => {
+    const f = await fixture()
+    await mkdir(join(f.packageRoot, 'src'), { recursive: true })
+    await writeFile(join(f.packageRoot, 'src', 'page.js'), 'source')
+    await writeFile(join(f.packageRoot, 'README.md'), 'notes')
+    const drift = await describeInstalledArtifactDrift(f.packageRoot, f.files)
+    expect(drift.unexpected.sort()).toEqual(['README.md', 'src/page.js'])
+    await writeFile(join(f.packageRoot, 'lib/client.js'), 'tampered')
+    await expect(describeInstalledArtifactDrift(f.packageRoot, f.files)).rejects.toThrow('file bytes')
   })
 })

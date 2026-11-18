@@ -26,6 +26,8 @@ describe('dshbay workbench bundle v1', () => {
     const b = await buildWorkbenchBundle({ snapshot: second.snapshot, objects: second.objects, dshVersion: '0.2.2-rc.3' })
     expect(a.archive).toEqual(b.archive)
     expect(workbenchBundleFilename('My Workbench')).toBe('My-Workbench.dshbay.zip')
+    expect(workbenchBundleFilename('学习 工作台')).toBe('学习-工作台.dshbay.zip')
+    expect(workbenchBundleFilename('a/b:c')).toBe('a-b-c.dshbay.zip')
     expect((await readWorkbenchBundle(a.archive)).manifest.format).toBe('dshbay-workbench')
   })
 

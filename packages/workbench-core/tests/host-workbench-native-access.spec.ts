@@ -78,6 +78,15 @@ it('resolves real file Workbenches, creates non-owner peers and scopes catalog g
   expect(f.invoke).toHaveBeenCalledTimes(2)
 })
 
+it('forwards waterfall answers ($events/result) from browser owners to the native handler', async () => {
+  const f = await fixture()
+  f.access.registerOwner('browser', 'one', () => true)
+  const owner = f.access.getContext('browser')
+  const answer = { clientId: 'client', eventId: 'event', outcome: { kind: 'result', value: { answers: [] } } }
+  expect(await f.http('$events/result', answer, owner)).toEqual({ kind: 'owner' })
+  expect(await f.http('$other/result', answer, owner)).toMatchObject({ result: { ok: false } })
+})
+
 it('rejects foreign attachments even when a caller knows their native reference', async () => {
   const f = await fixture()
   expect(await f.http('session/attachment', { request: { sessionId: 'one-session', attachment: { attachmentId: 'not-mine' } } })).toMatchObject({ result: { ok: false } })

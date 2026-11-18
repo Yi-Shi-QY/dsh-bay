@@ -1,6 +1,7 @@
 import { canonicalJson, decodeDeterministicZip, encodeDeterministicZip, type WorkbenchPackageArchiveLimitsV1, type WorkbenchPackageFileV1 } from './foundation/workbench-sharing.ts'
+import { WORKBENCH_BUNDLE_MAX_BYTES, WORKBENCH_BUNDLE_MAX_ENTRIES, WORKBENCH_BUNDLE_MAX_FILE_BYTES } from './workbench-bundle-contract.ts'
 import { createWorkbenchSnapshot, snapshotDigest, validateWorkbenchSnapshot, validateWorkbenchSnapshotKind, type WorkbenchBundleKind, type WorkbenchSnapshotObject, type WorkbenchSnapshotV1 } from './workbench-snapshot.ts'
-import { WORKBENCH_DSH_GENERATION } from './release-compatibility.ts'
+import { WORKBENCH_DSH_GENERATION, isWorkbenchBundleDshCompatible } from './release-compatibility.ts'
 
 export interface WorkbenchBundleManifestV1 extends WorkbenchSnapshotV1 {
   dshVersion: string
@@ -27,13 +28,25 @@ export interface WorkbenchBundleReaderOptions {
   verifyExternalDependency?: (dependency: NonNullable<WorkbenchBundleManifestV1['externalDependencies']>[number]) => boolean | Promise<boolean>
 }
 
+/**
+ * The sharing-package defaults (128 entries, 64 MB) describe layout packages.
+ * A workbench bundle carries project files and session checkpoints, so it uses
+ * the same 512 MB budget the route advertises.
+ */
+export const WORKBENCH_BUNDLE_ARCHIVE_LIMITS: WorkbenchPackageArchiveLimitsV1 = {
+  maxEntries: WORKBENCH_BUNDLE_MAX_ENTRIES,
+  maxFileBytes: WORKBENCH_BUNDLE_MAX_FILE_BYTES,
+  maxTotalBytes: WORKBENCH_BUNDLE_MAX_BYTES,
+}
+
 export const WORKBENCH_BUNDLE_MANIFEST_PATH = 'manifest.json'
 export const WORKBENCH_BUNDLE_PAYLOAD_PREFIX = 'payload/'
 export const WORKBENCH_BUNDLE_EXTENSION = '.dshbay.zip'
 const dependencyDigest = /^sha256:[a-f0-9]{64}$/u
 
 export function workbenchBundleFilename(workbenchName: string): string {
-  const safe = workbenchName.normalize('NFC').trim().replace(/[^A-Za-z0-9._-]+/gu, '-').replace(/^-+|-+$/gu, '')
+  // Letters and digits of any script are kept, so a Chinese name stays readable.
+  const safe = workbenchName.normalize('NFC').trim().replace(/[^\p{L}\p{N}._-]+/gu, '-').replace(/^[-.]+|[-.]+$/gu, '').slice(0, 120)
   if (!safe) throw new Error('workbench name is empty')
   return safe + WORKBENCH_BUNDLE_EXTENSION
 }
@@ -93,7 +106,7 @@ export async function buildWorkbenchBundle(input: WorkbenchBundleInput): Promise
 }
 
 export async function readWorkbenchBundle(bytes: Uint8Array, options: WorkbenchBundleReaderOptions = {}): Promise<WorkbenchBundle> {
-  const entries = decodeDeterministicZip(bytes, options.limits)
+  const entries = decodeDeterministicZip(bytes, options.limits ?? WORKBENCH_BUNDLE_ARCHIVE_LIMITS)
   const manifestEntry = entries.find(entry => entry.path === WORKBENCH_BUNDLE_MANIFEST_PATH)
   if (manifestEntry === undefined) throw new Error('这不是 dshbay 工作台包；如果这是对话归档包，不能作为工作台恢复包。')
   const value = decodeJson(manifestEntry.content)
@@ -104,7 +117,7 @@ export async function readWorkbenchBundle(bytes: Uint8Array, options: WorkbenchB
   const manifest = value as WorkbenchBundleManifestV1
   if (manifest.schemaVersion !== 1 || (manifest.kind !== 'template' && manifest.kind !== 'complete')) throw new Error('不受支持的工作台包版本；只接受 dshbay-workbench v1。')
   if (typeof manifest.dshVersion !== 'string' || !manifest.dshVersion) throw new Error('工作台包缺少 DSH 版本')
-  if (manifest.dshVersion !== WORKBENCH_DSH_GENERATION) throw new Error(`Workbench bundles require DSH ${WORKBENCH_DSH_GENERATION}`)
+  if (!isWorkbenchBundleDshCompatible(manifest.dshVersion)) throw new Error(`工作台包来自 DSH ${manifest.dshVersion}，与当前 DSH ${WORKBENCH_DSH_GENERATION} 不属于同一版本代。`)
   validateExternalDependencies(manifest.externalDependencies)
   await validateWorkbenchSnapshot(manifestSnapshot(manifest))
   if (manifest.entries.filter(entry => !entry.deleted && entry.path === 'layout.json' && entry.kind === 'layout').length !== 1) throw new Error('Workbench bundle requires one layout.json entry')
@@ -133,7 +146,7 @@ export function isWorkbenchBundleFilename(filename: string): boolean { return fi
 
 export function isWorkbenchBundleArchive(bytes: Uint8Array): boolean {
   try {
-    const manifest = decodeDeterministicZip(bytes).find(entry => entry.path === WORKBENCH_BUNDLE_MANIFEST_PATH)
+    const manifest = decodeDeterministicZip(bytes, WORKBENCH_BUNDLE_ARCHIVE_LIMITS).find(entry => entry.path === WORKBENCH_BUNDLE_MANIFEST_PATH)
     const value = manifest === undefined ? undefined : decodeJson(manifest.content) as { format?: unknown; schemaVersion?: unknown; dshVersion?: unknown; kind?: unknown }
     return value?.format === 'dshbay-workbench' && value.schemaVersion === 1 && (value.kind === 'template' || value.kind === 'complete') && value.dshVersion === WORKBENCH_DSH_GENERATION
   } catch { return false }

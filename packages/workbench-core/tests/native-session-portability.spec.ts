@@ -134,3 +134,11 @@ it('understands foreign path dialects and rejects escaping paths', () => {
   })
   expect(event).toMatchObject({ data: { files: [{ path: join(tmpdir(), 'recipient', 'app', 'output.md') }] } })
 })
+
+it('carries workspace change markers verbatim; the summary they point to stays on the source Host', () => {
+  const context = { sourceRoot: '/home/bay', targetRoot: join(tmpdir(), 'recipient'), sessionIds: {} }
+  const marker = { type: 'workspace/changes', seq: 7, data: { turn: 3 } } as never
+  expect(remapNativeEvent(marker, context)).toEqual(marker)
+  expect(() => remapNativeEvent({ type: 'workspace/changes', data: {} } as never, context)).toThrow('工作区变更记录无效')
+  expect(() => remapNativeEvent({ type: 'team/member', data: {} } as never, context)).toThrow('迁移适配器')
+})

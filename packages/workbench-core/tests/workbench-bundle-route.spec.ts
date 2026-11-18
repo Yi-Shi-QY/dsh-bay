@@ -84,6 +84,28 @@ describe('dshbay bundle Host routes', () => {
     } finally { sourceRoute.dispose() }
   })
 
+  it('round-trips a bundle larger than the layout-package archive limit', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dshbay-route-large-')); roots.push(root)
+    const workspaces = { async create(folder: string) { return { id: folder } } }
+    const sourceDirectory = new HostWorkbenchDirectory(join(root, 'source-profile'), workspaces as never)
+    await sourceDirectory.create({ requestId: 'create-large-source', parentPath: root, folderName: 'source', record: record('source'), open: false })
+    // 80 MB exceeds the 64 MB default that bundle reading used to inherit.
+    await writeFile(join(sourceDirectory.rootPath('source'), 'payload.bin'), Buffer.alloc(80 * 1024 * 1024, 7))
+    const sourceRoute = route(sourceDirectory)
+    try {
+      const exported = await sourceRoute.handlers.get('/api/workbench/bundle/v1/export')!(new Request('http://localhost', { method: 'POST', body: JSON.stringify({ workbenchId: 'source', kind: 'complete' }) }))
+      expect(exported.ok).toBe(true)
+      const bytes = new Uint8Array(await exported.arrayBuffer())
+      const recipient = new HostWorkbenchDirectory(join(root, 'recipient-profile'), workspaces as never)
+      const recipientRoute = route(recipient)
+      try {
+        const response = await recipientRoute.handlers.get('/api/workbench/bundle/v1/import')!(new Request('http://localhost/api/workbench/bundle/v1/import?parentPath=' + encodeURIComponent(root) + '&folderName=recipient', { method: 'POST', body: bytes }))
+        expect(response.ok, JSON.stringify(await response.clone().json())).toBe(true)
+        expect((await stat(join(root, 'recipient', 'payload.bin'))).size).toBe(80 * 1024 * 1024)
+      } finally { recipientRoute.dispose() }
+    } finally { sourceRoute.dispose() }
+  })
+
   it('rejects DSH conversation archives at the Workbench import boundary', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dshbay-route-dialog-')); roots.push(root)
     const directory = new HostWorkbenchDirectory(join(root, 'profile'), { async create(folder: string) { return { id: folder } } } as never)
@@ -153,17 +175,36 @@ describe('dshbay bundle Host routes', () => {
     } finally { sourceRoute.dispose() }
   })
 
-  it('blocks an extension lock that declares unverifiable external artifacts', async () => {
+  it('embeds collected extensions and installs them on import', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dshbay-route-extension-')); roots.push(root)
-    const directory = new HostWorkbenchDirectory(join(root, 'profile'), { async create(folder: string) { return { id: folder } } } as never)
-    await directory.create({ requestId: 'create-extension', parentPath: root, folderName: 'source', record: record('source'), open: false })
-    await writeFile(join(directory.rootPath('source'), '.dshbay', 'extensions.lock.json'), '{"externalDependencies":[{"id":"adapter","reason":"platform"}]}\n')
-    const installed = route(directory)
+    const workspaces = { async create(folder: string) { return { id: folder } } }
+    const sourceDirectory = new HostWorkbenchDirectory(join(root, 'source-profile'), workspaces as never)
+    await sourceDirectory.create({ requestId: 'create-extension', parentPath: root, folderName: 'source', record: record('source'), open: false })
+    const artifact = new TextEncoder().encode('packed-extension')
+    const digest = (await import('node:crypto')).createHash('sha256').update(artifact).digest('hex')
+    const lock = [{ packageName: 'inner-page', moduleId: 'inner-page', version: '1.0.0', artifactSha256: digest, permissions: [], editorIds: ['inner.page'], exportPolicy: 'embed', platforms: ['win32'], migrations: { events: [], workbenchData: [] }, artifactPath: 'extensions/' + digest + '.tgz' }]
+    let installed: unknown
+    const extensions = () => ({
+      async collect(_record: unknown, directory: string) {
+        await mkdir(join(directory, 'extensions'), { recursive: true })
+        await writeFile(join(directory, 'extensions', digest + '.tgz'), artifact)
+        return { locks: lock, notices: [{ packageName: 'inner-page', reason: '安装目录含 1 个清单外的文件，已跳过：README.md' }] }
+      },
+      async install(rows: unknown) { installed = rows; return { restartRequired: false } },
+    })
+    const sourceRoute = routeWith(sourceDirectory, { extensions })
     try {
-      const handler = installed.handlers.get('/api/workbench/bundle/v1/export')!
-      const response = await handler(new Request('http://localhost', { method: 'POST', body: JSON.stringify({ workbenchId: 'source', kind: 'template' }) }))
-      expect(response.ok).toBe(false)
-      expect(await response.json()).toMatchObject({ error: expect.any(String) })
-    } finally { installed.dispose() }
+      const exported = await sourceRoute.handlers.get('/api/workbench/bundle/v1/export')!(new Request('http://localhost', { method: 'POST', body: JSON.stringify({ workbenchId: 'source', kind: 'template' }) }))
+      expect(exported.ok).toBe(true)
+      expect(JSON.parse(decodeURIComponent(exported.headers.get('x-dshbay-export-notices') ?? '[]'))).toMatchObject([{ sessionKey: 'inner-page' }])
+      const bytes = new Uint8Array(await exported.arrayBuffer())
+      const recipient = new HostWorkbenchDirectory(join(root, 'recipient-profile'), workspaces as never)
+      const recipientRoute = routeWith(recipient, { extensions })
+      try {
+        const response = await recipientRoute.handlers.get('/api/workbench/bundle/v1/import')!(new Request('http://localhost/api/workbench/bundle/v1/import?parentPath=' + encodeURIComponent(root) + '&folderName=recipient', { method: 'POST', body: bytes }))
+        expect(response.ok, JSON.stringify(await response.clone().json())).toBe(true)
+        expect(installed).toMatchObject([{ packageName: 'inner-page' }])
+      } finally { recipientRoute.dispose() }
+    } finally { sourceRoute.dispose() }
   })
 })

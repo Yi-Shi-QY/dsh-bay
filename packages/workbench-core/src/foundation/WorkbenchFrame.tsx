@@ -2758,8 +2758,10 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
         const result = await workbenchDirectory.rename(workbenchId, name)
         if (result.status !== 'committed') {
           const message = result.status === 'rejected' && result.reason === 'duplicate-name'
-            ? `A Workbench named "${name}" already exists.`
-            : 'Unable to rename the Workbench; the connection may have changed.'
+            ? `已存在名为“${name}”的工作台。`
+            : result.status === 'conflict'
+              ? '工作台刚被其他操作更新，重命名未保存，请重试。'
+              : '重命名未保存：工作台目录当前不可写，请稍后重试。'
           setWorkbenchNameError(message)
           setStateDiagnostic(message)
           return
@@ -2767,6 +2769,10 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
       }
       setRenamingWorkbenchId(undefined)
       setStateDiagnostic(undefined)
+    } catch (error) {
+      const message = `重命名失败：${error instanceof Error ? error.message : String(error)}`
+      setWorkbenchNameError(message)
+      setStateDiagnostic(message)
     } finally {
       setWorkbenchRenaming(false)
     }
