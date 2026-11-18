@@ -7,7 +7,7 @@ export interface WorkbenchSettingsOpenOptionsV1 {
   section?: 'workbenches' | 'pages' | 'interactions' | 'sharing'
   workbenchId?: string
   shareMode?: 'import' | 'export' | 'history'
-  shareType?: 'complete' | 'distribution'
+  shareType?: 'complete' | 'template'
 }
 export const DESKTOP_SETTINGS_CONTEXT: WorkbenchSettingsContextV1 = Object.freeze({ mode: 'desktop' })
 

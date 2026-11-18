@@ -23,7 +23,7 @@ it('keeps sourced immutable history, idempotent writes, conflicts and tombstones
   expect(reopened.list('wb')).toEqual([])
   expect(reopened.read('wb', input.id, 1).body).toBe('Original decision')
   expect(reopened.read('wb', input.id).entry.removed).toBe(true)
-  expect(await readFile(join(f.root, '.bay', 'memory', 'entries', input.id, '2.md'), 'utf8')).toBe('Updated')
+  expect(await readFile(join(f.root, '.dshbay', 'memory', 'entries', input.id, '2.md'), 'utf8')).toBe('Updated')
 })
 it('limits worker claims and prompt size, and revalidates machine-dependent memories after import', async () => {
   const f = await setup()

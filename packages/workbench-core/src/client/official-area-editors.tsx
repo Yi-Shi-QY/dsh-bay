@@ -5,6 +5,7 @@ import type { TerminalLaunchShells, TerminalView, TerminalViewState } from '@dee
 import type { WebTerminalId, WebTerminalInfo } from '@deepseek-ai/dsh-api-terminal-controller/types'
 import type { WorkspaceDirectoryEntry } from '@deepseek-ai/dsh-api-workspace-files/types'
 import { ProjectFilesEditor } from './ProjectFilesEditor.tsx'
+import { getWorkbenchClientSessions } from './session-service.ts'
 import { WorkbenchPageLoading, WorkbenchPageTransition } from '../foundation/WorkbenchPageLoading.tsx'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { SidebarRightTabClaim, SidebarRightTabInfo } from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
@@ -110,7 +111,7 @@ function NativeResourceUnavailable({ label }: { readonly label: string }): React
 }
 
 function useSessionSnapshot(ctx: Context) {
-  const list = ctx.sessions.list
+  const list = getWorkbenchClientSessions(ctx).list
   return useSyncExternalStore(list.subscribe.bind(list), list.getSnapshot.bind(list), list.getSnapshot.bind(list))
 }
 
@@ -170,6 +171,7 @@ function sortEntries(entries: readonly WorkspaceDirectoryEntry[]): WorkspaceDire
  * filesystem authority; this component only renders the bounded list result.
  */
 function WorkspaceFilesEditor({ owner, ctx }: { owner: AreaProps; ctx: Context }): ReactNode {
+  const clientSessions = getWorkbenchClientSessions(ctx)
   const sessionId = sessionIdOf(owner)
   const sessions = useSessionSnapshot(ctx)
   const cwd = sessionId === undefined ? undefined : sessions.byId[sessionId]?.cwd
@@ -209,7 +211,7 @@ function WorkspaceFilesEditor({ owner, ctx }: { owner: AreaProps; ctx: Context }
     let renderer: ReturnType<typeof createWorkbenchNativeAreaSlotRenderer> | undefined
     let lease: ReturnType<typeof retainWorkbenchArea>
     try {
-      lease = retainWorkbenchArea(ctx.sessions, { sessionId, areaId: owner.areaId, claim: owner.areaClaim })
+      lease = retainWorkbenchArea(clientSessions, { sessionId, areaId: owner.areaId, claim: owner.areaClaim })
     } catch {
       setError('当前文件内页的对话绑定已失效，请重新绑定对话。')
       return

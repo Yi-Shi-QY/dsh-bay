@@ -8,7 +8,6 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { HostConnectionHandle } from '@deepseek-ai/dsh-client-connection'
 import type { SessionController } from '@deepseek-ai/dsh-api-session-controller'
 import type { AgentPresetRegistry } from '@deepseek-ai/dsh-agent-preset-registry'
-import type { WorkspaceRegistry } from '@deepseek-ai/dsh-workspace'
 import type SettingsProvider from '@deepseek-ai/dsh-settings'
 import { SettingsConflictError } from '@deepseek-ai/dsh-settings'
 import { BlockAssembler, createUserMessage, freezeMessage, MessageId } from '@deepseek-ai/dsh-llm'
@@ -30,9 +29,10 @@ import { installWorkbenchDirectoryRoute } from './host-workbench-directory-route
 import { WORKBENCH_DIRECTORY_SERVICE } from './workbench-directory-contract.ts'
 import { HostWorkbenchMemory } from './host-workbench-memory.ts'
 import type { WorkbenchMemoryWrite } from './workbench-memory-contract.ts'
-import { installWorkbenchCompleteRoute } from './host-workbench-complete.ts'
-import { WORKBENCH_COMPLETE_EXTENSIONS, type CompleteExtensions } from './host-complete-extensions.ts'
-import { WORKBENCH_COMPLETE_MIGRATIONS, type CompleteMigrationRegistry } from './host-complete-migrations.ts'
+import { installWorkbenchBundleRoute } from './host-workbench-bundle-route.ts'
+import { installWorkbenchSyncRoute } from './host-workbench-sync-route.ts'
+import { createRc3WorkbenchSessionCheckpointSource, type Rc3WorkbenchSessionCheckpointDeps } from './workbench-session-checkpoint.ts'
+import { createRc3WorkbenchSessionCheckpointRestorer } from './host-workbench-session-checkpoint.ts'
 import { WORKBENCH_SESSION_RUNTIME } from './host-workbench-directory-service.ts'
 import { WORKBENCH_ACCESS_SERVICE } from './workbench-access-contract.ts'
 import { WorkbenchAccessError } from './host-workbench-access.ts'
@@ -192,7 +192,7 @@ export class BayAgentHost {
     const before = this.store.load(id), after = upgradeTaskProjects(this.record(id), before)
     if (!isDeepStrictEqual(before, after)) {
       if (this.directory) {
-        const backup = path.join(this.directory.rootPath(id), '.bay', 'upgrades', 'project-ownership-v1', 'tasks.json')
+        const backup = path.join(this.directory.rootPath(id), '.dshbay', 'upgrades', 'project-ownership-v1', 'tasks.json')
         if (!existsSync(backup)) atomicJson(backup, before)
       }
       this.store.save(id, after)
@@ -595,7 +595,6 @@ export function installBayAgentHost(ctx: Context): (() => void) | undefined {
   const connection = ctx.get('connection', false), profile = ctx.get('profileContext', false)
   const settings = ctx.get('settings', false), sessions = ctx.get('sessionController', false), presets = ctx.get('agentPresets', false)
   if (!connection?.fetch || !profile?.dir || !settings || !sessions || !presets || typeof ctx.on !== 'function') return undefined
-  const workspaces = ctx.get('workspaceRegistry', false)
   const directory = ctx.get(WORKBENCH_DIRECTORY_SERVICE, false)
   const access = ctx.get(WORKBENCH_ACCESS_SERVICE, false)
   const host = new BayAgentHost(ctx, settings, sessions, profile.dir, presets, directory)
@@ -605,11 +604,23 @@ export function installBayAgentHost(ctx: Context): (() => void) | undefined {
     subscribe: (workbenchId, listener) => host.subscribeTaskChanges(workbenchId, listener),
   })
   ctx.provide(WORKBENCH_SESSION_RUNTIME, host)
-  const completeMigrations = ctx.get(WORKBENCH_COMPLETE_MIGRATIONS, false) as CompleteMigrationRegistry | undefined
-  const disposeComplete = directory && workspaces ? installWorkbenchCompleteRoute(connection, { profile: profile.dir, directory, persistence: ctx.sessionPersistence, attachments: ctx.get('attachments', false) as never, sessions, workspaces, orchestration: host.store,
-    extensions: () => ctx.get(WORKBENCH_COMPLETE_EXTENSIONS, false) as CompleteExtensions | undefined,
-    agents: () => ctx.get(AGENT_ASSEMBLY_SERVICE, false) as HostAgentAssemblyStore | undefined,
-    ...(completeMigrations ? { migrations: completeMigrations } : {}), ...(access ? { access } : {}) }) : undefined
+  const checkpoint = (() => {
+    const deps = {
+      sessionQuery: ctx.get('sessionQuery', false),
+      sessionPersistence: ctx.get('sessionPersistence', false),
+      attachments: ctx.get('attachments', false),
+      sessions: ctx.get('sessions', false),
+    }
+    if (!deps.sessionQuery || !deps.sessionPersistence || !deps.attachments) return undefined
+    return createRc3WorkbenchSessionCheckpointSource(deps as unknown as Rc3WorkbenchSessionCheckpointDeps)
+  })()
+  const checkpointRestorer = (() => {
+    const persistence = ctx.get('sessionPersistence', false)
+    const attachments = ctx.get('attachments', false)
+    return persistence ? createRc3WorkbenchSessionCheckpointRestorer(persistence, attachments) : undefined
+  })()
+  const disposeBundle = directory ? installWorkbenchBundleRoute(connection, { directory, ...(checkpoint ? { checkpoint } : {}), ...(checkpointRestorer ? { checkpointRestorer } : {}), ...(access ? { access } : {}) }) : undefined
+  const disposeSync = directory ? installWorkbenchSyncRoute(connection, { directory, ...(checkpoint ? { checkpoint } : {}), ...(access ? { access } : {}) }) : undefined
   const readJson = async (request: Request) => {
     const reader = request.body?.getReader(); if (!reader) throw new Error('body required')
     const chunks: Uint8Array[] = []; let size = 0
@@ -652,5 +663,5 @@ export function installBayAgentHost(ctx: Context): (() => void) | undefined {
       return Response.json({ draft }, { headers: { 'cache-control': 'no-store' } })
     } catch (error) { return Response.json({ error: String(error) }, { status: 400, headers: { 'cache-control': 'no-store' } }) }
   } })
-  return () => { access?.setTaskRuntime(undefined); disposeComplete?.(); disposeDraft(); disposeAgent(); host.dispose() }
+  return () => { access?.setTaskRuntime(undefined); disposeSync?.(); disposeBundle?.(); disposeDraft(); disposeAgent(); host.dispose() }
 }

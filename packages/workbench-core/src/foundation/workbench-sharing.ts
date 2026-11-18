@@ -1114,6 +1114,8 @@ export function decodeDeterministicZip(
     const nameSize = zipU16(bytes, cursor + 28)
     const extraSize = zipU16(bytes, cursor + 30)
     const commentSize = zipU16(bytes, cursor + 32)
+    const versionMadeBy = zipU16(bytes, cursor + 4)
+    const externalAttributes = zipU32(bytes, cursor + 38)
     const localOffset = zipU32(bytes, cursor + 42)
     const nameEnd = cursor + 46 + nameSize
     if (nameEnd + extraSize + commentSize > endOffset) throw new Error('ZIP central entry exceeds archive')
@@ -1122,6 +1124,8 @@ export function decodeDeterministicZip(
     if (seen.has(path)) throw new Error(`duplicate ZIP entry: ${path}`)
     if (folded.has(path.toLocaleLowerCase('en-US'))) throw new Error(`case-colliding ZIP entry: ${path}`)
     if ((flags & 0x1) !== 0 || (flags & 0x8) !== 0 || method !== 0) throw new Error(`unsupported ZIP entry: ${path}`)
+    const unixMode = (externalAttributes >>> 16) & 0xffff
+    if ((versionMadeBy >>> 8) === 3 && (unixMode & 0xf000) === 0xa000) throw new Error(`symlink ZIP entry is not allowed: ${path}`)
     if (uncompressedSize !== compressedSize || uncompressedSize > limits.maxFileBytes) throw new Error(`ZIP entry exceeds size limit: ${path}`)
     if (localOffset + 30 > endOffset || zipU32(bytes, localOffset) !== ZIP_LOCAL_FILE_HEADER) throw new Error(`ZIP local entry is invalid: ${path}`)
     const localNameSize = zipU16(bytes, localOffset + 26)

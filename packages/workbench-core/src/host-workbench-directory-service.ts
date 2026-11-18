@@ -5,7 +5,6 @@ import { HostWorkbenchMemory } from './host-workbench-memory.ts'
 import { installWorkbenchDirectoryRoute } from './host-workbench-directory-route.ts'
 import { WORKBENCH_DIRECTORY_SERVICE } from './workbench-directory-contract.ts'
 import { WORKBENCH_ACCESS_SERVICE } from './workbench-access-contract.ts'
-import { decodeWorkbenchSettingsV4 } from './foundation/persistence.ts'
 import { readDshExtensionInventoryV1 } from './read-dsh-extension-inventory.ts'
 
 export interface WorkbenchSessionRuntime {
@@ -18,7 +17,7 @@ export const WORKBENCH_SESSION_RUNTIME = 'workbenchSessionRuntime'
 export function installWorkbenchDirectoryHost(ctx: Context): (() => void) | undefined {
   const connection = ctx.get('connection', false), profile = ctx.get('profileContext', false), workspaces = ctx.get('workspaceRegistry', false)
   if (!connection?.fetch || !profile?.dir || !workspaces) return undefined
-  const directory = new HostWorkbenchDirectory(profile.dir, workspaces, decodeWorkbenchSettingsV4(ctx.get('settings', false)?.describe().find(row => row.ns === 'workbench-layout')?.value))
+  const directory = new HostWorkbenchDirectory(profile.dir, workspaces)
   const memory = new HostWorkbenchMemory(id => directory.rootPath(id), id => directory.getSnapshot().value.workbenches[id]!)
   const access = new HostWorkbenchAccess(directory, memory)
   ctx.provide(WORKBENCH_DIRECTORY_SERVICE, directory)

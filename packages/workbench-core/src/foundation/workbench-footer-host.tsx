@@ -3,6 +3,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type { RenderOpts, SlotRendererHost, StoredEntry, StoreInstanceLike } from '@deepseek-ai/dsh-client-ui-slots'
 import { createSlotRenderer } from './renderer/scoped-slots.tsx'
+import { getWorkbenchClientSessions } from '../client/session-service.ts'
 
 const slot = 'sidebar.footer.action'
 const renderer = createSlotRenderer()
@@ -21,6 +22,7 @@ export function isAllowedWorkbenchFooterEntry(entry: StoredEntry): boolean {
 
 /** Render public footer contributions without declaring or mounting their Sidebar owner. */
 export function createWorkbenchFooterHost(ctx: Context) {
+  const sessions = getWorkbenchClientSessions(ctx)
   let live = true
   const adapted = new Map<StoredEntry, StoredEntry>()
   const denied = new Set<StoredEntry>()
@@ -75,7 +77,7 @@ export function createWorkbenchFooterHost(ctx: Context) {
       }
       return store
     },
-    root: source({ key: undefined, hooks: { sessions: ctx.sessions.list, workspaces: ctx.workspaces.list }, keyedHooks: {}, props: {} }),
+    root: source({ key: undefined, hooks: { sessions: sessions.list, workspaces: ctx.workspaces.list }, keyedHooks: {}, props: {} }),
     scopeRevision: source(0), scope: () => absentScope, locale: ctx.locale,
   }
   return {

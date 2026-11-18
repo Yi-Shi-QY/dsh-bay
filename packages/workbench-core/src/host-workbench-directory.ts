@@ -22,7 +22,7 @@ interface Registry {
   requests: Record<string, { workbenchId: string; parentPath: string; folderName: string }>
 }
 const clone = <T>(value: T): T => structuredClone(value)
-const filename = (root: string) => path.join(root, '.bay', 'workbench.json')
+const filename = (root: string) => path.join(root, '.dshbay', 'workbench.json')
 const safeId = (value: string) => /^[A-Za-z0-9][A-Za-z0-9._-]{0,180}$/u.test(value)
 export function atomicJson(file: string, value: unknown): void {
   mkdirSync(path.dirname(file), { recursive: true })
@@ -44,8 +44,7 @@ export class HostWorkbenchDirectory {
   private readonly listeners = new Set<() => void>()
   private areaHasTasks: (workbenchId: string, areaId: string) => boolean = () => false
 
-  constructor(profile: string, private readonly workspaces: Pick<WorkspaceRegistry, 'create'>,
-    legacy?: WorkbenchSettingsV4) {
+  constructor(profile: string, private readonly workspaces: Pick<WorkspaceRegistry, 'create'>) {
     this.registryFile = path.join(profile, '.dsh-workbench', 'directory-v1', 'registry.json')
     this.journalFile = path.join(profile, '.dsh-workbench', 'directory-v1', 'commit.json')
     const releaseRegistry = acquireFileLock(this.registryFile + '.lock')
@@ -55,7 +54,8 @@ export class HostWorkbenchDirectory {
       this.registry = readJson<Registry>(this.registryFile)
       if (this.registry.schemaVersion !== 1) throw new Error('不支持的工作台目录登记版本。')
     } else {
-      const { workbenches: old = {}, migrationRequired: _migration, ...preferences } = legacy ?? { version: 4, activeWorkbenchId: '', openWorkbenchIds: [], workbenches: {}, invalidWorkbenches: {}, layoutTemplates: {}, sessionMarkers: {} }
+      const old: Record<string, WorkbenchRecordV2> = {}
+      const preferences: Omit<WorkbenchSettingsV4, 'workbenches'> = { version: 4, activeWorkbenchId: '', openWorkbenchIds: [], invalidWorkbenches: {}, layoutTemplates: {}, sessionMarkers: {} }
       this.registry = { schemaVersion: 1, revision: 0, registrations: {}, requests: {}, preferences: { ...preferences, activeWorkbenchId: '', openWorkbenchIds: [], layoutTemplates: {}, invalidWorkbenches: {
         ...preferences.invalidWorkbenches, ...Object.fromEntries(Object.entries(old).map(([id, record]) => [id, { workbenchId: id, name: record.name, description: '17.x 工作台格式不受 18.0 支持；原数据已保留。', rawRecord: record }])) },
       } }
@@ -67,10 +67,10 @@ export class HostWorkbenchDirectory {
         this.validate(envelope.record)
         if (![1, 2].includes(envelope.schemaVersion) || envelope.record.workbenchId !== id) throw new Error('工作台身份或版本不匹配。')
         if (envelope.schemaVersion === 1) {
-          const releaseRoot = acquireFileLock(path.join(registration.rootPath, '.bay', 'writer.lock'))
+          const releaseRoot = acquireFileLock(path.join(registration.rootPath, '.dshbay', 'writer.lock'))
           try {
           const upgraded = upgradeProjectOwnership(registration.rootPath, envelope.record)
-          const backup = { file: path.join(registration.rootPath, '.bay', 'upgrades', 'project-ownership-v1', 'workbench.json'), value: envelope }
+          const backup = { file: path.join(registration.rootPath, '.dshbay', 'upgrades', 'project-ownership-v1', 'workbench.json'), value: envelope }
           envelope = { schemaVersion: 2, revision: envelope.revision + 1, record: this.portable(this.reconcileAreas(upgraded.record), registration) }
           this.registry.revision++
           this.commit(this.registry, [backup, ...upgraded.writes, { file: filename(registration.rootPath), value: envelope }])
@@ -97,7 +97,7 @@ export class HostWorkbenchDirectory {
         this.registry = latest
         for (const [id, registration] of Object.entries(latest.registrations).sort(([a], [b]) => a.localeCompare(b))) {
           if (!existsSync(filename(registration.rootPath))) continue
-          roots.push(acquireFileLock(path.join(registration.rootPath, '.bay', 'writer.lock')))
+          roots.push(acquireFileLock(path.join(registration.rootPath, '.dshbay', 'writer.lock')))
           this.records.set(id, readJson<FileWorkbenchV1>(filename(registration.rootPath)))
         }
         for (const id of this.records.keys()) if (!latest.registrations[id]) this.records.delete(id)
@@ -233,7 +233,7 @@ export class HostWorkbenchDirectory {
     return next
   }
   private writeProjection(root: string, record: WorkbenchRecordV2) {
-    const base = path.join(root, '.bay', 'context'); mkdirSync(base, { recursive: true })
+    const base = path.join(root, '.dshbay', 'context'); mkdirSync(base, { recursive: true })
     writeFileSync(path.join(base, '工作台整体背景说明.md'), renderWorkbenchContextMarkdown(workbenchContextOf(record.context)), 'utf8')
     for (const [id, context] of Object.entries(record.projectModelVersion ? {} : record.areaContexts ?? {})) {
       if (!safeId(id)) throw new Error('区域身份无效。')
@@ -244,18 +244,18 @@ export class HostWorkbenchDirectory {
   /** One revision per file. Written through the same serial writer as workbench.json. */
   async writeAgentDefinition(id: string, agentId: string, revision: number, value: unknown): Promise<void> {
     if (!/^[a-z][a-z0-9-]{1,62}$/u.test(agentId) || !Number.isInteger(revision) || revision < 1 || revision > 999999) throw new Error('Agent 标识或修订号无效。')
-    await this.serial(async () => { atomicJson(path.join(this.rootPath(id), '.bay', 'agents', `${agentId}@${revision}.json`), value) })
+    await this.serial(async () => { atomicJson(path.join(this.rootPath(id), '.dshbay', 'agents', `${agentId}@${revision}.json`), value) })
   }
   /** Which revisions are the live DSH modes. The file is internal and never listed as an agent. */
   async writeAgentSelection(id: string, value: unknown): Promise<void> {
-    await this.serial(async () => { atomicJson(path.join(this.rootPath(id), '.bay', 'agents', 'selection.json'), value) })
+    await this.serial(async () => { atomicJson(path.join(this.rootPath(id), '.dshbay', 'agents', 'selection.json'), value) })
   }
   async writeAgentSuggestion(id: string, value: unknown): Promise<void> {
-    await this.serial(async () => { atomicJson(path.join(this.rootPath(id), '.bay', 'agents', 'suggested.json'), value) })
+    await this.serial(async () => { atomicJson(path.join(this.rootPath(id), '.dshbay', 'agents', 'suggested.json'), value) })
   }
   rootPath(id: string): string { const root = this.registry.registrations[id]?.rootPath; if (!root || !this.records.has(id)) throw new Error('工作台目录未登记或已失联。'); return root }
   async resolveDirectory(id: string, relativePath: string, create = false): Promise<string> {
-    if (relativePath.split('/').some(part => part.toLowerCase() === '.bay')) throw new Error('内部工作台目录不能作为区域项目。')
+    if (relativePath.split('/').some(part => part.toLowerCase() === '.dshbay')) throw new Error('内部工作台目录不能作为区域项目。')
     const root = await realpath(this.rootPath(id)), target = resolvePortablePath(root, relativePath)
     // Check every existing ancestor before mkdir can follow a directory link.
     let cursor = root
@@ -269,22 +269,22 @@ export class HostWorkbenchDirectory {
     }
     const resolved = await realpath(target)
     const actualRelative = portableRelativePath(root, resolved)
-    if (actualRelative.split('/').some(part => part.toLowerCase() === '.bay')) throw new Error('内部工作台目录不能作为区域项目。')
+    if (actualRelative.split('/').some(part => part.toLowerCase() === '.dshbay')) throw new Error('内部工作台目录不能作为区域项目。')
     if (!(await stat(resolved)).isDirectory()) throw new Error('请选择文件夹。')
     return resolved
   }
   async readProjectFile(id: string, relativePath: string): Promise<Uint8Array> {
-    if (!relativePath || relativePath.split('/').some(part => part.toLowerCase() === '.bay')) throw new Error('不能读取工作台内部管理目录。')
+    if (!relativePath || relativePath.split('/').some(part => part.toLowerCase() === '.dshbay')) throw new Error('不能读取工作台内部管理目录。')
     const root = await realpath(this.rootPath(id)), target = resolvePortablePath(root, relativePath)
     const resolved = await realpath(target), actual = portableRelativePath(root, resolved)
-    if (actual.split('/').some(part => part.toLowerCase() === '.bay')) throw new Error('不能读取工作台内部管理目录。')
+    if (actual.split('/').some(part => part.toLowerCase() === '.dshbay')) throw new Error('不能读取工作台内部管理目录。')
     const info = await stat(resolved)
     if (!info.isFile()) throw new Error('请选择文件。')
     if (info.size > 16 * 1024 * 1024) throw new Error('文件超过读取上限。')
     return readFile(resolved)
   }
   async writeProjectFile(id: string, relativePath: string, value: Uint8Array): Promise<void> {
-    if (!relativePath || relativePath.split('/').some(part => part.toLowerCase() === '.bay')) throw new Error('不能写入工作台内部管理目录。')
+    if (!relativePath || relativePath.split('/').some(part => part.toLowerCase() === '.dshbay')) throw new Error('不能写入工作台内部管理目录。')
     if (value.byteLength > 16 * 1024 * 1024) throw new Error('文件超过写入上限。')
     await this.serial(async () => {
       const root = await realpath(this.rootPath(id)), target = resolvePortablePath(root, relativePath)
@@ -293,24 +293,24 @@ export class HostWorkbenchDirectory {
       await writeFile(temporary, value, { flag: 'wx' }); renameSync(temporary, target)
     })
   }
-  async listDirectories(id: string, relativePath = '') { const folder = await this.resolveDirectory(id, relativePath); return (await readdir(folder, { withFileTypes: true })).filter(row => row.name !== '.bay' && (row.isDirectory() || row.isSymbolicLink())).map(row => ({ name: row.name, relativePath: [relativePath, row.name].filter(Boolean).join('/') })) }
+  async listDirectories(id: string, relativePath = '') { const folder = await this.resolveDirectory(id, relativePath); return (await readdir(folder, { withFileTypes: true })).filter(row => row.name !== '.dshbay' && (row.isDirectory() || row.isSymbolicLink())).map(row => ({ name: row.name, relativePath: [relativePath, row.name].filter(Boolean).join('/') })) }
   async projectEntries(id: string, areaId: string, relativePath = '') {
     const record = this.snapshot.value.workbenches[id], project = record?.projects?.[areaId] ?? record?.areaProjects?.[areaId]
     if (!project) throw new Error('请先为此区域设置项目文件夹。')
     const base = await this.resolveDirectory(id, project.relativePath), directory = await this.resolveDirectory(id, [project.relativePath, relativePath].filter(Boolean).join('/'))
     portableRelativePath(base, directory)
     const rows = await readdir(directory, { withFileTypes: true })
-    const selected = rows.filter(row => row.name.toLowerCase() !== '.bay').sort((a, b) => Number(b.isDirectory()) - Number(a.isDirectory()) || a.name.localeCompare(b.name)).slice(0, 2000)
+    const selected = rows.filter(row => row.name.toLowerCase() !== '.dshbay').sort((a, b) => Number(b.isDirectory()) - Number(a.isDirectory()) || a.name.localeCompare(b.name)).slice(0, 2000)
     const entries = []
     for (const row of selected) {
       let kind: 'directory' | 'file' | 'unavailable' = row.isDirectory() ? 'directory' : 'file'
       try { const actual = await realpath(path.join(directory, row.name)); portableRelativePath(base, actual); if (row.isSymbolicLink()) kind = (await stat(actual)).isDirectory() ? 'directory' : 'file' } catch { kind = 'unavailable' }
       entries.push({ name: row.name, relativePath: [relativePath, row.name].filter(Boolean).join('/'), kind })
     }
-    return { project: project.relativePath, truncated: rows.length > selected.length + rows.filter(row => row.name.toLowerCase() === '.bay').length, entries: entries.sort((a, b) => Number(b.kind === 'directory') - Number(a.kind === 'directory') || a.name.localeCompare(b.name)) }
+    return { project: project.relativePath, truncated: rows.length > selected.length + rows.filter(row => row.name.toLowerCase() === '.dshbay').length, entries: entries.sort((a, b) => Number(b.kind === 'directory') - Number(a.kind === 'directory') || a.name.localeCompare(b.name)) }
   }
   async projectPreview(id: string, areaId: string, relativePath: string) {
-    if (relativePath.split('/').some(part => part.toLowerCase() === '.bay')) throw new Error('不能读取工作台内部管理目录。')
+    if (relativePath.split('/').some(part => part.toLowerCase() === '.dshbay')) throw new Error('不能读取工作台内部管理目录。')
     const record = this.snapshot.value.workbenches[id], project = record?.projects?.[areaId] ?? record?.areaProjects?.[areaId]
     if (!project || !relativePath) throw new Error('项目或文件不存在。')
     const base = await this.resolveDirectory(id, project.relativePath), target = await realpath(resolvePortablePath(base, relativePath))
@@ -339,13 +339,13 @@ export class HostWorkbenchDirectory {
       const rootPath = path.join(parentPath, input.folderName)
       const provisioningFile = path.join(path.dirname(this.registryFile), 'create-' + createHash('sha256').update(input.requestId).digest('hex') + '.json')
       const provisioning = existsSync(provisioningFile) ? readJson<{ rootPath: string; staging: string; requestId: string; record: WorkbenchRecordV2 }>(provisioningFile)
-        : { rootPath, staging: path.join(parentPath, '.bay-create-' + randomUUID()), requestId: input.requestId, record: input.record }
+        : { rootPath, staging: path.join(parentPath, '.dshbay-create-' + randomUUID()), requestId: input.requestId, record: input.record }
       if (provisioning.rootPath !== rootPath || provisioning.record.workbenchId !== input.record.workbenchId) throw new Error('创建请求与原操作不一致。')
       if (!existsSync(provisioningFile)) {
         if (existsSync(rootPath)) throw new Error('目标文件夹已存在，请选择其他名称。')
         atomicJson(provisioningFile, provisioning)
       }
-      const marker = (folder: string) => path.join(folder, '.bay', 'creation.json')
+      const marker = (folder: string) => path.join(folder, '.dshbay', 'creation.json')
       if (!existsSync(rootPath)) {
         await mkdir(provisioning.staging, { recursive: true })
         atomicJson(marker(provisioning.staging), { requestId: input.requestId })
@@ -504,7 +504,7 @@ export class HostWorkbenchDirectory {
     })
   }
   definition(id: string): FileWorkbenchV1 { this.rootPath(id); return clone(this.records.get(id)!) }
-  async publishImported(rootPath: string, envelope: FileWorkbenchV1, sessionMap: Record<string, string>) { return this.serial(async () => {
+  async publishImported(rootPath: string, envelope: FileWorkbenchV1, sessionMap: Record<string, string>, options: { open?: boolean } = {}) { return this.serial(async () => {
     this.validate(envelope.record)
     validateWorkbenchRelations(envelope.record)
     if (![1, 2].includes(envelope.schemaVersion) || !envelope.record.executionPaused) throw new Error('导入工作台必须保持待继续状态。')
@@ -521,7 +521,10 @@ export class HostWorkbenchDirectory {
     for (const key of Object.keys(envelope.record.sessionCatalog ?? {})) if (!sessionMap[key]) throw new Error('导入会话映射缺失。')
     const registry = clone(this.registry)
     registry.registrations[id] = { rootPath: actualRoot, workspaces: workspaceMap, sessions: clone(sessionMap) }
-    registry.preferences.openWorkbenchIds.push(id); registry.preferences.activeWorkbenchId = id; registry.revision++
+    if (options.open !== false) {
+      registry.preferences.openWorkbenchIds.push(id); registry.preferences.activeWorkbenchId = id
+    }
+    registry.revision++
     const upgraded = upgradeProjectOwnership(actualRoot, envelope.record)
     envelope = { ...envelope, schemaVersion: 2, record: this.portable(this.reconcileAreas(upgraded.record), registry.registrations[id]!) }
     this.commit(registry, [...upgraded.writes, { file: filename(actualRoot), value: envelope }]); this.records.set(id, envelope)

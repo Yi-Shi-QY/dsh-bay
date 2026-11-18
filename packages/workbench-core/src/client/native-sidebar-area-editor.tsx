@@ -7,6 +7,7 @@ import type { ShortcutCatalogEntry } from '@deepseek-ai/dsh-client-shortcuts/cli
 import type { WorkbenchEditorOwnerProps } from './editor-slots.ts'
 import { createWorkbenchNativeAreaSlotRenderer } from './native-area-slot-renderer.tsx'
 import { retainWorkbenchArea } from './native-area-reference.ts'
+import { getWorkbenchClientSessions } from './session-service.ts'
 import {
   createWorkbenchNativeTabOccurrence,
   markWorkbenchNativeTabClosing,
@@ -250,6 +251,7 @@ export function NativeSidebarAreaEditor({
   owner, ctx, entryKey, kind, title, contentId = `workbench://${kind}/${owner.instanceId}`,
   fallback = null, children, onOpenResource, onOpenTab, onClose,
 }: NativeSidebarAreaEditorProps): ReactNode {
+  const sessions = getWorkbenchClientSessions(ctx)
   const nativeInstanceId = owner.runtimeIdentity ?? owner.instanceId
   const nativeDefinition = workbenchNativeSidebarForKind(kind)
   const resourceOnly = nativeDefinition?.resourceOnly === true
@@ -510,7 +512,7 @@ export function NativeSidebarAreaEditor({
         setAvailable(false)
         return
       }
-      lease = retainWorkbenchArea(ctx.sessions, { sessionId: sessionId as SessionId, areaId, claim })
+      lease = retainWorkbenchArea(sessions, { sessionId: sessionId as SessionId, areaId, claim })
     } catch {
       setAvailable(false)
       return

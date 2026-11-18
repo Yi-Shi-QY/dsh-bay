@@ -100,7 +100,7 @@ writeFileSync(path.join(core, 'lib/build-inputs.json'), JSON.stringify({
   workbenchVersion: manifest.version,
   defaultInstall: [WORKBENCH_PACKAGE_NAME],
   excludedModules: ['@dsh-workbench/conversation-suite', '@dsh-workbench/svgdeepseek-pet'],
-  more: { workbench: 'deferred', official: 'rc2-ui-entry-customization-only' },
+  more: { workbench: 'deferred', official: 'rc3-ui-entry-customization-only' },
   inputs,
   hostInputs: Object.keys(hostResult.metafile.inputs).sort().map(file => ({
     path: file.replaceAll(String.fromCharCode(92), '/'),

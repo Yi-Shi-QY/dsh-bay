@@ -23,7 +23,7 @@ async function setup() {
 }
 it('retains profile-wide menu folders across host restarts without rewriting workbench files', async () => {
   const f = await setup(); await f.directory.create(f.input)
-  const workbenchFile = join(f.directory.rootPath('workbench-one'), '.bay', 'workbench.json')
+  const workbenchFile = join(f.directory.rootPath('workbench-one'), '.dshbay', 'workbench.json')
   const before = await readFile(workbenchFile, 'utf8')
   const editorMenu = { folders: [{ id: 'tools', name: '开发工具' }], assignments: { 'example.notes': 'tools' } }
   await f.directory.patch({ operation: 'set', path: ['editorMenu'], value: editorMenu, expectedRevision: f.directory.getSnapshot().revision })
@@ -33,7 +33,7 @@ it('retains profile-wide menu folders across host restarts without rewriting wor
 })
 it('persists sidebar shortcuts in the local registry without placing them in the portable workbench definition', async () => {
   const f = await setup(); await f.directory.create(f.input)
-  const file = join(f.directory.rootPath('workbench-one'), '.bay', 'workbench.json')
+  const file = join(f.directory.rootPath('workbench-one'), '.dshbay', 'workbench.json')
   const before = await readFile(file, 'utf8')
   await f.directory.patch({ operation: 'set', path: ['sidebarShortcuts'], value: ['workbench-one'], expectedRevision: f.directory.getSnapshot().revision })
   const reopened = new HostWorkbenchDirectory(join(f.root, 'profile'), f.workspaces as never)
@@ -67,7 +67,7 @@ it('creates one file-authoritative workbench and reopens without a second profil
   const first = await f.directory.create(f.input)
   expect(await f.directory.create(f.input)).toEqual(first)
   const rootPath = f.directory.rootPath(first.workbenchId)
-  expect(JSON.parse(await readFile(join(rootPath, '.bay', 'workbench.json'), 'utf8')).record.name).toBe('Research')
+  expect(JSON.parse(await readFile(join(rootPath, '.dshbay', 'workbench.json'), 'utf8')).record.name).toBe('Research')
   const profile = JSON.parse(await readFile(join(f.root, 'profile', '.dsh-workbench', 'directory-v1', 'registry.json'), 'utf8'))
   expect(profile.preferences.workbenches).toBeUndefined()
   const reopened = new HostWorkbenchDirectory(join(f.root, 'profile'), f.workspaces as never)
@@ -85,7 +85,7 @@ it('lists and previews a zero-session project, limits large previews and rejects
   expect(await f.directory.projectEntries('workbench-one', 'area-a')).toMatchObject({ project: 'app', entries: [{ name: 'src', kind: 'directory' }, { name: 'large.txt', kind: 'file' }] })
   expect(await f.directory.projectPreview('workbench-one', 'area-a', 'src/index.ts')).toEqual({ text: 'export const result = true', truncated: false })
   expect(await f.directory.projectPreview('workbench-one', 'area-a', 'large.txt')).toMatchObject({ truncated: true })
-  await expect(f.directory.projectPreview('workbench-one', 'area-a', '../.bay/workbench.json')).rejects.toThrow()
+  await expect(f.directory.projectPreview('workbench-one', 'area-a', '../.dshbay/workbench.json')).rejects.toThrow()
   await expect(f.directory.projectEntries('workbench-one', 'area-b')).rejects.toThrow('项目文件夹')
   expect(f.directory.getSnapshot().value.workbenches['workbench-one']!.sessionCatalog).toEqual({})
 })
@@ -98,7 +98,7 @@ it('binds two zero-session areas to one project without merging their contexts',
   expect(record.sessionCatalog).toEqual({})
   expect(record.document.root.kind).toBe('split')
   await expect(f.directory.bindArea({ workbenchId: 'workbench-one', areaId: 'area-a', relativePath: '../outside', expectedRevision: f.directory.getSnapshot().revision })).rejects.toThrow()
-  await expect(f.directory.bindArea({ workbenchId: 'workbench-one', areaId: 'area-a', relativePath: '.bay/memory', expectedRevision: f.directory.getSnapshot().revision })).rejects.toThrow('内部')
+  await expect(f.directory.bindArea({ workbenchId: 'workbench-one', areaId: 'area-a', relativePath: '.dshbay/memory', expectedRevision: f.directory.getSnapshot().revision })).rejects.toThrow('内部')
 })
 it('allows closing an area after its Bay Agent execution ends, while blocking only active execution', async () => {
   const f = await setup(); await f.directory.create(f.input)
@@ -168,6 +168,6 @@ it('serializes optimistic updates and generates background Markdown from the com
     f.directory.patch({ operation: 'set', path: ['workbenches', 'workbench-one'], value: { ...original, name: 'Stale' }, expectedRevision: snapshot.revision }),
   ])
   expect(changes.map(row => row.status)).toEqual(['committed', 'conflict'])
-  expect(await readFile(join(f.directory.rootPath('workbench-one'), '.bay', 'context', '工作台整体背景说明.md'), 'utf8')).toContain('Verified goal')
+  expect(await readFile(join(f.directory.rootPath('workbench-one'), '.dshbay', 'context', '工作台整体背景说明.md'), 'utf8')).toContain('Verified goal')
   expect(f.directory.getSnapshot().value.workbenches['workbench-one']?.name).toBe('Research')
 })

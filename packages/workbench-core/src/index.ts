@@ -2,9 +2,7 @@ import { installBayAgentHost } from './host-bay-agent.ts'
 import { installAgentAssemblyHost } from './host-agent-assembly-service.ts'
 import { installWorkbenchDirectoryHost } from './host-workbench-directory-service.ts'
 import { installWorkbenchNativeAccess } from './host-workbench-native-service.ts'
-import { installLayoutImportJournalRoute } from './host-layout-import-journal.ts'
 import { installFloatingUiSettings } from './host-floating-ui-settings.ts'
-import { installDistributionRoutes } from './host-distribution-route.ts'
 import { CompleteMigrationRegistry, WORKBENCH_COMPLETE_MIGRATIONS } from './host-complete-migrations.ts'
 export { CompleteMigrationRegistry, WORKBENCH_COMPLETE_MIGRATIONS, type CompleteMigrationProvider } from './host-complete-migrations.ts'
 export * from './module-contract.ts'
@@ -69,6 +67,21 @@ export * from './workbench-complete-contract.ts'
 export * from './workbench-memory-contract.ts'
 export * from './workbench-collaboration-contract.ts'
 export * from './host-workbench-collaboration.ts'
+export * from './workbench-snapshot.ts'
+export * from './workbench-snapshot-store.ts'
+export * from './workbench-snapshot-diff.ts'
+export * from './workbench-bundle.ts'
+export * from './workbench-bundle-reader.ts'
+export * from './workbench-bundle-writer.ts'
+export * from './workbench-sync.ts'
+export * from './workbench-sync-provider.ts'
+export * from './workbench-sync-scheduler.ts'
+export * from './workbench-sync-contract.ts'
+export * from './workbench-merge.ts'
+export * from './workbench-session-checkpoint.ts'
+export * from './workbench-bundle-contract.ts'
+export * from './host-workbench-bundle-route.ts'
+export * from './host-workbench-sync-route.ts'
 
 import { WORKBENCH_CORE_MANIFEST } from './core-manifest.ts'
 import { WORKBENCH_CORE_RUNTIME_SERVICE_NAME, createWorkbenchCoreRuntime } from './core-runtime.ts'
@@ -76,9 +89,7 @@ import { installWorkbenchHostSignedCatalogInstallRoute } from './host-module-ins
 import { installWorkbenchCoreProfileServices } from './host-profile-services.ts'
 import { installWorkbenchModuleIdentityRoute } from './host-module-identity-route.ts'
 import { installWorkbenchModuleCenterRoutes } from './host-module-center-route.ts'
-import { installWorkbenchOfflineImportRoutes } from './host-offline-import-route.ts'
 import { installWorkbenchHostDirectSourceInstallRoute } from './host-direct-source-install-route.ts'
-import { installWorkbenchDshNativeOfflineBundleRoutes } from './host-native-offline-bundle-route.ts'
 import { WorkbenchSettingsSchema, WORKBENCH_SETTINGS_NAMESPACE } from './host-layout-settings.ts'
 import { installWorkbenchBrowserWindowController } from './host-browser-window-controller.ts'
 import { installWorkbenchCreatorSkillProvider } from './workbench-creator-skill.ts'
@@ -90,7 +101,7 @@ import { installWorkbenchCreatorSkillProvider } from './workbench-creator-skill.
  */
 export const Config = WorkbenchSettingsSchema.volatile()
 
-export const inject = ['connection', 'pluginManager', 'profileContext', 'pluginPackages', 'credentials', 'sessions', 'sessionController', 'webServer', 'settings', 'skills', 'agentPresets', 'sessionPersistence', 'workspaceRegistry', 'attachments', 'fileUploads', 'typertGateway', 'remoteAccess', 'tools', 'agents', 'workingDirectory'] as const
+export const inject = ['connection', 'pluginManager', 'profileContext', 'pluginPackages', 'credentials', 'sessions', 'sessionQuery', 'sessionController', 'webServer', 'settings', 'skills', 'agentPresets', 'sessionPersistence', 'workspaceRegistry', 'attachments', 'fileUploads', 'typertGateway', 'remoteAccess', 'tools', 'agents', 'workingDirectory'] as const
 
 interface WorkbenchCoreHostContextV1 {
   baseUrl?: string
@@ -138,21 +149,13 @@ export function apply(ctx: WorkbenchCoreHostContextV1): void {
     const disposeRoute = installWorkbenchHostSignedCatalogInstallRoute(routeContext as never)
     const disposeIdentity = installWorkbenchModuleIdentityRoute(routeContext as never)
     const disposeCenter = installWorkbenchModuleCenterRoutes(routeContext as never)
-    const disposeLayoutJournal = installLayoutImportJournalRoute(routeContext as never)
     const disposeFloatingUi = installFloatingUiSettings(routeContext as never)
-    const disposeDistribution = installDistributionRoutes(routeContext as never)
-    const disposeOffline = installWorkbenchOfflineImportRoutes(routeContext as never)
     const disposeDirectSource = installWorkbenchHostDirectSourceInstallRoute(routeContext as never)
-    const disposeNativeOfflineBundle = installWorkbenchDshNativeOfflineBundleRoutes(routeContext as never)
     const disposeBrowserWindows = installWorkbenchBrowserWindowController(routeContext as never)
     return () => {
       disposeBrowserWindows?.()
-      disposeNativeOfflineBundle?.()
       disposeDirectSource?.()
-      disposeLayoutJournal?.()
       void disposeFloatingUi?.()
-      disposeDistribution?.()
-      disposeOffline?.()
       disposeCenter?.()
       disposeIdentity?.()
       disposeRoute?.()

@@ -1,6 +1,6 @@
 /** Workspace command registration and browser-owned opening requests. */
 import type { Context } from '@deepseek-ai/cordis'
-import type { SessionForkError } from '@deepseek-ai/dsh-api-session-controller/client'
+import type { ISessions, SessionForkError } from '@deepseek-ai/dsh-api-session-controller/client'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { ShortcutCommand, ShortcutCommandId } from '@deepseek-ai/dsh-client-shortcuts/client'
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
@@ -63,7 +63,8 @@ export function installWorkspaceShortcuts(
   reportForkFailure: (reason: 'unavailable' | 'failed') => void,
 ): void {
   const t = ctx.locale.bind('workspace')
-  const current = () => Object.values(ctx.sessions.list.getSnapshot().byId)
+  const sessions = ctx.get('sessions') as unknown as ISessions
+  const current = () => Object.values(sessions.list.getSnapshot().byId)
     .find(row => (row.retainedBy.mainView ?? 0) > 0)
   const addReason = () => ctx.slots.entries('sidebar.workspaces.directoryFlow').length === 0
     ? t('shortcut.noPicker')

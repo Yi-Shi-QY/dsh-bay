@@ -8,7 +8,7 @@ function json(relative: string) {
 }
 
 describe('DSH RC1 historical compatibility record', () => {
-  it('keeps RC1 identity evidence separate from the current RC2 candidate', () => {
+  it('keeps RC1 identity evidence separate from the current RC3 candidate', () => {
     const compatibility = json('compat/dsh-0.2.2-rc.1/manifest.json')
     const provenance = json('provenance/dsh-0.2.2-rc.1.json')
     const current = json('packages/workbench-core/package.json')
@@ -17,7 +17,7 @@ describe('DSH RC1 historical compatibility record', () => {
     expect(compatibility.upstream.commit).toBe('66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db')
     expect(provenance.dshGeneration).toBe(compatibility.upstream.generation)
     expect(provenance.upstream.sourceDigest).toBe(compatibility.upstream.sourceDigest)
-    expect(current.dsh.workbench.dshGeneration).toBe('0.2.2-rc.2')
+    expect(current.dsh.workbench.dshGeneration).toBe('0.2.2-rc.3')
     expect(current.dsh.workbench.upstreamCommit).not.toBe(compatibility.upstream.commit)
   })
 

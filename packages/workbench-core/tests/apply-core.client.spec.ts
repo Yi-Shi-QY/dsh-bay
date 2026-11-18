@@ -472,7 +472,7 @@ describe('Core additive browser foundation', () => {
     expect(f.directory.getSnapshot().value.backgroundAi).toEqual(profileDefaults)
     expect(f.directory.getSnapshot().value.workbenches.a?.backgroundAi).toEqual(value)
     expect(mirror.scope.getSnapshot().value?.backgroundAi).toEqual(value)
-    expect(JSON.parse(await readFile(join(f.directory.rootPath('a'), '.bay', 'workbench.json'), 'utf8')).record.backgroundAi).toEqual(value)
+    expect(JSON.parse(await readFile(join(f.directory.rootPath('a'), '.dshbay', 'workbench.json'), 'utf8')).record.backgroundAi).toEqual(value)
     await expect(mirror.scope.patch!({ operation: 'set', path: ['backgroundAi'], value: { ...value, systemPrompt: 'stale' }, expectedRevision: revision })).resolves.toMatchObject({ status: 'conflict' })
     expect(f.directory.getSnapshot().value.workbenches.a?.backgroundAi?.systemPrompt).toBe('Workbench instructions')
     const globalWrite = await browserFetch(WORKBENCH_DIRECTORY_ROUTE, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'patch', requestId: 'forged-global-preference', operation: { operation: 'set', path: ['backgroundAi'], value, expectedRevision: revision + 1 } }) })

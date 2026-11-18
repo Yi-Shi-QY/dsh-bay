@@ -142,7 +142,7 @@ export const inject = ['contextMenus',
  * @param ctx - client root context.
  */
 export function apply(ctx: Context): void {
-  const sessions = ctx.get('sessions') as ISessions
+  const sessions = ctx.get('sessions') as unknown as ISessions
   const workspaces = ctx.get('workspaces') as IWorkspaces
   // One viewing-store instance, created here as ui-layout does for its layout
   // store: the browser declares the handle, and the UiWorkspace service writes

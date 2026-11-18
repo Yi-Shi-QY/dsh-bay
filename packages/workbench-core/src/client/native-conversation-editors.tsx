@@ -14,6 +14,7 @@ import { createWorkbenchNativeAreaSlotRenderer } from './native-area-slot-render
 import type { WorkbenchCollaborationClientV1 } from './workbench-collaboration-client.ts'
 import { createWorkbenchSharedDraftBinding, type WorkbenchSharedDraftBindingV1 } from './workbench-shared-draft-binding.ts'
 import { draftRangeAt, draftSelectionOf, findDraftEditable } from './draft-selection-dom.ts'
+import { getWorkbenchClientSessions } from './session-service.ts'
 
 type NativeOwner = WorkbenchEditorOwnerProps & PropsRenderFactories & {
   SessionProvider: SessionProviderComponent
@@ -345,7 +346,7 @@ function conversationPresentationOf(
 }
 
 function useSummaryBlank(ctx: Context, sessionId: string | undefined): boolean | undefined {
-  const list = (ctx.sessions as unknown as {
+  const list = (getWorkbenchClientSessions(ctx) as unknown as {
     list?: { subscribe(listener: () => void): () => void; getSnapshot(): { byId?: Record<string, { blank?: boolean }> } }
   }).list
   const subscribe = useCallback((listener: () => void) => list?.subscribe(listener) ?? (() => {}), [list])
@@ -357,6 +358,7 @@ function useSummaryBlank(ctx: Context, sessionId: string | undefined): boolean |
 
 /** DSH owns Session, Conversation and Trajectory; Core only provides Area identity and binding. */
 export function createWorkbenchNativeConversationEditors(ctx: Context) {
+  const sessions = getWorkbenchClientSessions(ctx)
   function useDraftCloseGuard(owner: NativeOwner, binding?: SessionReference['binding']) {
     useEffect(() => owner.registerCloseGuard?.(() => {
       if (!binding) return true
@@ -537,7 +539,7 @@ export function createWorkbenchNativeConversationEditors(ctx: Context) {
       let live = true
       let lease: ReturnType<typeof retainWorkbenchArea>
       try {
-        lease = retainWorkbenchArea(ctx.sessions, {
+        lease = retainWorkbenchArea(sessions, {
           sessionId: owner.sessionId as SessionId, areaId: owner.areaId, claim: owner.areaClaim,
         })
       } catch {
@@ -670,7 +672,7 @@ export function createWorkbenchNativeConversationEditors(ctx: Context) {
       let live = true
       let lease: ReturnType<typeof retainWorkbenchArea>
       try {
-        lease = retainWorkbenchArea(ctx.sessions, { sessionId: owner.sessionId as SessionId, areaId: owner.areaId, claim: owner.areaClaim })
+        lease = retainWorkbenchArea(sessions, { sessionId: owner.sessionId as SessionId, areaId: owner.areaId, claim: owner.areaClaim })
       } catch (reason) {
         setError(reason instanceof Error ? reason.message : String(reason))
         return

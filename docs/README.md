@@ -30,6 +30,7 @@
 | --- | --- |
 | [贡献说明](../CONTRIBUTING.md) | 变更边界与按影响选择验证 |
 | [仓库结构](REPOSITORY-STRUCTURE.md) | 真实源码目录、服务入口与定位方法 |
+| [DSH RC2 适配方案](DSH-RC2-ADAPTATION-PLAN.zh-CN.md) | 上游影响分级、受控 rebase、候选升级和验收门槛 |
 | [扩展开发技能](../packages/workbench-core/presets/workbench-creator/skills/workbench-extension-development/SKILL.md) | 原生创造模式使用的开发流程 |
 | [扩展技术规范](../packages/workbench-core/presets/workbench-creator/skills/workbench-extension-development/WORKBENCH-CONTAINER-INNER-PAGE-EXTENSION-SPEC.zh.md) | Slot、绑定、状态、生命周期、离线制品契约 |
 | [验证记录](VALIDATION.md) | 最新已验证提交、制品摘要、通过项和未验证项 |

@@ -45,7 +45,7 @@ it('creates a named folder inside the workbench and persists the area binding wi
   await waitFor(() => expect(f.onClose).toHaveBeenCalledOnce())
   expect((await stat(join(f.root, '社媒运营'))).isDirectory()).toBe(true)
   expect(f.bindAreaProject).toHaveBeenCalledExactlyOnceWith({ workbenchId: 'bench', areaId: 'area', relativePath: '社媒运营', createDirectory: true })
-  const saved = JSON.parse(await readFile(join(f.root, '.bay', 'workbench.json'), 'utf8'))
+  const saved = JSON.parse(await readFile(join(f.root, '.dshbay', 'workbench.json'), 'utf8'))
   expect(saved.record.areaProjects.area.relativePath).toBe('社媒运营')
   expect(saved.record.sessionCatalog).toEqual({})
 })

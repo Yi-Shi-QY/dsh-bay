@@ -710,7 +710,7 @@ export function createFileWorkbenchCollaborationStore(
   let writeTail: Promise<unknown> = Promise.resolve()
   const fileFor = (workbenchId: string): string | undefined => {
     const root = rootForWorkbench(workbenchId)
-    return root === undefined ? undefined : path.join(root, '.bay', 'collaboration', 'active-v1.json')
+    return root === undefined ? undefined : path.join(root, '.dshbay', 'collaboration', 'active-v1.json')
   }
   const read = async (file: string): Promise<{ savedAt: number; snapshot: WorkbenchCollaborationSnapshotV1 } | undefined> => {
     try {

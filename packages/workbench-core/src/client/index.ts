@@ -1,4 +1,5 @@
 import { waitForFileWorkbench } from './workbench-access.ts'
+export { createWorkbenchBundleClient } from './workbench-bundle.ts'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-client-connection/client'
 export type { WorkbenchEditorOwnerProps } from './editor-slots.ts'

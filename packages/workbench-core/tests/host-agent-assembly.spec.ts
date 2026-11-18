@@ -31,7 +31,7 @@ function directory(workbenchIds: readonly string[] = ['main']) {
     return [id, root] as const
   }))
   const write = (id: string, name: string, value: unknown) => {
-    const folder = path.join(roots.get(id)!, '.bay', 'agents')
+    const folder = path.join(roots.get(id)!, '.dshbay', 'agents')
     mkdirSync(folder, { recursive: true })
     writeFileSync(path.join(folder, name), JSON.stringify(value))
   }
@@ -88,7 +88,7 @@ it('saves each revision as its own file and registers only the revision a person
   await store.registerRevision('main', 'quote-assistant', 1)
   expect([...presets.live]).toEqual(['bay:main:quote-assistant@1'])
   expect(store.list('main').map(row => [row.definition.name, row.definition.revision, row.status])).toEqual([['报价助手', 1, 'registered'], ['报价助手二版', 2, 'saved']])
-  const selection = JSON.parse(readFileSync(path.join(fixture.roots.get('main')!, '.bay', 'agents', 'selection.json'), 'utf8'))
+  const selection = JSON.parse(readFileSync(path.join(fixture.roots.get('main')!, '.dshbay', 'agents', 'selection.json'), 'utf8'))
   expect(selection.registered).toEqual([{ agentId: 'quote-assistant', revision: 1 }])
   await store.dispose()
 

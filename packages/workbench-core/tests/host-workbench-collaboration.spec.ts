@@ -330,13 +330,13 @@ describe('Workbench collaboration manager', () => {
         operation: { kind: 'canvas.set-focus', focus: { areaId: 'area-a', editorId: 'workbench.conversation' } },
       })
       await new Promise(resolve => setTimeout(resolve, 10))
-      expect(JSON.parse(await readFile(join(root, '.bay', 'collaboration', 'active-v1.json'), 'utf8')).snapshot.sharedCanvas.focus).toEqual({ areaId: 'area-a', editorId: 'workbench.conversation' })
+      expect(JSON.parse(await readFile(join(root, '.dshbay', 'collaboration', 'active-v1.json'), 'utf8')).snapshot.sharedCanvas.focus).toEqual({ areaId: 'area-a', editorId: 'workbench.conversation' })
       const second = createWorkbenchCollaborationManager({ store, randomId: () => 'new-session' })
       const restored = await second.start('workbench-file', 'owner-2')
       expect(restored.collaborationId).toBe(started.collaborationId)
       expect(restored.session.snapshot().sharedCanvas.focus).toEqual({ areaId: 'area-a', editorId: 'workbench.conversation' })
       await second.stop('workbench-file')
-      await expect(readFile(join(root, '.bay', 'collaboration', 'active-v1.json'), 'utf8')).rejects.toThrow()
+      await expect(readFile(join(root, '.dshbay', 'collaboration', 'active-v1.json'), 'utf8')).rejects.toThrow()
     } finally { await rm(root, { recursive: true, force: true }) }
   })
 
