@@ -403,7 +403,7 @@ export class HostWorkbenchAccess {
     const record = this.directory.getSnapshot().value.workbenches[workbenchId]
     if (!record || record.archivedAt !== undefined || typeof record.fileWorkbench?.rootPath !== 'string') return false
     try {
-      const file = path.join(record.fileWorkbench.rootPath, '.bay', 'workbench.json'), stat = statSync(file)
+      const file = path.join(record.fileWorkbench.rootPath, '.dshbay', 'workbench.json'), stat = statSync(file)
       const stamp = [file, stat.mtimeMs, stat.ctimeMs, stat.size, stat.ino].join(':')
       const prior = this.definitions.get(workbenchId)
       if (prior?.stamp === stamp) return prior.valid
@@ -414,7 +414,7 @@ export class HostWorkbenchAccess {
     } catch { return false }
   }
   getRecord(workbenchId: string) {
-    if (!this.lookup(workbenchId)) throw new WorkbenchAccessError('workbench-unavailable', '工作台目录丢失、已归档或定义损坏，请在 DSH 中检查目录和 .bay/workbench.json。', 404)
+    if (!this.lookup(workbenchId)) throw new WorkbenchAccessError('workbench-unavailable', '工作台目录丢失、已归档或定义损坏，请在 DSH 中检查目录和 .dshbay/workbench.json。', 404)
     return this.directory.getSnapshot().value.workbenches[workbenchId]!
   }
   sessionTarget(sessionId: string): WorkbenchAccessTarget | undefined {
@@ -509,7 +509,7 @@ export class HostWorkbenchAccess {
     if (!grant.capabilities.includes(capability)) throw new WorkbenchAccessError('capability-denied', '此操作需要主控授权：' + capability)
     if (target.relativePath !== undefined) {
       const relative = target.relativePath
-      if (relative.startsWith('/') || relative.includes('\\') || relative.split('/').some(part => part === '..' || part.toLowerCase() === '.bay') || /[\u0000-\u001f:]/u.test(relative)) throw new WorkbenchAccessError('path-scope-denied', '文件路径不在授权范围内。')
+    if (relative.startsWith('/') || relative.includes('\\') || relative.split('/').some(part => part === '..' || part.toLowerCase() === '.dshbay') || /[\u0000-\u001f:]/u.test(relative)) throw new WorkbenchAccessError('path-scope-denied', '文件路径不在授权范围内。')
       const root = realpathSync(record.fileWorkbench!.rootPath!), absolute = path.resolve(root, relative)
       let existing = absolute
       while (!existsSync(existing) && path.dirname(existing) !== existing) existing = path.dirname(existing)
@@ -517,8 +517,8 @@ export class HostWorkbenchAccess {
       const actual = path.relative(root, resolved).split(path.sep).join('/')
       // The lexical path is inside the Workbench; the resolved one must be
       // too, otherwise a symlink or junction leads out of the shared root or
-      // into the Host-private `.bay` directory.
-      if (actual === '..' || actual.startsWith('../') || path.isAbsolute(actual) || actual.split('/').some(part => part.toLowerCase() === '.bay')) throw new WorkbenchAccessError('path-scope-denied', '文件链接目标不在工作台内。')
+      // into the Host-private `.dshbay` directory.
+      if (actual === '..' || actual.startsWith('../') || path.isAbsolute(actual) || actual.split('/').some(part => part.toLowerCase() === '.dshbay')) throw new WorkbenchAccessError('path-scope-denied', '文件链接目标不在工作台内。')
     }
   }
   /** Build the full, redacted Workbench seed used by shared-control sessions. */

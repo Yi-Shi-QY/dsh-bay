@@ -1637,7 +1637,7 @@ export function renderFactoryRoot(
   )
 }
 
-/** Stable component identity for Area-scoped Factory roots.  Defining this
+/** Stable component identity for private Area Factory roots.  Defining this
  * component inside renderFactoryRoot() remounted the complete native
  * conversation tree on every parent render, which could release a live
  * Factory occurrence while its local slots were still committing. */

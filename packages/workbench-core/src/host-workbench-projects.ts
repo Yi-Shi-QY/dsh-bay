@@ -12,12 +12,12 @@ import type { WorkbenchMemoryEntry, WorkbenchMemoryIndex } from './workbench-mem
 export interface ProjectWrite { file: string; value?: unknown; text?: string }
 export interface ProjectFile { schemaVersion: 1; projectId: string; name: string; context: ReturnType<typeof createAreaContext>; contextCandidates?: WorkbenchProjectV1['contextCandidates'] }
 
-/** Metadata is never allowed to follow a .bay symlink outside the managed project. */
+/** Metadata is never allowed to follow a .dshbay symlink outside the managed project. */
 export function projectMetadataFolder(root: string, relativePath: string): string {
   const absolute = realpathSync(resolvePortablePath(root, relativePath))
   const relative = portableRelativePath(realpathSync(root), absolute)
-  if (!relative || relative.split('/').some(segment => segment.toLowerCase() === '.bay')) throw new Error('项目目录无效。')
-  const folder = path.join(absolute, '.bay')
+  if (!relative || relative.split('/').some(segment => segment.toLowerCase() === '.dshbay')) throw new Error('项目目录无效。')
+  const folder = path.join(absolute, '.dshbay')
   if (existsSync(folder) && (lstatSync(folder).isSymbolicLink() || realpathSync(folder) !== folder)) throw new Error('项目管理目录不能是链接。')
   return folder
 }
@@ -111,10 +111,10 @@ export function upgradeProjectOwnership(root: string, source: WorkbenchRecordV2)
 }
 
 function upgradeProjectMemories(root: string, record: WorkbenchRecordV2): ProjectWrite[] {
-  const folder = path.join(root, '.bay', 'memory'), file = path.join(folder, 'index.json')
+  const folder = path.join(root, '.dshbay', 'memory'), file = path.join(folder, 'index.json')
   if (!existsSync(file)) return []
   const index = JSON.parse(readFileSync(file, 'utf8')) as WorkbenchMemoryIndex
-  const writes: ProjectWrite[] = [{ file: path.join(root, '.bay', 'upgrades', 'project-ownership-v1', 'memory-index.json'), value: index }]
+  const writes: ProjectWrite[] = [{ file: path.join(root, '.dshbay', 'upgrades', 'project-ownership-v1', 'memory-index.json'), value: index }]
   const retained = structuredClone(index), indexes = new Map<string, WorkbenchMemoryIndex>()
   for (const entry of Object.values(index.entries)) {
     if (!entry.areaId) continue

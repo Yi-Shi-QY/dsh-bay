@@ -10,7 +10,6 @@ import { WorkbenchHome } from './WorkbenchHome.tsx'
 import { WorkbenchHomeNavigation } from './WorkbenchHomeNavigation.tsx'
 import { WorkbenchManagementPage, UnsavedFormPrompt, type PendingSettingsForm } from './WorkbenchSettingsPages.tsx'
 import { WorkbenchSharingPage } from './WorkbenchSharingPage.tsx'
-import { WorkbenchLayoutSharingPage } from './WorkbenchLayoutSharingPage.tsx'
 import css from './WorkbenchHome.module.css'
 import pageCss from './WorkbenchSettings.module.css'
 
@@ -81,8 +80,7 @@ export function WorkbenchHomeCenter(props: WorkbenchHomeCenterProps) {
       <div className={css.centerContent + ' ' + pageCss.settingsRoot} style={{ height: 'auto' }}>
         {snapshot.status !== 'ready' ? <p role="alert">工作台连接暂不可用，当前资料已保留。请恢复连接后重试。</p> : null}
         {section === 'workbenches' ? <WorkbenchManagementPage key={destination?.workbenchId ?? 'list'} {...pageProps} />
-          : props.distributionPackage ? <WorkbenchSharingPage key={destination?.shareMode + ':' + destination?.shareType + ':' + destination?.workbenchId} {...pageProps} distributionPackage={props.distributionPackage} />
-            : <WorkbenchLayoutSharingPage key={destination?.shareMode + ':' + destination?.workbenchId} {...pageProps} />}
+          : <WorkbenchSharingPage key={destination?.shareMode + ':' + destination?.shareType + ':' + destination?.workbenchId} {...pageProps} />}
       </div>
     </main> : <WorkbenchHome value={snapshot.value ?? lastValue.current} directory={props.directory} editors={editors} navigate={navigate} {...(props.windowController ? { windowController: props.windowController } : {})} onOpenWorkbench={openWorkbench} onCreated={props.onCreated} {...(props.generateContextDraft === undefined ? {} : { generateContextDraft: props.generateContextDraft })} />}
     {pending && form.current ? <div className={pageCss.settingsRoot} style={{ height: 0, minHeight: 0 }}><UnsavedFormPrompt form={form.current} onContinue={() => finish(false)} onLeave={() => finish(true)} /></div> : null}

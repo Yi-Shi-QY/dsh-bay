@@ -5,7 +5,7 @@ import type { WorkbenchEditorCatalogRow } from '../src/foundation/catalog.ts'
 
 const extension = {
   schemaVersion: 1 as const, moduleId: 'example.pet', apiVersion: 1 as const,
-  editorIds: ['example.pet.page'], coreCompatibility: '0.1.0-beta.1', dshGeneration: '0.2.2-rc.2',
+  editorIds: ['example.pet.page'], coreCompatibility: '0.2.2-alpha.10', dshGeneration: '0.2.1-rc.2',
 }
 const declaration = {
   editorId: 'example.pet.page', scope: 'root' as const, label: 'Pet', requiredBinding: 'none' as const,

@@ -242,7 +242,7 @@ export async function inspectLayoutPackage(bytes: Uint8Array): Promise<LayoutPac
     }
     return { digest, layout, warnings: layout.warnings, legacy: false }
   }
-  throw new Error('当前版本不支持此工作台格式，原文件未修改。请使用完整工作台包。')
+  throw new Error('18.0 不支持此工作台格式，原文件未修改。请使用 18.0 完整工作台包。')
 }
 
 /** One choice per distinct source; multiple views of that source share the choice. */

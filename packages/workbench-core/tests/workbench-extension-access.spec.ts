@@ -7,8 +7,8 @@ const extension = {
   moduleId: 'example.pet',
   apiVersion: 1 as const,
   editorIds: ['example.pet.page'],
-  coreCompatibility: '0.1.0-beta.0',
-  dshGeneration: '0.2.2-rc.2',
+  coreCompatibility: '0.2.2-alpha.18.0',
+  dshGeneration: '0.2.1-rc.2',
 }
 const declaration = {
   editorId: 'example.pet.page', scope: 'root' as const, label: 'Pet', requiredBinding: 'none' as const,
@@ -31,7 +31,7 @@ const emptyConsents = {}
 const resolve = (input: Partial<Parameters<typeof resolveWorkbenchExtensionAccessV1>[0]> = {}) =>
   resolveWorkbenchExtensionAccessV1({
     editors: [coreEditor, editor], inventory, consents: emptyConsents,
-    coreVersion: '0.1.0-beta.1', dshGeneration: '0.2.2-rc.2', coreEditorIds: ['workbench.conversation'], ...input,
+    coreVersion: '0.2.2-alpha.18.1', dshGeneration: '0.2.1-rc.2', coreEditorIds: ['workbench.conversation'], ...input,
   })
 
 describe('Workbench extension identity and Core opt-in', () => {
@@ -79,7 +79,7 @@ describe('Workbench extension identity and Core opt-in', () => {
     expect(result.snapshot.extensions[0]).toMatchObject({ availability: 'invalid-contract', allowed: false })
   })
 
-  it('keeps an earlier beta extension compatible and excludes it until Workbench allows it', () => {
+  it('keeps an exact 18.0 extension compatible and excludes it until Workbench allows it', () => {
     const pending = resolve()
     expect(pending.editors.map(row => row.id)).toEqual(['workbench.conversation'])
     expect(pending.snapshot.extensions[0]).toMatchObject({

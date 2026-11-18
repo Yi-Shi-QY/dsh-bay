@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "kind": "dsh-bay-dependency-map",
   "product": "DSH Bay",
-  "candidate": "0.1.0-beta.1",
-  "dshGeneration": "0.2.2-rc.2",
+  "candidate": "0.1.1",
+  "dshGeneration": "0.2.2-rc.3",
   "upstreamCommit": "ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c",
   "purpose": "Record direct declarations, host-provided DSH closure, upstream package paths, source mirrors, resource identities and verification entry points for recurring local diff and npm drift scans.",
   "manifestFiles": [
@@ -50,7 +50,7 @@
         "package.json#devDependencies",
         "packages/workbench-core/package.json#peerDependencies"
       ],
-      "versionPolicy": "root build pins 0.2.2-rc.2; Core peers use >=0.2.2-rc.2 <0.2.3",
+      "versionPolicy": "root build pins 0.2.2-rc.3; Core peers use >=0.2.2-rc.3 <0.2.3",
       "side": "host-and-client",
       "impact": "P0",
       "moduleScopes": [
@@ -112,6 +112,8 @@
         "@deepseek-ai/dsh-llm",
         "@deepseek-ai/dsh-plugin-manager",
         "@deepseek-ai/dsh-session",
+        "@deepseek-ai/dsh-session-log-export",
+        "@deepseek-ai/dsh-session-persistence",
         "@deepseek-ai/dsh-session-format-v3-to-v4",
         "@deepseek-ai/dsh-settings",
         "@deepseek-ai/dsh-skill",
@@ -250,136 +252,81 @@
       "name": "@deepseek-ai/dsh-attachment",
       "role": "transitive-host-runtime",
       "impact": "P1",
-      "evidence": [
-        "packages/workbench-core/src/host-*.ts",
-        "packages/workbench-core/src/foundation/*.{ts,tsx}"
-      ],
+      "evidence": ["packages/workbench-core/src/host-*.ts", "packages/workbench-core/src/foundation/*.{ts,tsx}"],
       "reason": "Used by direct type imports, but not a Core peer declaration; supplied by the DSH host dependency closure.",
-      "verification": [
-        "pnpm typecheck",
-        "pnpm build"
-      ]
+      "verification": ["pnpm typecheck", "pnpm build"]
     },
     {
       "name": "@deepseek-ai/dsh-client-file-upload",
       "role": "transitive-client-runtime",
       "impact": "P1",
-      "evidence": [
-        "packages/workbench-core/src/client/*.{ts,tsx}"
-      ],
+      "evidence": ["packages/workbench-core/src/client/*.{ts,tsx}"],
       "reason": "Ambient client module used by the native conversation/editor surface.",
-      "verification": [
-        "pnpm typecheck",
-        "pnpm test"
-      ]
+      "verification": ["pnpm typecheck", "pnpm test"]
     },
     {
       "name": "@deepseek-ai/dsh-client-product-analytics",
       "role": "transitive-client-runtime",
       "impact": "P2",
-      "evidence": [
-        "packages/workbench-core/src/client/*.{ts,tsx}"
-      ],
+      "evidence": ["packages/workbench-core/src/client/*.{ts,tsx}"],
       "reason": "Product event types are supplied by the host client bundle.",
-      "verification": [
-        "pnpm typecheck"
-      ]
+      "verification": ["pnpm typecheck"]
     },
     {
       "name": "@deepseek-ai/dsh-client-ui-dockkit",
       "role": "host-allowlisted-runtime",
       "impact": "P1",
-      "evidence": [
-        "packages/workbench-core/src/host-distribution-artifacts.ts"
-      ],
+      "evidence": ["packages/workbench-core/src/host-distribution-artifacts.ts"],
       "reason": "Allowed in host distribution artifacts; not imported by the Core runtime directly.",
-      "verification": [
-        "pnpm test",
-        "pnpm pack:core"
-      ]
+      "verification": ["pnpm test", "pnpm pack:core"]
     },
     {
       "name": "@deepseek-ai/dsh-session-format",
       "role": "transitive-host-runtime",
       "impact": "P1",
-      "evidence": [
-        "packages/workbench-core/src/host-complete-migrations.ts",
-        "packages/workbench-core/src/foundation/*.{ts,tsx}"
-      ],
+      "evidence": ["packages/workbench-core/src/host-complete-migrations.ts", "packages/workbench-core/src/foundation/*.{ts,tsx}"],
       "reason": "Session artifact types are consumed beside the declared v3-to-v4 migration package.",
-      "verification": [
-        "pnpm test",
-        "pnpm typecheck"
-      ]
+      "verification": ["pnpm test", "pnpm typecheck"]
     },
     {
       "name": "@deepseek-ai/dsh-session-persistence",
       "role": "transitive-host-runtime",
       "impact": "P0",
-      "evidence": [
-        "packages/workbench-core/src/host-complete-migrations.ts",
-        "packages/workbench-core/src/foundation/*.{ts,tsx}"
-      ],
+      "evidence": ["packages/workbench-core/src/host-complete-migrations.ts", "packages/workbench-core/src/foundation/*.{ts,tsx}"],
       "reason": "Session event persistence is an execution and migration seam; a missing export can break complete package restore.",
-      "verification": [
-        "pnpm test",
-        "pnpm typecheck",
-        "pnpm verify:workbench-package"
-      ]
+      "verification": ["pnpm test", "pnpm typecheck", "pnpm verify:workbench-package"]
     },
     {
       "name": "@deepseek-ai/dsh-subagent",
       "role": "transitive-client-runtime",
       "impact": "P1",
-      "evidence": [
-        "packages/workbench-core/src/client/*.{ts,tsx}"
-      ],
+      "evidence": ["packages/workbench-core/src/client/*.{ts,tsx}"],
       "reason": "Nested Subagent Chat identity is consumed from the host package closure.",
-      "verification": [
-        "pnpm test packages/workbench-core/tests/native-conversation-rc2.client.spec.tsx",
-        "pnpm typecheck"
-      ]
+      "verification": ["pnpm test packages/workbench-core/tests/native-conversation-rc2.client.spec.tsx", "pnpm typecheck"]
     },
     {
       "name": "@deepseek-ai/dsh-util-values",
       "role": "transitive-host-runtime",
       "impact": "P2",
-      "evidence": [
-        "packages/workbench-core/src/host-*.ts",
-        "packages/workbench-core/src/foundation/*.{ts,tsx}"
-      ],
+      "evidence": ["packages/workbench-core/src/host-*.ts", "packages/workbench-core/src/foundation/*.{ts,tsx}"],
       "reason": "Shared assertion helpers are imported without a direct Core declaration.",
-      "verification": [
-        "pnpm typecheck",
-        "pnpm test"
-      ]
+      "verification": ["pnpm typecheck", "pnpm test"]
     },
     {
       "name": "@deepseek-ai/dsh-web-frontend",
       "role": "host-runtime-entry",
       "impact": "P0",
-      "evidence": [
-        "packages/workbench-core/src/host-browser-window-controller.ts"
-      ],
+      "evidence": ["packages/workbench-core/src/host-browser-window-controller.ts"],
       "reason": "Electron/browser window startup resolves the host frontend entry by package path.",
-      "verification": [
-        "pnpm typecheck",
-        "pnpm test",
-        "DSH desktop acceptance"
-      ]
+      "verification": ["pnpm typecheck", "pnpm test", "DSH desktop acceptance"]
     },
     {
       "name": "@deepseek-ai/dsh-workspace",
       "role": "transitive-host-runtime",
       "impact": "P1",
-      "evidence": [
-        "packages/workbench-core/src/host-*.ts"
-      ],
+      "evidence": ["packages/workbench-core/src/host-*.ts"],
       "reason": "Workspace registry types are supplied by the host closure.",
-      "verification": [
-        "pnpm typecheck",
-        "pnpm test"
-      ]
+      "verification": ["pnpm typecheck", "pnpm test"]
     }
   ],
   "resourceIdentities": [
@@ -387,12 +334,7 @@
       "id": "official-inner-pages",
       "kind": "official-container-page",
       "impact": "P1",
-      "evidence": [
-        "packages/workbench-core/src/client/native-sidebar-registry.ts",
-        "packages/workbench-core/src/client/native-area-slot-renderer.tsx",
-        "packages/workbench-core/src/client/native-automatic-isolation.tsx",
-        "docs/ARCHITECTURE.zh-CN.md"
-      ],
+      "evidence": ["packages/workbench-core/src/client/native-sidebar-registry.ts", "packages/workbench-core/src/client/native-area-slot-renderer.tsx", "packages/workbench-core/src/client/native-automatic-isolation.tsx"],
       "members": [
         "@deepseek-ai/dsh-client-ui-chat",
         "@deepseek-ai/dsh-client-ui-deliverables",
@@ -405,24 +347,14 @@
         "@deepseek-ai/dsh-client-ui-sidebar-terminal",
         "@deepseek-ai/dsh-client-ui-subagent"
       ],
-      "changeSignals": [
-        "registration key or tab identity change",
-        "resource address change",
-        "official page removal"
-      ],
-      "verification": [
-        "pnpm test packages/workbench-core/tests/native-sidebar-registration.spec.ts",
-        "pnpm test packages/workbench-core/tests/native-conversation-rc2.client.spec.tsx",
-        "DSH desktop acceptance"
-      ]
+      "changeSignals": ["registration key or tab identity change", "resource address change", "official page removal"],
+      "verification": ["pnpm test packages/workbench-core/tests/native-sidebar-registration.spec.ts", "pnpm test packages/workbench-core/tests/native-conversation-rc2.client.spec.tsx", "DSH desktop acceptance"]
     },
     {
       "id": "agent-runtime-capabilities",
       "kind": "runtime-capability-identity",
       "impact": "P1",
-      "evidence": [
-        "packages/workbench-core/src/host-bay-agent.ts"
-      ],
+      "evidence": ["packages/workbench-core/src/host-bay-agent.ts"],
       "members": [
         "@deepseek-ai/dsh-command-compact",
         "@deepseek-ai/dsh-compaction-basic",
@@ -432,50 +364,28 @@
         "@deepseek-ai/dsh-tool-subagent",
         "@deepseek-ai/dsh-tool-subagent-control"
       ],
-      "changeSignals": [
-        "preset capability removal",
-        "tool identity or config change",
-        "compaction behavior change"
-      ],
-      "verification": [
-        "pnpm test packages/workbench-core/tests/bay-agent-controller.client.spec.ts",
-        "pnpm typecheck",
-        "DSH desktop acceptance"
-      ]
+      "changeSignals": ["preset capability removal", "tool identity or config change", "compaction behavior change"],
+      "verification": ["pnpm test packages/workbench-core/tests/bay-agent-controller.client.spec.ts", "pnpm typecheck", "DSH desktop acceptance"]
     },
     {
       "id": "runtime-resource-addresses",
       "kind": "resource-address-package",
       "impact": "P1",
-      "evidence": [
-        "packages/workbench-core/src/client/*.{ts,tsx}",
-        "packages/workbench-core/src/foundation/*.{ts,tsx}",
-        "packages/workbench-core/src/foundation/workbench-sidebar/generated/upstream/**/*"
-      ],
+      "evidence": ["packages/workbench-core/src/client/*.{ts,tsx}", "packages/workbench-core/src/foundation/*.{ts,tsx}", "packages/workbench-core/src/foundation/workbench-sidebar/generated/upstream/**/*"],
       "members": [
         "@deepseek-ai/dsh-desktop",
         "@deepseek-ai/dsh-jobs/view",
         "@deepseek-ai/dsh-schedule/client",
         "@deepseek-ai/dsh-subagent/client"
       ],
-      "changeSignals": [
-        "resource address scheme change",
-        "desktop user-agent marker change",
-        "task/subagent navigation change"
-      ],
-      "verification": [
-        "pnpm test",
-        "DSH desktop acceptance"
-      ]
+      "changeSignals": ["resource address scheme change", "desktop user-agent marker change", "task/subagent navigation change"],
+      "verification": ["pnpm test", "DSH desktop acceptance"]
     },
     {
       "id": "assembled-agent-preset-rows",
       "kind": "dsh-preset-plugin-module",
       "impact": "P0",
-      "evidence": [
-        "packages/workbench-core/src/host-agent-preset.ts",
-        "docs/PROJECT-HANDBOOK.zh-CN.md"
-      ],
+      "evidence": ["packages/workbench-core/src/host-agent-preset.ts", "packages/workbench-core/src/host-agent-assembly.ts"],
       "members": [
         "@deepseek-ai/dsh-web-app",
         "@deepseek-ai/dsh-persona",
@@ -489,91 +399,55 @@
         "@deepseek-ai/dsh-tool-todo",
         "@deepseek-ai/dsh-tool-web"
       ],
-      "changeSignals": [
-        "standard or minimal preset rows change in @deepseek-ai/dsh-web-app/presets/*.patch.yml",
-        "plugin module rename or config schema change"
-      ],
-      "verification": [
-        "pnpm test packages/workbench-core/tests/host-agent-assembly.spec.ts",
-        "DSH desktop acceptance"
-      ]
+      "changeSignals": ["standard or minimal preset rows change in @deepseek-ai/dsh-web-app/presets/*.patch.yml", "plugin module rename or config schema change"],
+      "verification": ["pnpm test packages/workbench-core/tests/host-agent-assembly.spec.ts", "DSH desktop acceptance"]
     }
   ],
   "sourceCopies": [
     {
       "id": "sidebar-workspace-source-mirror",
-      "upstreamPackages": [
-        "@deepseek-ai/dsh-client-ui-sidebar",
-        "@deepseek-ai/dsh-client-ui-workspace",
-        "@deepseek-ai/dsh-client-ui-primitives"
-      ],
-      "upstreamPaths": [
-        "packages/client/ui-sidebar/src/client",
-        "packages/client/ui-workspace/src/client"
-      ],
+      "upstreamPackages": ["@deepseek-ai/dsh-client-ui-sidebar", "@deepseek-ai/dsh-client-ui-workspace", "@deepseek-ai/dsh-client-ui-primitives"],
+      "upstreamPaths": ["packages/client/ui-sidebar/src/client", "packages/client/ui-workspace/src/client"],
       "sourceIndex": "packages/workbench-core/rc2-sidebar-workspace-source-index.json",
       "copyManifest": "packages/workbench-core/src/foundation/workbench-sidebar.copy-manifest.json",
       "runtimeMirror": "packages/workbench-core/src/foundation/workbench-sidebar/generated/upstream",
       "impact": "P0",
       "adaptationSeam": "Area-local Session placement, RC2 Menu anchorRef, locale merge and official More ownership",
-      "verification": [
-        "pnpm check:compat",
-        "pnpm typecheck",
-        "pnpm test packages/workbench-core/tests/native-sidebar-registration.spec.ts"
-      ]
+      "verification": ["pnpm check:compat", "pnpm typecheck", "pnpm test packages/workbench-core/tests/native-sidebar-registration.spec.ts"]
     },
     {
-      "id": "area-renderer",
-      "upstreamPackages": [
-        "@deepseek-ai/dsh-client-ui-renderer",
-        "@deepseek-ai/dsh-client-ui-slots"
-      ],
-      "upstreamPaths": [
-        "packages/client/ui-renderer/src/client",
-        "packages/client/ui-slots/src/client"
-      ],
+      "id": "private-area-renderer",
+      "upstreamPackages": ["@deepseek-ai/dsh-client-ui-renderer", "@deepseek-ai/dsh-client-ui-slots"],
+      "upstreamPaths": ["packages/client/ui-renderer/src/client", "packages/client/ui-slots/src/client"],
       "provenance": "packages/workbench-core/src/foundation/renderer/provenance.json",
       "runtimeMirror": "packages/workbench-core/src/foundation/renderer",
       "impact": "P0",
-      "adaptationSeam": "HOC content, keyed members, scoped host caches and late Factory registration",
-      "verification": [
-        "pnpm check:compat",
-        "pnpm test packages/workbench-core/tests/private-renderer-rc2.client.spec.tsx",
-        "pnpm test packages/workbench-core/tests/native-conversation-rc2.client.spec.tsx"
-      ]
+      "adaptationSeam": "HOC content, keyed members, private host caches and late Factory registration",
+      "verification": ["pnpm check:compat", "pnpm test packages/workbench-core/tests/private-renderer-rc2.client.spec.tsx", "pnpm test packages/workbench-core/tests/native-conversation-rc2.client.spec.tsx"]
     }
   ],
   "ownershipRules": [
     {
       "id": "host-authority",
       "rule": "Host owns directory, access, session registration, migration and artifact writes; client adapters do not write these records directly.",
-      "evidence": [
-        "packages/workbench-core/src/host-workbench-directory-service.ts",
-        "docs/ARCHITECTURE.zh-CN.md"
-      ]
+      "evidence": ["packages/workbench-core/src/host-workbench-directory-service.ts", "docs/ARCHITECTURE.zh-CN.md"]
     },
     {
       "id": "official-owner-preservation",
       "rule": "DSH official owners remain intact; Bay registers an additive Workbench row and projects selected official pages into an Area.",
-      "evidence": [
-        "packages/workbench-core/dsh.bundle.patch.yml",
-        "packages/workbench-core/src/client/native-area-slot-renderer.tsx"
-      ]
+      "evidence": ["packages/workbench-core/dsh.bundle.patch.yml", "packages/workbench-core/src/client/native-area-slot-renderer.tsx"]
     },
     {
       "id": "upstream-copy-control",
       "rule": "Copied upstream source changes require source index, adaptation registration and reproducible digest updates.",
-      "evidence": [
-        "scripts/check-compatibility.mjs",
-        "packages/workbench-core/src/foundation/workbench-sidebar.copy-manifest.json"
-      ]
+      "evidence": ["scripts/check-compatibility.mjs", "packages/workbench-core/src/foundation/workbench-sidebar.copy-manifest.json"]
     }
   ],
   "futureDriftInputs": [
     "DSH Git tag, commit and local source diff",
     "npm package version, gitHead, tarball integrity and exports",
     "package.json peer ranges and lockfile resolutions",
-    "source mirror and renderer file hashes",
+    "source mirror and private renderer file hashes",
     "resource identity registrations",
     "impact test commands and DSH desktop acceptance state"
   ]

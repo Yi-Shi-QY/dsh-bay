@@ -308,7 +308,7 @@ describe('browser Workbench handoff controller', () => {
       if (endpoint === 'workbench-window/opened') return { ok: true, value: { status: 'requested' } }
       return { ok: true, value: { status: 'requested' } }
     }) }
-    vi.stubGlobal('navigator', { userAgent: 'Mozilla/5.0 @deepseek-ai/dsh-desktop/0.2.2-rc.2 Chrome/152.0.7977.130' })
+    vi.stubGlobal('navigator', { userAgent: 'Mozilla/5.0 @deepseek-ai/dsh-desktop/0.2.1-rc.2 Chrome/152.0.7977.130' })
     vi.stubGlobal('dshDesktop', { protocolVersion: 1 })
     const popup = vi.spyOn(window, 'open')
     const controller = createBrowserWindowController({ rpc: rpc as never })

@@ -14,7 +14,7 @@ describe('Workbench extension registry', () => {
         runtime: { background: 'pause', collapsed: 'dispose', reacquire: 'on-visible' },
       },
       extension: { schemaVersion: 1, moduleId: 'test.pet', apiVersion: 1, editorIds: ['test.pet'],
-        coreCompatibility: '1.0.0', dshGeneration: '0.2.2-rc.2' },
+        coreCompatibility: '1.0.0', dshGeneration: '0.2.1-rc.2' },
     }
     const catalog: WorkbenchEditorCatalog = { getSnapshot: () => [page], subscribe: () => () => {} }
     const inventory = (enabled: boolean): WorkbenchDshExtensionInventoryV1 => ({
@@ -27,7 +27,7 @@ describe('Workbench extension registry', () => {
     const registry = createWorkbenchExtensionRegistryV1({
       catalog,
       settings: { getSnapshot: () => ({ value: undefined }), subscribe: () => () => {} },
-      coreEditorIds: [], coreVersion: '1.0.0', dshGeneration: '0.2.2-rc.2',
+      coreEditorIds: [], coreVersion: '1.0.0', dshGeneration: '0.2.1-rc.2',
       readDshInventory: () => {
         call += 1
         if (call === 1) return new Promise(resolve => { resolveFirst = resolve })
@@ -48,13 +48,13 @@ describe('Workbench extension registry', () => {
     const page: WorkbenchEditorCatalogRow = {
       id: 'test.pet', label: 'Pet', scope: 'root', pluginId: 'pet-entry',
       extension: { schemaVersion: 1, moduleId: 'test.pet', apiVersion: 1, editorIds: ['test.pet'],
-        coreCompatibility: '1.0.0', dshGeneration: '0.2.2-rc.2' },
+        coreCompatibility: '1.0.0', dshGeneration: '0.2.1-rc.2' },
     }
     let resolveInventory: ((value: WorkbenchDshExtensionInventoryV1) => void) | undefined
     const registry = createWorkbenchExtensionRegistryV1({
       catalog: { getSnapshot: () => [page], subscribe: () => () => {} },
       settings: { getSnapshot: () => ({ value: undefined }), subscribe: () => () => {} },
-      coreEditorIds: [], coreVersion: '1.0.0', dshGeneration: '0.2.2-rc.2',
+      coreEditorIds: [], coreVersion: '1.0.0', dshGeneration: '0.2.1-rc.2',
       readDshInventory: () => new Promise(resolve => { resolveInventory = resolve }),
     })
     const listener = vi.fn()
@@ -75,7 +75,7 @@ describe('Workbench extension registry', () => {
         runtime: { background: 'pause', collapsed: 'dispose', reacquire: 'on-visible' },
       },
       extension: { schemaVersion: 1, moduleId: 'test.pet', apiVersion: 1, editorIds: ['test.pet'],
-        coreCompatibility: '1.0.0', dshGeneration: '0.2.2-rc.2' },
+        coreCompatibility: '1.0.0', dshGeneration: '0.2.1-rc.2' },
     }
     const core: WorkbenchEditorCatalogRow = { id: 'core.page', label: 'Core', scope: 'root' }
     const rows = [core, page]
@@ -92,7 +92,7 @@ describe('Workbench extension registry', () => {
         rows: [{ rowId: 'pet', moduleName: '@test/pet', entryId: 'pet-entry' }] }],
     }
     const registry = createWorkbenchExtensionRegistryV1({
-      catalog: source, settings, coreEditorIds: ['core.page'], coreVersion: '1.0.0', dshGeneration: '0.2.2-rc.2',
+      catalog: source, settings, coreEditorIds: ['core.page'], coreVersion: '1.0.0', dshGeneration: '0.2.1-rc.2',
       readDshInventory: async () => inventory,
     })
     await registry.refresh()
@@ -118,13 +118,13 @@ describe('Workbench extension registry', () => {
     const editor: WorkbenchEditorCatalogRow = {
       id: 'unsafe.page', label: 'Unsafe', scope: 'root', pluginId: 'unknown',
       extension: { schemaVersion: 1, moduleId: 'unsafe', apiVersion: 1, editorIds: ['unsafe.page'],
-        coreCompatibility: '1.0.0', dshGeneration: '0.2.2-rc.2' },
+        coreCompatibility: '1.0.0', dshGeneration: '0.2.1-rc.2' },
     }
     const catalog: WorkbenchEditorCatalog = { getSnapshot: () => [editor], subscribe: () => () => {} }
     const registry = createWorkbenchExtensionRegistryV1({
       catalog,
       settings: { getSnapshot: () => ({ value: undefined }), subscribe: () => () => {} },
-      coreEditorIds: [], coreVersion: '1.0.0', dshGeneration: '0.2.2-rc.2',
+      coreEditorIds: [], coreVersion: '1.0.0', dshGeneration: '0.2.1-rc.2',
       readDshInventory: async () => { throw new Error('offline') },
     })
     await registry.refresh()
@@ -137,12 +137,12 @@ describe('Workbench extension registry', () => {
     const editor: WorkbenchEditorCatalogRow = {
       id: 'unsafe.page', label: 'Unsafe', scope: 'root', pluginId: 'unknown',
       extension: { schemaVersion: 1, moduleId: 'unsafe', apiVersion: 1, editorIds: ['unsafe.page'],
-        coreCompatibility: '1.0.0', dshGeneration: '0.2.2-rc.2' },
+        coreCompatibility: '1.0.0', dshGeneration: '0.2.1-rc.2' },
     }
     const registry = createWorkbenchExtensionRegistryV1({
       catalog: { getSnapshot: () => [editor], subscribe: () => () => {} },
       settings: { getSnapshot: () => ({ value: undefined }), subscribe: () => () => {} },
-      coreEditorIds: [], coreVersion: '1.0.0', dshGeneration: '0.2.2-rc.2',
+      coreEditorIds: [], coreVersion: '1.0.0', dshGeneration: '0.2.1-rc.2',
       readDshInventory: async () => {
         throw new WorkbenchExtensionInventoryReadError([{
           operation: 'pluginManager.listBundles', code: 'connection-lost', message: 'Host connection lost',
@@ -160,7 +160,7 @@ describe('Workbench extension registry', () => {
     const page: WorkbenchEditorCatalogRow = {
       id: 'test.pet', label: 'Pet', scope: 'root', pluginId: 'pet-entry',
       extension: { schemaVersion: 1, moduleId: 'test.pet', apiVersion: 1, editorIds: ['test.pet'],
-        coreCompatibility: '1.0.0', dshGeneration: '0.2.2-rc.2' },
+        coreCompatibility: '1.0.0', dshGeneration: '0.2.1-rc.2' },
     }
     const inventory: WorkbenchDshExtensionInventoryV1 = {
       plugins: [{ entryId: 'pet-entry', moduleName: '@test/pet', enabled: true, fiberPhase: 'active' }],
@@ -173,7 +173,7 @@ describe('Workbench extension registry', () => {
     const registry = createWorkbenchExtensionRegistryV1({
       catalog: { getSnapshot: () => [page], subscribe: () => () => {} },
       settings: { getSnapshot: () => ({ value: undefined }), subscribe: () => () => {} },
-      coreEditorIds: [], coreVersion: '1.0.0', dshGeneration: '0.2.2-rc.2',
+      coreEditorIds: [], coreVersion: '1.0.0', dshGeneration: '0.2.1-rc.2',
       readDshInventory: async () => {
         attempts += 1
         if (!available) throw new Error('connection not ready')
@@ -201,7 +201,7 @@ describe('Workbench extension registry', () => {
         runtime: { background: 'pause', collapsed: 'dispose', reacquire: 'on-visible' },
       },
       extension: { schemaVersion: 1, moduleId: 'test.pet', apiVersion: 1, editorIds: ['test.pet'],
-        coreCompatibility: '1.0.0', dshGeneration: '0.2.2-rc.2' },
+        coreCompatibility: '1.0.0', dshGeneration: '0.2.1-rc.2' },
     }
     const catalog: WorkbenchEditorCatalog = { getSnapshot: () => [page], subscribe: () => () => {} }
     const enabled: WorkbenchDshExtensionInventoryV1 = {
@@ -214,7 +214,7 @@ describe('Workbench extension registry', () => {
     const registry = createWorkbenchExtensionRegistryV1({
       catalog,
       settings: { getSnapshot: () => ({ value: undefined }), subscribe: () => () => {} },
-      coreEditorIds: [], coreVersion: '1.0.0', dshGeneration: '0.2.2-rc.2',
+      coreEditorIds: [], coreVersion: '1.0.0', dshGeneration: '0.2.1-rc.2',
       readDshInventory: async () => inventory,
       subscribeDshChanges(listener) { onDshChanged = listener; return () => { onDshChanged = undefined } },
     })

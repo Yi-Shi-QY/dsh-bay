@@ -38,7 +38,7 @@ if (buildInputs.packageName !== manifest.name) throw new Error('Build/package na
 const candidate = {
   status: 'public-beta',
   candidateId: buildInputs.candidateId,
-  product: 'DSH Bay / 湾',
+  product: 'DSH Bay',
   packageName: manifest.name,
   version: manifest.version,
   dshGeneration: manifest.dsh.workbench.dshGeneration,

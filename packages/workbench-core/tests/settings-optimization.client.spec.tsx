@@ -206,7 +206,7 @@ describe('settings product interactions', () => {
     expect(prompt).toContain('@example/old')
     expect(prompt).toContain('0.8.0')
     expect(prompt).toContain('old.page')
-    expect(prompt).toContain('v0.1 Core')
+    expect(prompt).toContain('18.0')
     expect(prompt).toContain('offline-embedded')
   })
   it('shows Creator repair startup failures in the extension card', async () => {

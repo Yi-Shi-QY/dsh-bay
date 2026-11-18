@@ -3,10 +3,10 @@
   "upstreamPackage": "@deepseek-ai/dsh-client-ui-renderer",
   "upstreamVersion": "0.2.2-rc.2",
   "upstreamCommit": "ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c",
-  "adaptation": "rc2-scoped-area-renderer",
+  "adaptation": "rc2-private-area-renderer",
   "adaptations": [
     "Host-keyed child-slot binding caches preserve Area lifetime isolation.",
-    "Stable Area-scoped Factory root supports Area-local rendering and late registration subscriptions.",
+    "Private stable Factory root supports Area-local rendering and late registration subscriptions.",
     "All other renderer machinery follows the pinned RC2 source; hashes normalize CRLF to LF."
   ],
   "files": [
@@ -15,7 +15,7 @@
       "npmSource": "src/client/scoped-slots.tsx",
       "output": "scoped-slots.tsx",
       "upstreamSha256": "7f348afba3e4aa2882ee50c7a18800fe03c606bb87b61e02ee64b99d919450a1",
-      "sha256": "02b862835114916d774d3d81a30782c8b8eb35bee8aafb94ffe9a9f021e50e3c"
+      "sha256": "e2dbe33ca9256181b701e975b1776ef2f06c1c83e5c860b91f89aa35ca8b2580"
     },
     {
       "source": "packages/client/ui-renderer/src/client/bindings.tsx",

@@ -239,7 +239,7 @@ function extensionAvailabilityLabel(extension: ExtensionRow) {
 /** Build the one-shot repair brief that Creator will receive as an unsent draft. */
 export function creatorRepairPrompt(extension: ExtensionRow): string {
   return [
-    '请在当前项目中修复并升级这个 DSH Bay Workbench 容器内页扩展，使它适配当前 v0.1 Core。',
+    '请在当前项目中修复并升级这个 DSH Bay Workbench 容器内页扩展，使它适配当前 18.0 版本。',
     '',
     `扩展模块：${extension.moduleId}`,
     `包名：${extension.packageName ?? '未知'}`,
@@ -248,7 +248,7 @@ export function creatorRepairPrompt(extension: ExtensionRow): string {
     `当前状态：${extensionAvailabilityLabel(extension)}`,
     `诊断信息：${extension.detail}`,
     '',
-    '请先读取当前项目和 workbench-extension-development 技能，检查当前 DSH/Core 版本、Slot 注册、Session 绑定、工作台目录与多会话模型，以及 offline-embedded 离线制品要求。',
+    '请先读取当前项目和 workbench-extension-development 技能，检查当前 DSH/Core 版本、Slot 注册、Session 绑定、18.0 工作台目录与多会话模型，以及 offline-embedded 离线制品要求。',
     '然后分析旧扩展与当前版本的差异，制定并实施兼容升级方案。',
     '保留扩展原有身份和功能，避免修改无关模块。',
     '完成类型检查、扩展合同测试和离线制品检查后，再说明仍需人工验证的部分。',

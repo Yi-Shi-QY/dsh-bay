@@ -740,6 +740,7 @@ export function createBayAgentInMemoryWorkerRuntime(options: { name?: string; au
     subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener) },
   }
 }
+
 /**
  * Adapter seam for a real external Worker Runtime. The Core only knows this
  * small client contract; it never imports the runtime implementation.
@@ -769,4 +770,12 @@ export function createBayAgentExternalWorkerRuntimeAdapter(
     subscribe: listener => 'subscribeEnvelope' in client ? (() => {}) : client.subscribe(listener),
     ...('subscribeEnvelope' in client ? { subscribeEnvelope: (listener: (envelope: BayAgentWorkerRuntimeEventEnvelopeV1) => void) => client.subscribeEnvelope(listener) } : {}),
   }
+}
+
+/** Named compatibility constructor for the planned dsh-superagent bridge.
+ * The client is injected so Core stays independent from that runtime's code. */
+export function createDshSuperagentWorkerRuntimeAdapter(
+  client: BayAgentExternalWorkerRuntimeClientV1 | BayAgentExternalWorkerRuntimeClientV2,
+): BayAgentWorkerRuntimeV1 {
+  return createBayAgentExternalWorkerRuntimeAdapter(client, 'dsh-superagent')
 }

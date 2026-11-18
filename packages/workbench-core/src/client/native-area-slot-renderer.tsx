@@ -16,6 +16,7 @@ import { bindSnapshotSelector } from '../foundation/renderer/bind.ts'
 import { createSlotRenderer, renderFactoryRoot } from '../foundation/renderer/scoped-slots.tsx'
 import { SlotAssemblyError } from '../foundation/renderer/errors.ts'
 import { isDeferredOfficialMoreRegistration } from './workbench-more-policy.ts'
+import { getWorkbenchClientSessions } from './session-service.ts'
 import type {
   HocRenderOpts, RenderOpts, SlotRendererHost, SlotScope, SlotSpec, StandardSourceBinding, StoredEntry, StoredFactory, StoreInstanceLike,
 } from '@deepseek-ai/dsh-client-ui-slots'
@@ -164,6 +165,7 @@ export function createWorkbenchNativeAreaSlotRenderer(
     scopeKey?: string
   } = {},
 ) {
+  const sessions = getWorkbenchClientSessions(ctx)
   let live = true
   const adapted = new Map<StoredEntry, StoredEntry>()
   const adaptedAreaEntries = new Map<StoredEntry, StoredEntry>()
@@ -210,7 +212,7 @@ export function createWorkbenchNativeAreaSlotRenderer(
     if (options.onOpenResource === undefined) return 'native-fallback'
     const child = sourceSessionId === undefined
       ? undefined
-      : (ctx.sessions as unknown as {
+      : (sessions as unknown as {
           subagentAddress?: (sessionId: string) => { readonly parentSessionId?: string } | undefined
         }).subagentAddress?.(sourceSessionId)
     const source: WorkbenchResourceSourceV1 | undefined = sourceSessionId === undefined
@@ -436,7 +438,7 @@ export function createWorkbenchNativeAreaSlotRenderer(
     const seat = createLocalAgentPresetSeat(sessionId === undefined
       ? undefined
       : (() => {
-          const preset = (ctx.sessions.list.getSnapshot().byId[sessionId as import('@deepseek-ai/dsh-session/types').SessionId]
+          const preset = (sessions.list.getSnapshot().byId[sessionId as import('@deepseek-ai/dsh-session/types').SessionId]
             ?.projectionValues as { readonly agentPreset?: unknown } | undefined)?.agentPreset
           return typeof preset === 'string' ? preset : undefined
         })())
@@ -626,7 +628,7 @@ export function createWorkbenchNativeAreaSlotRenderer(
             const originalOpenFile = original.openFile
             const openFile = typeof originalOpenFile === 'function'
               ? async (path: string, fileOptions?: { readonly line?: number }) => {
-                const cwd = (ctx.sessions as unknown as { list?: { getSnapshot(): { byId?: Record<string, { cwd?: string }> } } }).list?.getSnapshot().byId?.[upstreamSessionId]?.cwd
+                const cwd = (sessions as unknown as { list?: { getSnapshot(): { byId?: Record<string, { cwd?: string }> } } }).list?.getSnapshot().byId?.[upstreamSessionId]?.cwd
                 const address = fileAddressFor(upstreamSessionId as SessionId, cwd, path)
                 const placement = fileOptions?.line === undefined ? undefined : { params: { line: fileOptions.line } }
                 const routed = routeResource(address, placement, upstreamSessionId)
@@ -665,7 +667,7 @@ export function createWorkbenchNativeAreaSlotRenderer(
             const originalOpenPlan = original.openPlan
             const openPlan = typeof originalOpenPlan === 'function'
               ? (callId: unknown) => {
-                const child = (ctx.sessions as unknown as { subagentAddress?: (sessionId: string) => { kind?: string; parentSessionId?: string; childSessionId?: string; mode?: string } | undefined }).subagentAddress?.(upstreamSessionId)
+                const child = (sessions as unknown as { subagentAddress?: (sessionId: string) => { kind?: string; parentSessionId?: string; childSessionId?: string; mode?: string } | undefined }).subagentAddress?.(upstreamSessionId)
                 const address = child?.childSessionId === undefined
                   ? `dsh-resource://plan/${encodeURIComponent(upstreamSessionId)}/${encodeURIComponent(String(callId))}`
                   : `dsh-resource://plan/subagent/${encodeURIComponent(child.parentSessionId ?? upstreamSessionId)}/${encodeURIComponent(child.childSessionId)}/${encodeURIComponent(child.mode ?? 'unknown')}/${encodeURIComponent(String(callId))}`

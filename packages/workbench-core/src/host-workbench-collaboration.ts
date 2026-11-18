@@ -252,21 +252,21 @@ export function createWorkbenchCollaborationSession(
     }
   }
 
-  const persist = (): Promise<void> => {
+  const persist = (): void => {
     const store = options.store
-    if (store === undefined) return Promise.resolve()
+    if (store === undefined) return
     const persisted: PersistedCollaborationSnapshotV1 = {
       ...stateSnapshot(state),
       ...(eventLog.length === 0 ? {} : { eventLog: structuredClone(eventLog) }),
       ...(commandResults.size === 0 ? {} : { commandResults: Object.fromEntries([...commandResults].slice(-512).map(([id, result]) => [id, structuredClone(result)])) }),
     }
-    return Promise.resolve().then(() => store.save(persisted)).then(() => {}, () => {})
+    void Promise.resolve(store.save(persisted)).catch(() => {})
   }
 
-  const rememberResult = async (requestId: string, result: WorkbenchCommandResultV1): Promise<void> => {
+  const rememberResult = (requestId: string, result: WorkbenchCommandResultV1): void => {
     commandResults.set(requestId, result)
     while (commandResults.size > 512) commandResults.delete(commandResults.keys().next().value as string)
-    await persist()
+    persist()
   }
 
   const emit = (actorId: string, kind: string, payload: unknown, requestId?: string, canvas = false): WorkbenchCollaborationEventV1 => {
@@ -396,9 +396,9 @@ export function createWorkbenchCollaborationSession(
       } else if (operation.kind === 'draft.apply') {
         const draftInput = operation.operation
         const draft = state.drafts[draftInput.draftId]
-        if (draft === undefined) { result = failure(input.requestId, 'draft-not-found', '共享草稿不存在。'); await rememberResult(input.requestId, result); return result }
+        if (draft === undefined) { result = failure(input.requestId, 'draft-not-found', '共享草稿不存在。'); rememberResult(input.requestId, result); return result }
         let operations = normalizeDraftOperations(draftInput.operations)
-        if (draftInput.baseRevision > draft.revision) { result = failure(input.requestId, 'draft-conflict', '共享草稿版本无效。', draft); await rememberResult(input.requestId, result); return result }
+        if (draftInput.baseRevision > draft.revision) { result = failure(input.requestId, 'draft-conflict', '共享草稿版本无效。', draft); rememberResult(input.requestId, result); return result }
         if (draftInput.baseRevision < draft.revision) {
           const history = eventLog.filter(event => (event.kind === 'draft.changed' || event.kind === 'draft.cleared') && event.payload && typeof event.payload === 'object' && (event.payload as { draftId?: unknown }).draftId === draftInput.draftId)
           for (const event of history) {
@@ -491,7 +491,7 @@ export function createWorkbenchCollaborationSession(
       } else if (operation.kind === 'layout.release-lease') {
         result = success(input.requestId, { released: releaseControlLease(input.participantId, operation.targetId, operation.leaseId) })
       } else {
-        if (input.baseRevision !== state.workbenchRevision) { result = failure(input.requestId, 'revision-conflict', '工作台状态已变化，请重新读取后重试。', stateSnapshot(state)); await rememberResult(input.requestId, result); return result }
+        if (input.baseRevision !== state.workbenchRevision) { result = failure(input.requestId, 'revision-conflict', '工作台状态已变化，请重新读取后重试。', stateSnapshot(state)); rememberResult(input.requestId, result); return result }
         if (options.executeCommand === undefined) result = failure(input.requestId, 'command-failed', 'Host 尚未安装工作台命令执行器。')
         else {
           const value = await options.executeCommand({ collaborationId, workbenchId, participantId: input.participantId, operation: operation as never })
@@ -518,7 +518,7 @@ export function createWorkbenchCollaborationSession(
             ? failure(input.requestId, 'permission-denied', error instanceof Error ? error.message : 'collaboration permission denied')
             : failure(input.requestId, 'command-failed', error instanceof Error ? error.message : 'collaboration command failed')
     }
-    await rememberResult(input.requestId, result)
+    rememberResult(input.requestId, result)
     return result
   }
 
@@ -710,7 +710,7 @@ export function createFileWorkbenchCollaborationStore(
   let writeTail: Promise<unknown> = Promise.resolve()
   const fileFor = (workbenchId: string): string | undefined => {
     const root = rootForWorkbench(workbenchId)
-    return root === undefined ? undefined : path.join(root, '.bay', 'collaboration', 'active-v1.json')
+    return root === undefined ? undefined : path.join(root, '.dshbay', 'collaboration', 'active-v1.json')
   }
   const read = async (file: string): Promise<{ savedAt: number; snapshot: WorkbenchCollaborationSnapshotV1 } | undefined> => {
     try {

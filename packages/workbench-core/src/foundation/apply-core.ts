@@ -1,12 +1,9 @@
-import { fetchPortableAgents } from '../agent-assembly-model.ts'
 import { browserSafeUuid } from '../browser-safe-id.ts'
 import { installWorkbenchSidebarShortcuts } from '../client/workbench-sidebar-shortcuts.tsx'
 import { workbenchFetch } from '../client/workbench-access.ts'
 import { requestWorkbenchShareGrant } from './WorkbenchSharePermissions.tsx'
 import { installFloatingExitGuard } from '../client/floating-exit-guard.ts'
 import { areasOf } from './document-v3.ts'
-import { createDistributionClient } from '../distribution-contract.ts'
-import { createWorkbenchPackageService } from './workbench-package-service.ts'
 import { createWorkbenchLayoutPackageService } from './layout-package-service.ts'
 import { createLayoutImportJournal } from '../layout-import-journal.ts'
 import { scopeSettingsSnapshot, settingsTargetWritable, DESKTOP_SETTINGS_CONTEXT } from './settings-context.ts'
@@ -22,7 +19,7 @@ import { connectFloatingUiPreferences } from '../client/floating-ui-preferences.
 import { installNativeAutomaticIsolation } from '../client/native-automatic-isolation.tsx'
 import { closeWorkbenchNative } from '../client/native-sidebar-area-editor.tsx'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
-import type { SessionReference } from '@deepseek-ai/dsh-api-session-controller/client'
+import type { ISessions, SessionReference } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type {} from '@deepseek-ai/dsh-client-ui-workspace/client'
@@ -36,6 +33,7 @@ import type { ContextMenus } from '@deepseek-ai/dsh-client-ui-context-menu/clien
 import { createNativePluginNavigation } from '../client/native-plugin-navigation.ts'
 import { createNativePluginsPanelVisibility, watchNativePluginsPanel } from '../client/native-main-panel-navigation.ts'
 import { createAreaSessionCreator } from '../client/session-placement.ts'
+import { getWorkbenchClientSessions } from '../client/session-service.ts'
 import { createWorkbenchSettingsScope, type SettingsScope } from '../client/workbench-settings-contracts.ts'
 import { createFileWorkbenchSettings } from '../client/file-workbench-settings.ts'
 import { createWorkbenchCompleteClient } from '../client/workbench-complete.ts'
@@ -135,15 +133,15 @@ function unwrapRemoteResult<T>(result: unknown, operation: string): T {
 }
 
 /** The frozen Workspace Browser receives only official Runtime operations. */
-function sidebarHostActionsFor(ctx: ClientContext): WorkbenchSidebarHostActionsV1 {
+function sidebarHostActionsFor(ctx: ClientContext, sessions: ISessions): WorkbenchSidebarHostActionsV1 {
   return {
     sessionStatus: ctx.uiSession.sessionStatus,
-    searchSessions: async (query, signal) => unwrapRemoteResult(await ctx.sessions.search(query, signal), 'session search'),
-    searchResultLimit: ctx.sessions.searchResultLimit,
-    renameSession: (sessionId, title) => ctx.sessions.using(sessionId, { source: 'controllerOperation' }, async reference => {
+    searchSessions: async (query, signal) => unwrapRemoteResult(await sessions.search(query, signal), 'session search'),
+    searchResultLimit: sessions.searchResultLimit,
+    renameSession: (sessionId, title) => sessions.using(sessionId, { source: 'controllerOperation' }, async reference => {
       unwrapRemoteResult(await reference.binding.session.rename(title), 'session rename')
     }),
-    forkSession: sessionId => ctx.sessions.fork({ sessionId, increaseTitle: true }),
+    forkSession: sessionId => sessions.fork({ sessionId, increaseTitle: true }),
     renameWorkspace: async (workspaceId, title) => { await ctx.workspaces.rename(workspaceId, title) },
     deleteWorkspace: workspaceId => ctx.workspaces.delete(workspaceId),
     insertWorkspaceBefore: (workspaceId, beforeWorkspaceId) => ctx.workspaces.insertBefore(workspaceId, beforeWorkspaceId),
@@ -164,6 +162,10 @@ export function applyWorkbenchCoreFoundation(
 ): { ready: () => Promise<void>; flush: () => Promise<boolean>; runtimeMetrics: { getSnapshot(): WorkbenchRuntimeMetricsSnapshotV1 }; floatingRuntime: ReturnType<typeof createFloatingWorkspaceRuntime>; bayAgent?: BayAgentControllerV1 } {
   const runtimeMetrics = createWorkbenchRuntimeMetrics()
   const floatingRuntime = createFloatingWorkspaceRuntime()
+  // RC3 exposes the client Session controller through the Cordis service
+  // registry. The same context also carries the Host SessionStore, so using
+  // `ctx.sessions` here would select the wrong API surface.
+  const sessions = getWorkbenchClientSessions(ctx)
   const floatingSessionReferences = new Map<string, SessionReference>()
   const suppliedToolUsageService = (ctx as unknown as { get?: (name: string, strict?: boolean) => unknown }).get?.('workbenchToolUsageService') as WorkbenchToolUsageServiceV1 | undefined
   ctx.effect(() => installNativeAutomaticIsolation(ctx, modeController), 'workbench: automatic review isolation')
@@ -273,7 +275,7 @@ export function applyWorkbenchCoreFoundation(
     ? createBrowserWindowController({
       restoreDesktop: async () => {
         await fileSettings.request({ action: 'snapshot' })
-        await ctx.sessions.refresh()
+        await sessions.refresh()
       },
       rpc: connectionRpc,
       floating: { snapshot: id => floatingRuntime.snapshotHandoff(id), restore: (id, value) => floatingRuntime.restoreHandoff(id, value),
@@ -306,9 +308,9 @@ export function applyWorkbenchCoreFoundation(
   }, 'workbench: suspend temporary interactions on control handoff')
   floatingRuntime.hasControl = id => windowView ? companionControl && windowView.workbenchId === id : settingsTargetWritable(DESKTOP_SETTINGS_CONTEXT, id, windowController)
   floatingRuntime.validBinding = binding => {
-    const sessions = ctx.sessions.list.getSnapshot().byId
+    const sessionRows = sessions.list.getSnapshot().byId
     const workspaces = ctx.workspaces.list.getSnapshot()
-    return !!sessions[binding.sessionId as keyof typeof sessions] && !workspaces.archivedSessionIds.includes(binding.sessionId as never)
+    return !!sessionRows[binding.sessionId as keyof typeof sessionRows] && !workspaces.archivedSessionIds.includes(binding.sessionId as never)
       && (!binding.workspaceId || workspaces.items.some(row => row.workspaceId === binding.workspaceId && row.sessionIds.includes(binding.sessionId as never)))
   }
   ctx.effect(() => connectFloatingUiPreferences(floatingRuntime, windowView !== undefined), 'workbench: floating UI preferences')
@@ -320,7 +322,7 @@ export function applyWorkbenchCoreFoundation(
         contextPatch: input => contextPatch === undefined ? Promise.resolve({ status: 'unavailable' as const }) : contextPatch(input),
         createFileWorkbench: async input => {
           const value = await fileSettings.request<{ workbenchId: string; revision: number }>({ action: 'create', ...input })
-          await ctx.sessions.refresh()
+          await sessions.refresh()
           return { status: 'committed', ...value }
         },
       }
@@ -431,7 +433,7 @@ export function applyWorkbenchCoreFoundation(
   const creatorInspect = createWorkbenchCreatorInspectProvider({
     settings,
     editorCatalog,
-    sessions: ctx.sessions,
+    sessions,
     workspaces: ctx.workspaces,
   })
   let controlPlane: WorkbenchControlPlane
@@ -459,7 +461,7 @@ export function applyWorkbenchCoreFoundation(
       editors: editorCatalog,
       createSession: async input => {
         if (input.workspaceId === undefined) throw new Error('Control Plane Session creation requires a Workspace')
-        const sessionId = await ctx.sessions.create({
+        const sessionId = await sessions.create({
           workspaceId: input.workspaceId as WorkspaceId,
           ...(input.agentPreset === undefined ? {} : { agentPreset: input.agentPreset }),
         })
@@ -474,7 +476,7 @@ export function applyWorkbenchCoreFoundation(
     })
     ;(ctx as unknown as { provide?: (name: string, value: unknown) => unknown }).provide?.(WORKBENCH_CONTROL_PLANE_SERVICE_NAME, controlPlane)
   }
-  const bayAgent = createRemoteBayAgentController(windowView?.workbenchId ?? settings.getSnapshot().value?.activeWorkbenchId ?? 'main', workbenchFetch, () => ctx.sessions.refresh())
+  const bayAgent = createRemoteBayAgentController(windowView?.workbenchId ?? settings.getSnapshot().value?.activeWorkbenchId ?? 'main', workbenchFetch, () => sessions.refresh())
   const aiDraftGenerator = createRemoteWorkbenchAiDraftGenerator({
     route: BAY_AGENT_DRAFT_ROUTE,
     fetcher: workbenchFetch,
@@ -564,11 +566,11 @@ export function applyWorkbenchCoreFoundation(
       const tabId = floatingRuntime.find(project.sessionKey, workbenchId) ? project.sessionKey + ':' + browserSafeUuid() : project.sessionKey
 
       // A reserved identity lets failed creation responses retry the same blank session.
-      const sessionId = project.registered ? project.sessionId as SessionId : await ctx.sessions.create({
+      const sessionId = project.registered ? project.sessionId as SessionId : await sessions.create({
         workspaceId: project.workspaceId as WorkspaceId, sessionId: project.sessionId as SessionId,
         agentPreset: CREATOR_REPAIR_AGENT_PRESET,
       })
-      const reference = ctx.sessions.retain(sessionId, { source: 'workbenchFloatingCreator' })
+      const reference = sessions.retain(sessionId, { source: 'workbenchFloatingCreator' })
       let runtimeOwnsReference = false
       try {
         const binding = await reference.ready
@@ -581,7 +583,7 @@ export function applyWorkbenchCoreFoundation(
           })
         }
         // Preserve user drafts and never reinsert a brief into an ongoing conversation.
-        const blank = !project.registered || ctx.sessions.list.getSnapshot().byId[sessionId]?.blank === true
+        const blank = !project.registered || sessions.list.getSnapshot().byId[sessionId]?.blank === true
         if (blank) {
           const result = ctx.conversation.input.requestDraftInitialization(binding, {
             prompt: prompt + '\n\n修复项目：' + project.relativePath
@@ -608,7 +610,6 @@ export function applyWorkbenchCoreFoundation(
     return operation
   }
   const settingsPage = {
-    ...(windowView === undefined ? { distributionPackage: createWorkbenchPackageService({version:4,client: createDistributionClient(), settings, directory, editors: editorCatalog, rawEditors: slotEditorCatalog, registry: extensionRegistry, canExport: id => settingsTargetWritable(settingsContext, id, windowController), canImport: () => settingsContext.mode === 'desktop', agents: id => fetchPortableAgents(id)}) } : {}),
     layoutPackage: createWorkbenchLayoutPackageService({ settings, directory, editors: editorCatalog, journal: createLayoutImportJournal(),
       canExport: id => settingsTargetWritable(settingsContext, id, windowController), canImport: () => settingsContext.mode === 'desktop' }),
     settingsContext,
@@ -623,7 +624,7 @@ export function applyWorkbenchCoreFoundation(
       subscribe: listener => ctx.slots.subscribe('main', listener),
       selectPanel: () => ctx.layout.selectPanel('plugins' as MainPanelId),
     }),
-    ...(windowView === undefined ? { sessionList: ctx.sessions.list, workspaceList: ctx.workspaces.list } : {}),
+    ...(windowView === undefined ? { sessionList: sessions.list, workspaceList: ctx.workspaces.list } : {}),
     workbenchDirectory: directory,
      loadModelCatalog: async (): Promise<import('@deepseek-ai/dsh-api-session-controller').ModelCatalog> => unwrapRemoteResult<import('@deepseek-ai/dsh-api-session-controller').ModelCatalog>(await ctx.remote.session.modelCatalog(), 'model catalog'),
     ...(windowView === undefined ? { extensionRegistry } : {}),
@@ -654,7 +655,7 @@ export function applyWorkbenchCoreFoundation(
 
   const footer = createWorkbenchFooterHost(ctx)
   const conversationStatus = createConversationTabStatusSource({
-    sessions: ctx.sessions, interactions: ctx.uiSession.sessionStatus,
+    sessions, interactions: ctx.uiSession.sessionStatus,
     generation: resolveClientConnection()?.generation ?? { getSnapshot: () => undefined, subscribe: () => () => {} },
   })
   ctx.effect(() => () => conversationStatus.dispose(), 'workbench: conversation tab status')
@@ -704,7 +705,7 @@ export function applyWorkbenchCoreFoundation(
       ...(frameCollaborationClient === undefined ? {} : { collaborationClient: frameCollaborationClient }),
       runtimeMetrics,
       connectWorkspace: async (workspaceId, options) => {
-        const previous = new Set(ctx.sessions.list.getSnapshot().ids)
+        const previous = new Set(sessions.list.getSnapshot().ids)
         const sessionId = await ctx.uiWorkspace.connectWorkspace(workspaceId as WorkspaceId, options)
         return { target: { workspaceId, sessionId }, reusedBlank: previous.has(sessionId) }
       },
@@ -716,16 +717,16 @@ export function applyWorkbenchCoreFoundation(
             return fileSettings.request<string>({ action: 'create-session', workbenchId: options.workbenchId, areaId: options.areaId, workspaceId,
               agentPreset: options.agentPreset ?? 'standard', requestId: options.requestId ?? browserSafeUuid() })
           }
-          return ctx.sessions.create({ workspaceId: workspaceId as WorkspaceId, ...(options?.agentPreset === undefined ? {} : { agentPreset: options.agentPreset }) })
+          return sessions.create({ workspaceId: workspaceId as WorkspaceId, ...(options?.agentPreset === undefined ? {} : { agentPreset: options.agentPreset }) })
         },
       }),
       createWorkspace: path => ctx.workspaces.create({ path }),
       pickDirectory: () => ctx.uiWorkspace.pickDirectory(),
-      sidebarHostActions: sidebarHostActionsFor(ctx),
+      sidebarHostActions: sidebarHostActionsFor(ctx, sessions),
       contextMenus: ctx.contextMenus as ContextMenus,
       openOfficialSession: (sessionId, assertClaim) => modeController.exit(() => {
         assertClaim()
-        if (!ctx.sessions.list.getSnapshot().byId[sessionId as SessionId]) throw new Error('此对话已不可用')
+        if (!sessions.list.getSnapshot().byId[sessionId as SessionId]) throw new Error('此对话已不可用')
         ctx.uiWorkspace.openSession(sessionId as SessionId)
       }),
     }),

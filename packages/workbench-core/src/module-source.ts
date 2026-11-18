@@ -175,11 +175,11 @@ export function workbenchVersionSatisfies(version: string, range: string): boole
   })
 }
 
-/** Exact declarations from an earlier beta remain valid within the same beta line. */
+/** Exact declarations from an 18.0 extension remain valid across compatible 18.x candidates. */
 export function workbenchCoreCompatibilitySatisfies(version: string, range: string): boolean {
   if (workbenchVersionSatisfies(version, range)) return true
-  const current = /^(0\.1\.0-beta)\.(\d+)$/u.exec(version)
-  const required = /^(0\.1\.0-beta)\.(\d+)$/u.exec(range)
+  const current = /^0\.2\.2-alpha\.(\d+)\.(\d+)$/u.exec(version)
+  const required = /^0\.2\.2-alpha\.(\d+)\.(\d+)$/u.exec(range)
   return current !== null && required !== null && current[1] === required[1]
     && Number(current[2]) >= Number(required[2])
 }

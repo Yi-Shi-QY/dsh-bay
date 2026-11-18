@@ -45,7 +45,7 @@ it('creates a named folder inside the workbench and persists the area binding wi
   await waitFor(() => expect(f.onClose).toHaveBeenCalledOnce())
   expect((await stat(join(f.root, '社媒运营'))).isDirectory()).toBe(true)
   expect(f.bindAreaProject).toHaveBeenCalledExactlyOnceWith({ workbenchId: 'bench', areaId: 'area', relativePath: '社媒运营', createDirectory: true })
-  const saved = JSON.parse(await readFile(join(f.root, '.bay', 'workbench.json'), 'utf8'))
+  const saved = JSON.parse(await readFile(join(f.root, '.dshbay', 'workbench.json'), 'utf8'))
   expect(saved.record.areaProjects.area.relativePath).toBe('社媒运营')
   expect(saved.record.sessionCatalog).toEqual({})
 })
@@ -75,7 +75,7 @@ it('keeps the name and a visible error after failure, then allows retry', async 
   await waitFor(() => expect(f.onClose).toHaveBeenCalledOnce())
 })
 
-it.each(['../escape', '.bay', 'nested/folder', 'CON'])('rejects invalid folder name %s before submitting', async name => {
+it.each(['../escape', '.dshbay', 'nested/folder', 'CON'])('rejects invalid folder name %s before submitting', async name => {
   const f = await fixture()
   const view = render(<AreaProjectDialog directory={f.directory} workbenchId="bench" areaId="area" onClose={f.onClose} />)
   fireEvent.change(view.getByLabelText('文件夹名称'), { target: { value: name } })

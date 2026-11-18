@@ -1,7 +1,7 @@
 /**
  * Host store for manually assembled agents.
  *
- * Every revision is its own file under `<workbench>/.bay/agents/<agentId>@<revision>.json`.
+ * Every revision is its own file under `<workbench>/.dshbay/agents/<agentId>@<revision>.json`.
  * Saving writes the next revision and registers nothing. A person picks which
  * revision is the live DSH mode; registration is memory-only, so the selection
  * is stored beside the definitions and replayed before session recovery.
@@ -170,7 +170,7 @@ export class HostAgentAssemblyStore {
   async adoptCopiedSelection(workbenchId: string): Promise<void> {
     await this.serial(workbenchId, async () => {
       const root = this.rootOf(workbenchId)
-      if (!root || !existsSync(path.join(root, '.bay', 'agents', 'selection.json'))) return
+      if (!root || !existsSync(path.join(root, '.dshbay', 'agents', 'selection.json'))) return
       await this.suggest(workbenchId, 'complete', this.readSelection(workbenchId))
       await this.directory.writeAgentSelection(workbenchId, { schemaVersion: 1, registered: [] } satisfies AgentAssemblySelectionV1)
     })
@@ -263,7 +263,7 @@ export class HostAgentAssemblyStore {
 
   private readSuggestion(workbenchId: string): AgentAssemblySuggestionV1 | undefined {
     const root = this.rootOf(workbenchId)
-    const file = root && path.join(root, '.bay', 'agents', 'suggested.json')
+    const file = root && path.join(root, '.dshbay', 'agents', 'suggested.json')
     if (!file || !existsSync(file)) return undefined
     try {
       const value = JSON.parse(readFileSync(file, 'utf8')) as Partial<AgentAssemblySuggestionV1>
@@ -275,7 +275,7 @@ export class HostAgentAssemblyStore {
   private readAll(workbenchId: string): WorkbenchAgentDefinitionV1[] {
     const root = this.rootOf(workbenchId)
     if (!root) return []
-    const folder = path.join(root, '.bay', 'agents')
+    const folder = path.join(root, '.dshbay', 'agents')
     if (!existsSync(folder)) return []
     const seen = new Set<string>()
     return readdirSync(folder)
@@ -298,7 +298,7 @@ export class HostAgentAssemblyStore {
   private readSelection(workbenchId: string): readonly RevisionRef[] {
     const root = this.rootOf(workbenchId)
     if (!root) return []
-    const file = path.join(root, '.bay', 'agents', 'selection.json')
+    const file = path.join(root, '.dshbay', 'agents', 'selection.json')
     if (!existsSync(file)) return []
     try {
       const value = JSON.parse(readFileSync(file, 'utf8')) as Partial<AgentAssemblySelectionV1>

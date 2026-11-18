@@ -114,7 +114,7 @@ export function createDistributionPackageService(options:{client:DistributionCli
     },
     async inspect(bytes:Uint8Array){if(!options.canImport())throw new Error('请在接收方 DSH 桌面导入模板包。');return options.client.inspect(bytes)},
     async inspectLegacy(bytes:Uint8Array){
-      throw new Error('当前版本不支持此旧工作台格式，原文件未修改。请使用完整工作台包。')
+      throw new Error('18.0 不支持旧工作台格式，原文件未修改。请使用 18.0 完整工作台包。')
     },
     async confirm(row:DistributionImportStatus,bindings:Readonly<Record<string,SessionBindingV1>>={},destination?:DistributionImportDestination){if(!options.canImport())throw new Error('只能在接收方桌面确认。');return restore(await options.client.consent(row.transactionId,row.archiveSha256,destination),bindings)},
     async resume(id:string,bindings:Readonly<Record<string,SessionBindingV1>>={}){if(!options.canImport())throw new Error('请在接收方桌面继续。');return restore(await options.client.resume(id),bindings)},

@@ -13,7 +13,7 @@ import type { SettingsScopeSnapshot } from '../client/workbench-settings-contrac
 import type { WorkbenchSettingsV4 } from './persistence.ts'
 import type { WorkbenchSettingsSection } from './WorkbenchFrame.tsx'
 import { WorkbenchManagementPage, InnerPagesSettingsPage, InteractionSettingsPage, UnsavedFormPrompt, type PendingSettingsForm } from './WorkbenchSettingsPages.tsx'
-import { WorkbenchLayoutSharingPage } from './WorkbenchLayoutSharingPage.tsx'
+import { WorkbenchSharingPage } from './WorkbenchSharingPage.tsx'
 import type { DistributionPackageService } from './distribution-package-service.ts'
 import { DESKTOP_SETTINGS_CONTEXT, scopeSettingsSnapshot, settingsViewMemory, type WorkbenchSettingsContextV1, type WorkbenchSettingsOpenOptionsV1 } from './settings-context.ts'
 import css from './WorkbenchSettings.module.css'
@@ -86,7 +86,7 @@ export function WorkbenchCoreSettingsSection(props: WorkbenchCoreSettingsSection
       }}><span className={css.navIcon}>{tab.icon}</span>{tab.label}</button>)}</div><label className={css.narrowNavigation}>设置分类<select aria-label="工作台设置分类" value={actualSection} onChange={event => navigate({ section: event.target.value as typeof section })}>{tabs.map(tab => <option key={tab.id} value={tab.id}>{tab.label}</option>)}</select></label></nav>
       <div ref={panel} className={css.content} id={`${id}-content`} role="tabpanel" aria-label={tabs.find(tab => tab.id === actualSection)?.label} tabIndex={0} onScroll={event => { memory.scroll[section] = event.currentTarget.scrollTop }}>
         {snapshot.status === 'loading' ? <p role="status">正在读取工作台设置…</p> : snapshot.status !== 'ready' ? <p role="alert">设置连接中断，请恢复 DSH 连接后重试。未保存资料保留在当前表单中。</p> : null}
-        {actualSection === 'workbenches' ? <WorkbenchManagementPage {...pageProps} /> : actualSection === 'pages' ? <InnerPagesSettingsPage {...pageProps} /> : actualSection === 'interactions' ? browser ? <WorkbenchBackgroundAiSettings {...pageProps} /> : <InteractionSettingsPage {...pageProps} /> : browser ? <WorkbenchLayoutSharingPage {...pageProps} /> : null}
+        {actualSection === 'workbenches' ? <WorkbenchManagementPage {...pageProps} /> : actualSection === 'pages' ? <InnerPagesSettingsPage {...pageProps} /> : actualSection === 'interactions' ? browser ? <WorkbenchBackgroundAiSettings {...pageProps} /> : <InteractionSettingsPage {...pageProps} /> : browser ? <WorkbenchSharingPage {...pageProps} /> : null}
       </div>
     </div>
     {pendingIntent && form.current ? <UnsavedFormPrompt form={form.current} onContinue={() => setPendingIntent(undefined)} onLeave={() => { const next = pendingIntent; form.current = undefined; setPendingIntent(undefined); next() }} /> : null}

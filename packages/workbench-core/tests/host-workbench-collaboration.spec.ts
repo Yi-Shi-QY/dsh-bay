@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -329,14 +329,13 @@ describe('Workbench collaboration manager', () => {
         requestId: 'file-focus', collaborationId: started.collaborationId, workbenchId: 'workbench-file', participantId: 'owner', baseRevision: 0,
         operation: { kind: 'canvas.set-focus', focus: { areaId: 'area-a', editorId: 'workbench.conversation' } },
       })
-      await new Promise(resolve => setTimeout(resolve, 10))
-      expect(JSON.parse(await readFile(join(root, '.bay', 'collaboration', 'active-v1.json'), 'utf8')).snapshot.sharedCanvas.focus).toEqual({ areaId: 'area-a', editorId: 'workbench.conversation' })
+      await vi.waitFor(async () => expect(JSON.parse(await readFile(join(root, '.dshbay', 'collaboration', 'active-v1.json'), 'utf8')).snapshot.sharedCanvas.focus).toEqual({ areaId: 'area-a', editorId: 'workbench.conversation' }))
       const second = createWorkbenchCollaborationManager({ store, randomId: () => 'new-session' })
       const restored = await second.start('workbench-file', 'owner-2')
       expect(restored.collaborationId).toBe(started.collaborationId)
       expect(restored.session.snapshot().sharedCanvas.focus).toEqual({ areaId: 'area-a', editorId: 'workbench.conversation' })
       await second.stop('workbench-file')
-      await expect(readFile(join(root, '.bay', 'collaboration', 'active-v1.json'), 'utf8')).rejects.toThrow()
+      await expect(readFile(join(root, '.dshbay', 'collaboration', 'active-v1.json'), 'utf8')).rejects.toThrow()
     } finally { await rm(root, { recursive: true, force: true }) }
   })
 
@@ -350,6 +349,7 @@ describe('Workbench collaboration manager', () => {
         requestId: 'logged-command', collaborationId: started.collaborationId, workbenchId: 'workbench-log', participantId: 'owner', baseRevision: 0,
         operation: { kind: 'canvas.set-focus', focus: { areaId: 'area-a', editorId: 'workbench.conversation' } },
       })
+      await vi.waitFor(async () => expect(JSON.parse(await readFile(join(root, '.dshbay', 'collaboration', 'active-v1.json'), 'utf8')).snapshot.eventLog).toEqual(expect.arrayContaining([expect.objectContaining({ requestId: 'logged-command', kind: 'canvas.focus.changed' })])))
       const second = createWorkbenchCollaborationManager({ store, randomId: () => 'restored-session' })
       const restored = await second.start('workbench-log', 'owner-2')
       expect(restored.session.eventsSince('logged-session')).toEqual(expect.arrayContaining([expect.objectContaining({ requestId: 'logged-command', kind: 'canvas.focus.changed' })]))

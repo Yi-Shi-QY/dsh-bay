@@ -14,7 +14,7 @@ const validId = (id: string) => /^[A-Za-z0-9][A-Za-z0-9_-]{0,120}$/u.test(id)
 export class HostWorkbenchMemory {
   constructor(private readonly rootFor: (workbenchId: string) => string, private readonly recordFor?: (workbenchId: string) => WorkbenchRecordV2) {}
   private folder(workbenchId: string, projectId?: string) {
-    if (!projectId) return path.join(this.rootFor(workbenchId), '.bay', 'memory')
+    if (!projectId) return path.join(this.rootFor(workbenchId), '.dshbay', 'memory')
     const project = this.recordFor?.(workbenchId).projects?.[projectId]
     if (!project) throw new Error('记忆所属项目不存在。')
     return path.join(projectMetadataFolder(this.rootFor(workbenchId), project.relativePath), 'memory')
@@ -72,7 +72,7 @@ export class HostWorkbenchMemory {
     if (projectId && !record?.projects?.[projectId]) throw new Error('记忆所属项目不存在。')
     if (projectId) input = { ...input, projectId }
     if (author === 'worker' && input.verification !== 'candidate') throw new Error('Worker 只能提交待核验记忆。')
-    const release = acquireFileLock(path.join(this.rootFor(workbenchId), '.bay', 'writer.lock'))
+    const release = acquireFileLock(path.join(this.rootFor(workbenchId), '.dshbay', 'writer.lock'))
     try {
       const all = this.index(workbenchId), existing = all.entries[input.id]
       if (existing && existing.projectId !== projectId) throw new Error('不能通过编辑正文更改记忆的项目归属。')

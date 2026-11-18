@@ -113,7 +113,7 @@ export function remapAgentPresetId(presetId: string, sourceWorkbenchId: string, 
 /** File name of one revision. The agent id and revision both sit in the name so a copied folder stays readable. */
 export function revisionFileName(agentId: string, revision: number): string { return `${agentId}@${revision}.json` }
 
-export function definitionPath(agentId: string, revision: number): string { return `.bay/agents/${revisionFileName(agentId, revision)}` }
+export function definitionPath(agentId: string, revision: number): string { return `.dshbay/agents/${revisionFileName(agentId, revision)}` }
 
 /** Split a revision file name. Older single-file definitions are read too, but never written again. */
 const RESERVED_FILES = new Set(['selection.json', 'suggested.json'])

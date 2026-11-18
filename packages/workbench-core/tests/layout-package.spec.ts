@@ -143,22 +143,21 @@ describe('layout sharing manifest v3 / portable layout v2', () => {
     expect(JSON.stringify(preview.layout)).not.toContain('私密对话')
     expect(preview.layout.warnings).toHaveLength(1)
   })
-  it('accepts layout packages from the previous beta candidate', async () => {
+  it('rejects layout packages from the previous 18.x candidate', async () => {
     const bytes = await buildLayoutPackage(fixture())
     const files = decodeDeterministicZip(bytes).map(file => {
       if (file.path !== 'manifest.json') return file
       const manifest = JSON.parse(new TextDecoder().decode(file.content))
-      manifest.compatibility.core = '0.1.0-beta.0'
+      manifest.compatibility.core = '0.2.2-alpha.18.0'
       return { ...file, content: encode(manifest) }
     })
-    const preview = await inspectLayoutPackage(encodeDeterministicZip(files))
-    expect(preview.layout.name).toBe(fixture().name)
+    await expect(inspectLayoutPackage(encodeDeterministicZip(files))).rejects.toThrow()
   })
-  it('imports an RC1 layout archive when its portable schema and file digests are valid', async () => {
+  it('rejects an RC1 layout archive even when its portable schema and file digests are valid', async () => {
     const bytes = await alter(await buildLayoutPackage(fixture()), manifest => {
       manifest.compatibility.dsh = '0.2.2-rc.1'
     })
-    expect((await inspectLayoutPackage(bytes)).layout.name).toBe(fixture().name)
+    await expect(inspectLayoutPackage(bytes)).rejects.toThrow()
   })
   it('allocates fresh local identities and leaves session pages pending without fake sessions', () => {
     const a = restoreLayoutPackage(fixture(), [descriptor]); const b = restoreLayoutPackage(fixture(), [descriptor])
@@ -194,7 +193,7 @@ describe('layout sharing manifest v3 / portable layout v2', () => {
     const bytes = await alter(await buildLayoutPackage(fixture()), (manifest, layout) => {
       if (kind === 'protocol') manifest.compatibility.portableLayout = 99
       if (kind === 'generation') manifest.compatibility.dsh = '0.2.1-rc.2'
-      if (kind === 'core') manifest.compatibility.core = '0.1.1-beta.0'
+      if (kind === 'core') manifest.compatibility.core = '0.2.2-alpha.13'
       if (kind === 'size') layout.document.root.moduleHistory[0].state = { text: 'x'.repeat(300000) }
       if (kind === 'duplicate') layout.document.root.moduleHistory[1].moduleInstanceId = layout.document.root.moduleHistory[0].moduleInstanceId
       if (kind === 'credentials') layout.document.root.moduleHistory[0].state = { credentials: 'secret' }

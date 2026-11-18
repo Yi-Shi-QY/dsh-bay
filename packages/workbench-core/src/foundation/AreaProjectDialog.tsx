@@ -7,7 +7,7 @@ import folders from './WorkbenchFolders.module.css'
 /** Keep the UI name-only; the Host still validates real paths and directory ownership. */
 function folderNameError(name: string): string | undefined {
   if (!name) return undefined
-  if (name.toLowerCase() === '.bay') return '此名称由工作台保留，请换一个名称。'
+  if (name.toLowerCase() === '.dshbay') return '此名称由工作台保留，请换一个名称。'
   if (name === '.' || name === '..' || /[<>:"/\\|?*\u0000-\u001f]/u.test(name) || /[.]$/u.test(name)
     || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/iu.test(name)) return '请输入有效的文件夹名称，不需要填写路径。'
   return undefined

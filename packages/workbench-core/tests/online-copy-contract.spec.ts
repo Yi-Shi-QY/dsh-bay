@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { applyWorkbenchCopyInviteActionV1, classifyWorkbenchCopyInviteV1, createWorkbenchCopyInviteV1, validateWorkbenchCopyCode, validateWorkbenchCopyInviteV1, verifyWorkbenchCopyInviteCodeV1 } from '../src/online-copy-contract.ts'
 
-const expected = { dshGeneration: '0.2.2-rc.2', coreVersion: '0.1.0-beta.1' }
+const expected = { dshGeneration: '0.2.1-rc.2', coreVersion: '0.2.2-alpha.2' }
 const invite = () => ({
   schemaVersion: 1,
   kind: 'dsh-workbench-copy-invite',

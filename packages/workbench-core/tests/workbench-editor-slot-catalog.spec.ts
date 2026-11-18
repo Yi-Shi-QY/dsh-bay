@@ -7,8 +7,8 @@ const extension = {
   moduleId: 'example.pet',
   apiVersion: 1 as const,
   editorIds: ['example.pet.page'],
-  coreCompatibility: '0.1.0-beta.1',
-  dshGeneration: '0.2.2-rc.2',
+  coreCompatibility: '0.2.2-alpha.9',
+  dshGeneration: '0.2.1-rc.3',
 }
 const declaration = {
   editorId: 'example.pet.page',

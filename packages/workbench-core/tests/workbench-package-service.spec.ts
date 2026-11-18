@@ -22,7 +22,7 @@ function setup(change?: (record: WorkbenchRecordV2) => void) {
   const { directory } = createProjectNeutralFrameSettings(source)
   const editor = {
     id: 'example.custom', label: 'Custom', scope: 'root' as const, pluginId: '@local/custom',
-    extension: { schemaVersion: 1 as const, moduleId: 'custom.module', apiVersion: 1 as const, editorIds: ['example.custom'], coreCompatibility: '0.1.0-beta.0', dshGeneration: '0.2.2-rc.1' },
+    extension: { schemaVersion: 1 as const, moduleId: 'custom.module', apiVersion: 1 as const, editorIds: ['example.custom'], coreCompatibility: '0.2.2-alpha.18.1', dshGeneration: '0.2.2-rc.1' },
     declaration: { state: { schemaVersion: 1, maxBytes: 4096, share: 'portable', restore: 'if-valid' } },
     portability: { version: 1 as const, exportState: (state: unknown) => state, importState: (state: unknown) => state },
   } as any

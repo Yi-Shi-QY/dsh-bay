@@ -17,7 +17,7 @@ describe('Workbench editor contract', () => {
 
   it('rejects area editor declarations embedded in a module manifest', () => {
     expect(() => validateWorkbenchModuleManifestV1({
-      moduleId: 'workbench.example', version: '1.0.0', coreCompatibility: '0.1.0-beta.1',
+      moduleId: 'workbench.example', version: '1.0.0', coreCompatibility: '0.2.2-alpha.10',
       artifactDigest: 'a'.repeat(64),
       provides: { editorIds: [declaration.editorId], surfaces: [], editors: [{ ...declaration, scope: 'area' }] },
       requires: { capabilities: [], modules: [] }, activation: { mode: 'workbench', scope: 'area' },
@@ -26,7 +26,7 @@ describe('Workbench editor contract', () => {
 
   it('allows area module activation while keeping its editor on a supported render scope', () => {
     expect(() => validateWorkbenchModuleManifestV1({
-      moduleId: 'workbench.example', version: '1.0.0', coreCompatibility: '0.1.0-beta.1',
+      moduleId: 'workbench.example', version: '1.0.0', coreCompatibility: '0.2.2-alpha.10',
       artifactDigest: 'a'.repeat(64),
       provides: { editorIds: [declaration.editorId], surfaces: [], editors: [declaration] },
       requires: { capabilities: [], modules: [] }, activation: { mode: 'workbench', scope: 'area' },
@@ -35,7 +35,7 @@ describe('Workbench editor contract', () => {
 
   it('rejects duplicate editor IDs in a module manifest', () => {
     expect(() => validateWorkbenchModuleManifestV1({
-      moduleId: 'workbench.example', version: '1.0.0', coreCompatibility: '0.1.0-beta.1',
+      moduleId: 'workbench.example', version: '1.0.0', coreCompatibility: '0.2.2-alpha.10',
       artifactDigest: 'a'.repeat(64),
       provides: { editorIds: [declaration.editorId, declaration.editorId], surfaces: [] },
       requires: { capabilities: [], modules: [] }, activation: { mode: 'workbench', scope: 'root' },
@@ -44,7 +44,7 @@ describe('Workbench editor contract', () => {
 
   it('requires embedded editor declarations to exactly match editorIds', () => {
     expect(() => validateWorkbenchModuleManifestV1({
-      moduleId: 'workbench.example', version: '1.0.0', coreCompatibility: '0.1.0-beta.1',
+      moduleId: 'workbench.example', version: '1.0.0', coreCompatibility: '0.2.2-alpha.10',
       artifactDigest: 'a'.repeat(64),
       provides: { editorIds: [declaration.editorId, 'example.other'], surfaces: [], editors: [declaration] },
       requires: { capabilities: [], modules: [] }, activation: { mode: 'workbench', scope: 'root' },
@@ -53,7 +53,7 @@ describe('Workbench editor contract', () => {
 
   it('rejects malformed editor IDs even when a legacy manifest omits editor declarations', () => {
     expect(() => validateWorkbenchModuleManifestV1({
-      moduleId: 'workbench.example', version: '1.0.0', coreCompatibility: '0.1.0-beta.1',
+      moduleId: 'workbench.example', version: '1.0.0', coreCompatibility: '0.2.2-alpha.10',
       artifactDigest: 'a'.repeat(64),
       provides: { editorIds: ['bad id'], surfaces: [] },
       requires: { capabilities: [], modules: [] }, activation: { mode: 'workbench', scope: 'root' },

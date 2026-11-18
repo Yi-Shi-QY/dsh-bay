@@ -24,7 +24,7 @@ it('rejects retired layout migration before inspecting or installing extensions'
   const layout=projectLayoutPackage(settingsFixture().workbenches.a!,[])
   const inspect=vi.fn(async(bytes:Uint8Array)=>inspectWorkbenchPackageV4(bytes))
   const service=createDistributionPackageService({client:{inspect},canImport:()=>true} as any)
-  await expect(service.inspectLegacy(await buildLayoutPackage(layout))).rejects.toThrow('当前版本不支持此旧工作台格式')
+  await expect(service.inspectLegacy(await buildLayoutPackage(layout))).rejects.toThrow('18.0 不支持旧工作台格式')
   expect(inspect).not.toHaveBeenCalled()
 })
 it('awaited inventory refresh waits for the newest overlapping read',async()=>{

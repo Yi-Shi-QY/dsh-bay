@@ -2,7 +2,7 @@
 
 ## v0.1 项目身份与实例生命周期
 
-Core 兼容范围为 `>=0.1.0-beta.1 <0.1.1`。模板扩展自身保留独立的 `0.1.0` 版本，不能把它误当成 Core 版本。
+Core 兼容范围为 `>=0.1.1 <0.1.2`。模板扩展自身保留独立的 `0.1.0` 版本，不能把它误当成 Core 版本。
 
 - 声明 `presentation.floating: false` 可禁止浮窗；缺少完整绑定及生命周期声明的内页不能在浮窗运行。
 - `owner.projectId` 是项目持久身份；`owner.areaId` 只是展示位置。关闭 Area 后 Project 保留，重新打开显示概览，不自动恢复扩展内页。两个 Area 共享项目时背景和记忆共享，内页视图状态独立。全局页或 Main 可无 projectId，不能退回用 areaId 猜测。
@@ -14,7 +14,7 @@ Core 兼容范围为 `>=0.1.0-beta.1 <0.1.1`。模板扩展自身保留独立的
 - 临时标签只在本客户端本次运行中保留；几何存于独立 Profile UI namespace，均不写入 PortableLayout 或分享包。正式固定后才参与布局保存和现有分发。
 - 必测：两个工作台相同标签 ID、最小化和总览往返、退出再进入、固定前后 DOM/控制器一致、关闭取消、固定冲突、权限撤回和旧绑定回调。
 
-模板兼容 DSH `0.2.2-rc.2`，锁定上游提交 `ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c`。
+模板兼容 DSH `0.2.2-rc.3`，锁定上游提交 `ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c`。
 
 完整字段、生命周期、身份校验、权限和验收要求见[Workbench 容器内页扩展插件开发规范](../../WORKBENCH-CONTAINER-INNER-PAGE-EXTENSION-SPEC.zh.md)。
 
@@ -56,8 +56,8 @@ ctx.slots.inject('workbench.editor.session', () => ctx.slots.register({
     moduleId: 'workbench.editor-example',
     apiVersion: 1,
     editorIds: ['workbench.example'],
-    coreCompatibility: '>=0.1.0-beta.1 <0.1.1',
-    dshGeneration: '0.2.2-rc.2',
+    coreCompatibility: '>=0.1.1 <0.1.2',
+    dshGeneration: '0.2.2-rc.3',
   } } }),
 }, Editor))
 ```

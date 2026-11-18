@@ -104,7 +104,7 @@ it('does not invoke opening while this workbench is already being handed off', (
 })
 
 it('does not reserve an internal popup in the branded DSH desktop shell', async () => {
-  vi.stubGlobal('navigator', { userAgent: 'Mozilla/5.0 @deepseek-ai/dsh-desktop/0.2.2-rc.2 Chrome/152.0.7977.130' })
+  vi.stubGlobal('navigator', { userAgent: 'Mozilla/5.0 @deepseek-ai/dsh-desktop/0.2.1-rc.2 Chrome/152.0.7977.130' })
   vi.stubGlobal('dshDesktop', { protocolVersion: 1 })
   const open = vi.fn(async () => {})
   const popup = vi.spyOn(window, 'open')

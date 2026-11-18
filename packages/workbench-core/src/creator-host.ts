@@ -32,7 +32,7 @@ unique. Treat module activation scope (root/session/area) separately from editor
 scope (root/session). Use the exact owner workspaceId/sessionId supplied by Core; never
 guess the global current Session or create one merely by opening a page. Declare binding,
 unbound, state maxBytes/restore/share, lifecycle and conversation resource policies.
-In the current Workbench model an Area is a project-directory association and may contain
+In the 18.0 Workbench model an Area is a project-directory association and may contain
 many independent Sessions; it is not a representative Session. Use the session-client
 template variant for conversation-bound pages and binding.sharing=independent. Project
 files, terminals and resources must use public DSH/Workbench adapters and portable state

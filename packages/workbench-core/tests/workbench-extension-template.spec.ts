@@ -61,7 +61,7 @@ describe('Workbench editor extension template identity', () => {
       },
       extension: {
         schemaVersion: 1, moduleId: 'workbench.editor-example', apiVersion: 1,
-        editorIds: ['workbench.example'], coreCompatibility: '0.1.0-beta.0', dshGeneration: '0.2.2-rc.2',
+        editorIds: ['workbench.example'], coreCompatibility: '0.2.2-alpha.12', dshGeneration: '0.2.1-rc.2',
       },
     }] satisfies WorkbenchEditorCatalogRow[]
     const inventory = {
@@ -70,7 +70,7 @@ describe('Workbench editor extension template identity', () => {
         rows: [{ rowId: 'example-row', moduleName: packageName, entryId: 'example-entry' }] }],
     }
     const pending = resolveWorkbenchExtensionAccessV1({
-      editors, inventory, consents: {}, coreVersion: '0.1.0-beta.0', dshGeneration: '0.2.2-rc.2', coreEditorIds: [],
+      editors, inventory, consents: {}, coreVersion: '0.2.2-alpha.12', dshGeneration: '0.2.1-rc.2', coreEditorIds: [],
     })
 
     expect(pending.snapshot.extensions[0]).toMatchObject({

@@ -15,16 +15,16 @@ export function validateWorkbenchRelations(record: WorkbenchRecordV2): void {
   const areas = new Set(workbenchAreas(record).map(area => area.areaId))
   const catalog = record.sessionCatalog ?? {}
   for (const [id, project] of Object.entries(record.projects ?? {})) {
-    if (project.projectId !== id || !project.relativePath || project.relativePath.includes('\\') || project.relativePath.split('/').some(part => !part || part === '.' || part === '..' || part.toLowerCase() === '.bay' || part.includes(':'))) throw new Error('项目登记无效：' + id)
+    if (project.projectId !== id || !project.relativePath || project.relativePath.includes('\\') || project.relativePath.split('/').some(part => !part || part === '.' || part === '..' || part.toLowerCase() === '.dshbay' || part.includes(':'))) throw new Error('项目登记无效：' + id)
   }
   for (const [id, project] of Object.entries(record.areaProjects ?? {})) {
-    if (!areas.has(id) || !project.relativePath || project.relativePath.includes('\\') || project.relativePath.split('/').some(part => !part || part === '.' || part === '..' || part.toLowerCase() === '.bay' || part.includes(':'))) throw new Error('区域项目引用无效：' + id)
+    if (!areas.has(id) || !project.relativePath || project.relativePath.includes('\\') || project.relativePath.split('/').some(part => !part || part === '.' || part === '..' || part.toLowerCase() === '.dshbay' || part.includes(':'))) throw new Error('区域项目引用无效：' + id)
     if (record.projectModelVersion && (!project.projectId || record.projects?.[project.projectId]?.relativePath !== project.relativePath)) throw new Error('区域项目身份无效：' + id)
   }
   for (const [key, entry] of Object.entries(catalog)) {
     // Closed sessions retain the project they were created in. Only pages
     // still present in the layout must match the area's current project.
-    const relativePathValid = entry.relativePath !== '' && !entry.relativePath.includes('\\') && entry.relativePath.split('/').every(part => part && part !== '.' && part !== '..' && part.toLowerCase() !== '.bay' && !part.includes(':'))
+  const relativePathValid = entry.relativePath !== '' && !entry.relativePath.includes('\\') && entry.relativePath.split('/').every(part => part && part !== '.' && part !== '..' && part.toLowerCase() !== '.dshbay' && !part.includes(':'))
     // Floating user sessions (for example extension repairs) own a project,
     // but do not need an Area container. Worker ownership remains explicit.
     const ownerValid = record.projectModelVersion ? !!entry.projectId && record.projects?.[entry.projectId]?.relativePath === entry.relativePath : entry.areaId ? areas.has(entry.areaId) : entry.role === 'user'

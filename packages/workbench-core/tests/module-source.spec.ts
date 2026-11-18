@@ -11,11 +11,11 @@ const npm = (version = '1.2.3') => ({ kind: 'npm' as const, packageName: '@dsh-w
 const git = (commit = 'a'.repeat(40)) => ({ kind: 'git' as const, repository: 'https://github.com/example/workbench.git', resolvedCommit: commit, artifactDigest: 'b'.repeat(64) })
 
 describe('Workbench module source identity', () => {
-  it('accepts compatible ranges and previous exact beta declarations', () => {
-    expect(workbenchCoreCompatibilitySatisfies('0.1.0-beta.1', '0.1.0-beta.0')).toBe(true)
-    expect(workbenchCoreCompatibilitySatisfies('0.1.0-beta.1', '>=0.1.0-beta.0 <0.1.1')).toBe(true)
-    expect(workbenchCoreCompatibilitySatisfies('0.1.0-beta.1', '0.1.1-beta.0')).toBe(false)
-    expect(workbenchCoreCompatibilitySatisfies('0.1.0-beta.1', '0.1.0-beta.2')).toBe(false)
+  it('accepts compatible ranges and previous exact 18.x Core declarations', () => {
+    expect(workbenchCoreCompatibilitySatisfies('0.2.2-alpha.18.1', '0.2.2-alpha.18.0')).toBe(true)
+    expect(workbenchCoreCompatibilitySatisfies('0.2.2-alpha.18.1', '>=0.2.2-alpha.18.0 <0.2.2-alpha.19.0')).toBe(true)
+    expect(workbenchCoreCompatibilitySatisfies('0.2.2-alpha.18.1', '0.2.2-alpha.17.6')).toBe(false)
+    expect(workbenchCoreCompatibilitySatisfies('0.2.2-alpha.18.1', '0.2.2-alpha.18.2')).toBe(false)
   })
 
   it('accepts explicit npm and git requests but rejects locators that can execute commands', () => {

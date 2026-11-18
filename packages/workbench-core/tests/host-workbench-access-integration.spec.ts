@@ -67,7 +67,7 @@ describe('file workbench / control lease / guest integration', () => {
       catch (error) { return (error as { code?: unknown }).code }
     }
     expect(codeOf('escape/a.txt')).toBe('path-scope-denied')
-    expect(codeOf('.bay/workbench.json')).toBe('path-scope-denied')
+    expect(codeOf('.dshbay/workbench.json')).toBe('path-scope-denied')
     expect(() => f.access.authorize(guest, 'read-files', { workbenchId: 'workbench-a', relativePath: 'notes/new.txt' })).not.toThrow()
   })
 
@@ -186,7 +186,7 @@ describe('file workbench / control lease / guest integration', () => {
     ])
   })
 
-  it('persists a shared canvas layout through the Workbench file', async () => {
+  it('persists a shared canvas layout through the 18.0 Workbench file', async () => {
     const f = await setup()
     const current = f.directory.getSnapshot().value.workbenches['workbench-a']!
     const layout = projectDocumentV3ToLayoutV2(current.document, current.areaProjects)
@@ -197,7 +197,7 @@ describe('file workbench / control lease / guest integration', () => {
     const persisted = f.directory.getSnapshot().value.workbenches['workbench-a']!
     expect(persisted.document.root.kind).toBe('split')
     if (persisted.document.root.kind === 'split') expect(persisted.document.root.ratio).toBe(0.7)
-    const reloaded = JSON.parse(await (await import('node:fs/promises')).readFile(join(f.directory.rootPath('workbench-a'), '.bay', 'workbench.json'), 'utf8')) as { record: typeof persisted }
+    const reloaded = JSON.parse(await (await import('node:fs/promises')).readFile(join(f.directory.rootPath('workbench-a'), '.dshbay', 'workbench.json'), 'utf8')) as { record: typeof persisted }
     expect(reloaded.record.document.root.kind).toBe('split')
     if (reloaded.record.document.root.kind === 'split') expect(reloaded.record.document.root.ratio).toBe(0.7)
   })
@@ -299,7 +299,7 @@ describe('file workbench / control lease / guest integration', () => {
     await symlink(outside, join(f.directory.rootPath('workbench-a'), 'app', 'escape'), process.platform === 'win32' ? 'junction' : 'dir')
     const token = f.access.registerGuest('guest', 'workbench-a', { ...SHARED_CONTROL_GRANT, capabilities: ['view', 'read-files'] }, () => true)
     expect((await f.call({ action: 'project-read', workbenchId: 'workbench-a', relativePath: 'app/escape/a.txt' }, token)).status).toBeGreaterThanOrEqual(400)
-    expect((await f.call({ action: 'project-read', workbenchId: 'workbench-a', relativePath: '.bay/workbench.json' }, token)).status).toBe(403)
+    expect((await f.call({ action: 'project-read', workbenchId: 'workbench-a', relativePath: '.dshbay/workbench.json' }, token)).status).toBe(403)
     expect((await f.call({ action: 'register-session', workbenchId: 'workbench-a', requestId: 'steal', sessionId: 'foreign' }, token)).status).toBe(403)
     const snapshot = await (await f.call({ action: 'snapshot' }, token)).json()
     expect(snapshot.snapshot.value.workbenches['workbench-a'].fileWorkbench.rootPath).toBeUndefined()
@@ -329,9 +329,9 @@ describe('file workbench / control lease / guest integration', () => {
     const f = await setup()
     expect(await f.controller.handle('prepare', { workbenchId: 'legacy-only' })).toMatchObject({ ok: false })
     const { rm } = await import('node:fs/promises')
-    await rm(join(f.directory.rootPath('workbench-a'), '.bay', 'workbench.json'))
+    await rm(join(f.directory.rootPath('workbench-a'), '.dshbay', 'workbench.json'))
     expect(await f.controller.handle('prepare', { workbenchId: 'workbench-a' })).toMatchObject({ ok: false })
-    await writeFile(join(f.directory.rootPath('workbench-a'), '.bay', 'workbench.json'), '{broken')
+    await writeFile(join(f.directory.rootPath('workbench-a'), '.dshbay', 'workbench.json'), '{broken')
     expect(await f.controller.handle('prepare', { workbenchId: 'workbench-a' })).toMatchObject({ ok: false })
   })
 })

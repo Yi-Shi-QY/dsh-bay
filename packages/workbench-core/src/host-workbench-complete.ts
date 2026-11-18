@@ -127,7 +127,7 @@ async function readManifest(stage: string) {
   const manifestFile = path.join(stage, 'manifest.json')
   const manifest = JSON.parse(await readFile(manifestFile, 'utf8')) as CompleteManifest
   if (manifest.type !== 'workbench-complete' || ![5, 6].includes(manifest.version) || !manifest.workbenchId || !manifest.sessionKeys) {
-    throw new Error('不是受支持的完整工作台包 V5 / V6。')
+    throw new Error('不是受支持的 18.0 完整工作台包 V5 / V6。')
   }
   for (const relative of ['manifest.json', 'files.ndjson', 'workbench/.bay/workbench.json', 'native/native-sessions.json']) {
     if (!existsSync(path.join(stage, relative))) throw new Error('完整包缺少必要内容：' + relative)

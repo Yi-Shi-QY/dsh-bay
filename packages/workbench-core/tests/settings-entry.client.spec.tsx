@@ -64,7 +64,7 @@ describe('Workbench Settings entry', () => {
     expect(view.queryByRole('tab', { name: '交互偏好' })).toBeNull()
     expect(view.queryByLabelText('新建工作台提示词')).toBeNull()
     fireEvent.click(view.getByRole('tab', { name: '导入与分享' }))
-    expect(view.getByRole('heading', { name: '导入与分享' })).toBeTruthy()
+    expect(view.getByRole('tabpanel', { name: '导入与分享' })).toBeTruthy()
   })
   it('opens the migrated settings without exiting or remounting the Frame', async () => {
     const { view, modeController } = bench()
