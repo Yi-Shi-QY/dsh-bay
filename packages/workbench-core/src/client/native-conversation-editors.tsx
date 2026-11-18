@@ -512,6 +512,7 @@ export function createWorkbenchNativeConversationEditors(ctx: Context) {
     const mountedRef = useRef(true)
     const ownerRef = useRef(owner)
     const selectedAgentPresetRef = useRef<string>()
+    const autoWorkspaceRef = useRef<string>()
     const [placement, setPlacement] = useState<StartPlacement>({ phase: 'idle' })
     const [, setSelectedAgentPreset] = useState<string>()
     const [retained, setRetained] = useState<{
@@ -585,6 +586,12 @@ export function createWorkbenchNativeConversationEditors(ctx: Context) {
       void task.catch(() => {})
       return task
     }, [])
+    useEffect(() => {
+      if (owner.presentation !== 'area' || owner.sessionId !== undefined || owner.workspaceId === undefined) return
+      if (autoWorkspaceRef.current === owner.workspaceId) return
+      autoWorkspaceRef.current = owner.workspaceId
+      void selectWorkspace(owner.workspaceId).catch(() => {})
+    }, [owner.presentation, owner.sessionId, owner.workspaceId, selectWorkspace])
 
     const matchingRetained = owner.sessionId !== undefined
       && retained?.sessionId === owner.sessionId && retained.areaClaim === owner.areaClaim

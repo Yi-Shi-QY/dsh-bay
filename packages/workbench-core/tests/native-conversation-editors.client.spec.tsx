@@ -206,6 +206,83 @@ describe('Core native Conversation editors', () => {
     expect(onOfficialWorkspaceOpen).not.toHaveBeenCalled()
   })
 
+  it('automatically inherits the Area project once, including under StrictMode', async () => {
+    const editors = createWorkbenchOfficialAreaEditors(nativeConversationContext({
+      onOfficialWorkspaceOpen: vi.fn(), injectArgs: [],
+    }))
+    const placeConversation = vi.fn(() => Promise.resolve({ workspaceId: 'workspace-area', sessionId: 'session-area' }))
+    const Start = editors.start as unknown as ComponentType<Record<string, unknown>>
+
+    render(<StrictMode><Start
+      instanceId="start-area-project"
+      areaId="area-project"
+      presentation="area"
+      workspaceId="workspace-area"
+      state={{}}
+      setState={vi.fn()}
+      close={vi.fn()}
+      focus={vi.fn()}
+      placeConversation={placeConversation}
+    /></StrictMode>)
+
+    await waitFor(() => expect(placeConversation).toHaveBeenCalledWith({
+      workspaceId: 'workspace-area', presentation: 'start',
+    }))
+    expect(placeConversation).toHaveBeenCalledOnce()
+  })
+
+  it('keeps automatic project inheritance retryable after a placement failure', async () => {
+    const editors = createWorkbenchOfficialAreaEditors(nativeConversationContext({
+      onOfficialWorkspaceOpen: vi.fn(), injectArgs: [],
+    }))
+    const placeConversation = vi.fn(async () => { throw new Error('host unavailable') })
+    const Start = editors.start as unknown as ComponentType<Record<string, unknown>>
+
+    render(<Start
+      instanceId="start-area-project-failure"
+      areaId="area-project-failure"
+      presentation="area"
+      workspaceId="workspace-area"
+      state={{}}
+      setState={vi.fn()}
+      close={vi.fn()}
+      focus={vi.fn()}
+      placeConversation={placeConversation}
+    />)
+
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('\u65e0\u6cd5\u51c6\u5907\u6b64\u5de5\u4f5c\u533a\u5bf9\u8bdd'))
+    expect(placeConversation).toHaveBeenCalledOnce()
+    fireEvent.click(screen.getByRole('button', { name: /区域项目.*新建对话/ }))
+    await waitFor(() => expect(placeConversation).toHaveBeenCalledTimes(2))
+  })
+
+  it('does not automatically place a floating Start surface into its project', async () => {
+    const editors = createWorkbenchOfficialAreaEditors(nativeConversationContext({
+      onOfficialWorkspaceOpen: vi.fn(), injectArgs: [],
+    }))
+    const placeConversation = vi.fn(() => Promise.resolve({ workspaceId: 'workspace-floating', sessionId: 'session-floating' }))
+    const Start = editors.start as unknown as ComponentType<Record<string, unknown>>
+
+    render(<Start
+      instanceId="start-floating-project"
+      areaId="area-floating-project"
+      presentation="floating"
+      workspaceId="workspace-floating"
+      state={{}}
+      setState={vi.fn()}
+      close={vi.fn()}
+      focus={vi.fn()}
+      placeConversation={placeConversation}
+    />)
+
+    await act(async () => { await Promise.resolve() })
+    expect(placeConversation).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: /区域项目.*新建对话/ }))
+    await waitFor(() => expect(placeConversation).toHaveBeenCalledWith({
+      workspaceId: 'workspace-floating', presentation: 'start',
+    }))
+  })
+
   it('coalesces repeated native Workspace picks into one Area binding request', async () => {
     const onOfficialWorkspaceOpen = vi.fn()
     const injectArgs: unknown[][] = []

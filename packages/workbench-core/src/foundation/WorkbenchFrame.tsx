@@ -168,7 +168,7 @@ import {
 } from './split-resize-metrics.ts'
 import css from './WorkbenchFrame.module.css'
 import { WorkbenchBrowserAction } from './WorkbenchBrowserAction.tsx'
-import { createPendingSessionTab, prepareFloatingTabForArea, selectableWorkbenchEditors } from './editor-selection.ts'
+import { createPendingSessionTab, editorsAvailableForWorkbenchContext, prepareFloatingTabForArea, selectableWorkbenchEditors } from './editor-selection.ts'
 import type { WorkbenchRuntimeMetricsSinkV1 } from './workbench-runtime-metrics.ts'
 import { WorkbenchBrowserControlPage } from './WorkbenchBrowserControlPage.tsx'
 import { closeWorkbenchNative } from '../client/native-sidebar-area-editor.tsx'
@@ -5544,7 +5544,21 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
     : areaCollapsed
       ? `从${collapseEdge === 'left' ? '左侧' : collapseEdge === 'right' ? '右侧' : collapseEdge === 'up' ? '顶部' : '底部'}展开${active?.lastKnownTitle ?? '当前'}容器`
       : `向${collapseEdge === 'left' ? '左' : collapseEdge === 'right' ? '右' : collapseEdge === 'up' ? '上' : '下'}收起${active?.lastKnownTitle ?? '当前'}容器`
-  const selectableEditors = selectableWorkbenchEditors(editors, props.hiddenEditorIds)
+  const areaProject = areaProjects?.[group.id]
+  const areaWorkspaceId = areaProject?.workspaceId ?? group.project?.workspaceId
+  const areaWorkspace = areaWorkspaceId === undefined
+    ? undefined
+    : workspaces.find(workspace => workspace.workspaceId === areaWorkspaceId)
+  const hasWorkspace = areaProjects === undefined || areaWorkspaceId !== undefined
+  const hasSession = hasWorkspace && areaWorkspace !== undefined
+    && areaWorkspace.sessionIds.some(sessionId => {
+      const session = sessionRows[sessionId]
+      return session !== undefined && !session.blank && !archivedSessionIds.includes(sessionId)
+    })
+  const selectableEditors = editorsAvailableForWorkbenchContext(
+    selectableWorkbenchEditors(editors, props.hiddenEditorIds),
+    { hasWorkspace, hasSession },
+  )
   const activeEditor = active === undefined
     ? undefined
     : workbenchEditorFromIndex(props.editorIndex, active.editorId, active.editorScope)
@@ -6640,7 +6654,8 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
         {project && props.directory && (active === undefined || projectOverviewOpen) ? <WorkbenchProjectOverview project={project} directory={props.directory} workbenchId={workbenchId} tasks={props.bayAgentSnapshot} controller={props.bayAgentController} writable={props.layoutActionsEnabled} onEditBackground={editAreaBackground ? () => editAreaBackground(group.id) : undefined}
           onAddPage={() => { setProjectOverviewOpen(false); editorMenuAnchorRef.current = emptyEditorTriggerRef.current ?? areaMenuTriggerRef.current; setEditorMenuMode('add'); setMenu('editor') }}
           onOpenSession={session => { const binding = { sessionId: session.sessionId!, ...(project.workspaceId ? { workspaceId: project.workspaceId } : {}) }; const existing = group.tabs.find(tab => tab.binding?.sessionId === binding.sessionId && tab.editorId === 'workbench.conversation'); if (existing) commit({ type: 'activate', groupId: group.id, tabId: existing.id }); else commit({ type: 'add-tab', groupId: group.id, tab: createSessionTab(nextId('tab'), 'workbench.conversation', binding, sessionRows[binding.sessionId]?.displayTitle ?? session.title) }); setProjectOverviewOpen(false) }} /> : active === undefined ? (
-          <WorkbenchEmptyArea editors={selectableEditors} onSelect={addEditor} triggerRef={emptyEditorTriggerRef} expanded={menu === 'editor'}
+          <WorkbenchEmptyArea editors={selectableEditors} context={{ hasWorkspace, hasSession }} onSelect={addEditor} triggerRef={emptyEditorTriggerRef} expanded={menu === 'editor'}
+            onSetProject={editAreaProject === undefined ? undefined : () => editAreaProject(group.id)}
             onManage={props.onManageEditors}
             onBrowse={anchor => { editorMenuAnchorRef.current = anchor; setEditorMenuMode('add'); setMenu(value => value === 'editor' ? undefined : 'editor') }} />
         ) : disposeWhenCollapsed ? (

@@ -25,14 +25,14 @@ export function registerWorkbenchOfficialAreaEditors(
     requiredBinding,
     binding: {
       requirement: requiredBinding,
-      unbound: requiredBinding === 'none' ? 'available' : 'pending',
+      unbound: requiredBinding === 'none' || (requiredBinding === 'workspace' && scope === 'root') ? 'available' : 'pending',
       sharing: requiredBinding === 'session' ? 'independent' : 'none',
     },
     ...(conversationResources === undefined ? {} : { conversationResources }),
     runtime: { background, collapsed, reacquire: 'on-visible' },
   })
   const declarations = {
-    start: declaration(WORKBENCH_OFFICIAL_AREA_EDITOR_IDS.start, 'root', '新建对话', 'none', 'dispose', 'keep'),
+    start: declaration(WORKBENCH_OFFICIAL_AREA_EDITOR_IDS.start, 'root', '新建对话', 'workspace', 'dispose', 'keep'),
     conversation: declaration(WORKBENCH_OFFICIAL_AREA_EDITOR_IDS.conversation, 'session', '对话', 'session', 'keep', 'keep'),
     trajectory: declaration(WORKBENCH_OFFICIAL_AREA_EDITOR_IDS.trajectory, 'session', 'Agent 轨迹', 'session', 'pause', 'pause'),
     files: { ...declaration(WORKBENCH_OFFICIAL_AREA_EDITOR_IDS.files, 'root', '项目文件', 'none', 'pause', 'pause'), presentation: { floating: false } },

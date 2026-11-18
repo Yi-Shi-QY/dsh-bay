@@ -1,11 +1,39 @@
 import type { WorkbenchEditorCatalogRow } from './catalog.ts'
 import { createSessionTab, type GroupNode, type JsonValue, type TabDocument, type SessionBindingV1 } from './model.ts'
+import type { WorkbenchEditorBindingRequirementV1 } from '../module-contract.ts'
+
+export interface WorkbenchEditorAvailabilityContextV1 {
+  readonly hasWorkspace: boolean
+  readonly hasSession: boolean
+}
+
+/** Resolve the binding contract that controls whether an editor can be added. */
+export function workbenchEditorBindingRequirement(editor: WorkbenchEditorCatalogRow): WorkbenchEditorBindingRequirementV1 {
+  return editor.declaration?.binding?.requirement
+    ?? editor.declaration?.requiredBinding
+    ?? (editor.scope === 'session' ? 'session' : 'none')
+}
+
+/** Keep the add menu aligned with the Area's current project and conversation context. */
+export function editorsAvailableForWorkbenchContext(
+  editors: readonly WorkbenchEditorCatalogRow[],
+  context: WorkbenchEditorAvailabilityContextV1,
+): readonly WorkbenchEditorCatalogRow[] {
+  return editors.filter(editor => {
+    const requirement = workbenchEditorBindingRequirement(editor)
+    if (requirement === 'none') return true
+    if (requirement === 'workspace') return context.hasWorkspace
+    return context.hasWorkspace && context.hasSession
+  })
+}
 
 /** Render scope does not replace the editor's declared binding requirement. */
 export function createFloatingEditorTab(editor: WorkbenchEditorCatalogRow, id: string, binding?: SessionBindingV1, state: JsonValue = {}): TabDocument {
-  const requirement = editor.declaration?.binding?.requirement ?? editor.declaration?.requiredBinding ?? (editor.scope === 'session' ? 'session' : 'none')
-  const requiresBinding = requirement !== 'none' || editor.scope === 'session'
-  if (requiresBinding && binding && (requirement !== 'workspace' || binding.workspaceId)) {
+  const requirement = workbenchEditorBindingRequirement(editor)
+  const requiresBinding = requirement === 'session' || editor.scope === 'session'
+    || (requirement !== 'none' && editor.declaration?.binding?.unbound !== 'available')
+  const canUseWorkspaceBinding = requirement !== 'workspace' || binding?.workspaceId !== undefined
+  if (binding && canUseWorkspaceBinding && (requiresBinding || requirement === 'workspace')) {
     return { ...createSessionTab(id, editor.id, binding, editor.label, state), editorScope: editor.scope }
   }
   return { id, editorId: editor.id, editorScope: editor.scope, lastKnownTitle: editor.label, state,

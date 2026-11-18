@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, waitFor, within } from '@testing-library/re
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { WorkbenchEmptyArea } from '../src/foundation/WorkbenchEmptyArea.tsx'
 import { WorkbenchEditorPicker } from '../src/foundation/WorkbenchEditorPicker.tsx'
-import { selectableWorkbenchEditors } from '../src/foundation/editor-selection.ts'
+import { editorsAvailableForWorkbenchContext, selectableWorkbenchEditors } from '../src/foundation/editor-selection.ts'
 import type { WorkbenchEditorCatalogRow } from '../src/foundation/catalog.ts'
 import { WorkbenchFrame } from '../src/foundation/WorkbenchFrame.tsx'
 import { defaultLayout } from '../src/foundation/model.ts'
@@ -69,13 +69,28 @@ describe('Empty Area launch surface', () => {
     expect(view.getByRole('tab', { name: /当前内页：团队笔记/ }).querySelector('path')?.getAttribute('d')).toBe('M4 4h16v16H4Z')
     expect(selectSession).not.toHaveBeenCalled()
   })
-  it('adds an unbound Session editor without starting or selecting a Session', async () => {
+  it('does not offer Session editors before a project is configured', async () => {
     const { view, selectSession } = renderEmptyFrame()
-    fireEvent.click((await view.findAllByRole('button', { name: '添加内页：终端' }))[0]!)
-    await waitFor(() => expect(view.queryByRole('tab', { name: /当前内页：终端/ })).not.toBeNull())
-    expect(view.getByRole('button', { name: '选择此内页的对话' })).toBeDefined()
-    expect(view.queryByTestId('workbench.terminal')).toBeNull()
+    expect(view.queryByRole('button', { name: '添加内页：终端' })).toBeNull()
+    expect(view.queryByText('先设置项目')).toBeDefined()
+    expect(view.queryByText('当前只能添加不依赖对话的内页。设置项目后，才能开始新对话。')).toBeDefined()
     expect(selectSession).not.toHaveBeenCalled()
+  })
+  it('filters binding-dependent editors using the existing declaration contract', () => {
+    const rows: WorkbenchEditorCatalogRow[] = [
+      { id: 'notes', scope: 'root', label: '笔记', declaration: { editorId: 'notes', scope: 'root', label: '笔记', requiredBinding: 'none', runtime: { background: 'keep', collapsed: 'keep', reacquire: 'on-visible' }, state: { schemaVersion: 1, maxBytes: 1, restore: 'always', share: 'portable' } } },
+      { id: 'start', scope: 'root', label: '新建对话', declaration: { editorId: 'start', scope: 'root', label: '新建对话', requiredBinding: 'workspace', runtime: { background: 'keep', collapsed: 'keep', reacquire: 'on-visible' }, state: { schemaVersion: 1, maxBytes: 1, restore: 'always', share: 'portable' } } },
+      { id: 'conversation', scope: 'session', label: '对话', declaration: { editorId: 'conversation', scope: 'session', label: '对话', requiredBinding: 'session', runtime: { background: 'keep', collapsed: 'keep', reacquire: 'on-visible' }, state: { schemaVersion: 1, maxBytes: 1, restore: 'always', share: 'portable' } } },
+    ]
+    expect(editorsAvailableForWorkbenchContext(rows, { hasWorkspace: false, hasSession: false }).map(row => row.id)).toEqual(['notes'])
+    expect(editorsAvailableForWorkbenchContext(rows, { hasWorkspace: true, hasSession: false }).map(row => row.id)).toEqual(['notes', 'start'])
+    expect(editorsAvailableForWorkbenchContext(rows, { hasWorkspace: true, hasSession: true }).map(row => row.id)).toEqual(['notes', 'start', 'conversation'])
+  })
+  it('makes the project-free empty state actionable', () => {
+    const onSetProject = vi.fn()
+    const view = render(<WorkbenchEmptyArea editors={[editors[0]]} context={{ hasWorkspace: false, hasSession: false }} onSelect={vi.fn()} onBrowse={vi.fn()} onSetProject={onSetProject} triggerRef={createRef()} expanded={false} />)
+    fireEvent.click(view.getByRole('button', { name: '设置项目' }))
+    expect(onSetProject).toHaveBeenCalledOnce()
   })
   it('uses the live visible catalog, with SVG and readable names on every shortcut', () => {
     const onSelect = vi.fn(), onBrowse = vi.fn()
