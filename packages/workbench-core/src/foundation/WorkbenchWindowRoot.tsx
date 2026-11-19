@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import type { PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
 import css from './WorkbenchWindowRoot.module.css'
 import { requestWorkbenchClientExit } from '../client/floating-exit-guard.ts'
+import { useWorkbenchLocale, type WorkbenchLocaleSource } from './workbench-locale.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface SlotMap {
@@ -10,7 +11,8 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 }
 
 /** Dedicated composition, selected only inside a companion-owned document. */
-export function WorkbenchWindowRoot(props: PropsRenderSlots<'workbench.window.surface'>): ReactNode {
+export function WorkbenchWindowRoot(props: PropsRenderSlots<'workbench.window.surface'> & { locale?: WorkbenchLocaleSource | undefined }): ReactNode {
+  const { t } = useWorkbenchLocale(props.locale)
   const [reclaimState, setReclaimState] = useState<'requested' | 'reclaimed'>()
   useEffect(() => {
     const receive = (event: Event) => {
@@ -25,11 +27,11 @@ export function WorkbenchWindowRoot(props: PropsRenderSlots<'workbench.window.su
     {reclaimState === undefined ? null : <div className={css.lock} role="alertdialog" aria-modal="true" aria-live="polite" aria-busy={reclaimState === 'requested'}>
       <section className={css.message} data-reclaim-state={reclaimState}>
       {reclaimState === 'requested' ? <span className={css.spinner} aria-hidden="true" /> : null}
-      <h1>{reclaimState === 'reclaimed' ? '工作台已收回到 DSH 客户端' : '正在收回工作台'}</h1>
+      <h1>{reclaimState === 'reclaimed' ? t('home.workbenchControlReturnedToTheDshClient') : t('home.returningControlToTheDshClient')}</h1>
       <p>{reclaimState === 'reclaimed'
-        ? '此浏览器页面已锁定，工作台现在由 DSH 客户端控制。你可以关闭此页面。'
-        : '此页面已停止操作，正在等待 DSH 客户端确认。'}</p>
-      {reclaimState === 'reclaimed' ? <button type="button" onClick={() => { void requestWorkbenchClientExit().then(ok => { if (ok) window.close() }) }}>关闭此页面</button> : null}
+        ? t('home.theDshClientNowControlsTheWorkbench')
+        : t('home.thisPageIsLockedWhileTheDsh')}</p>
+      {reclaimState === 'reclaimed' ? <button type="button" onClick={() => { void requestWorkbenchClientExit().then(ok => { if (ok) window.close() }) }}>{t('home.closeThisPage')}</button> : null}
       </section>
     </div>}
   </div>

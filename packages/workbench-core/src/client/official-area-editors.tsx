@@ -1,3 +1,6 @@
+import type { WorkbenchMessageKey } from '../foundation/workbench-messages.ts'
+import type { WorkbenchTranslate } from '../foundation/workbench-locale.ts'
+import { useWorkbenchLocale } from '../foundation/workbench-locale.ts'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import type { Context } from '@deepseek-ai/cordis'
 import type { RemoteFailure } from '@deepseek-ai/dsh-api-remotes/client'
@@ -97,16 +100,18 @@ function sessionIdOf(owner: AreaProps): SessionId | undefined {
 }
 
 function MissingSession(): ReactNode {
+  const { t } = useWorkbenchLocale()
   return <section data-workbench-official-area-state="missing-session" style={{ padding: 20 }}>
-    <strong>此官方内页需要绑定 DSH Session</strong>
-    <p>请在此内页菜单中选择来源对话，然后重新打开此内页。</p>
+    <strong>{t('editor.thisBuiltInPageNeedsADsh')}</strong>
+    <p>{t('editor.chooseASourceConversationFromThePage')}</p>
   </section>
 }
 
-function NativeResourceUnavailable({ label }: { readonly label: string }): ReactNode {
+function NativeResourceUnavailable({ labelKey }: { readonly labelKey: WorkbenchMessageKey }): ReactNode {
+  const { t } = useWorkbenchLocale()
   return <section data-workbench-official-area-state="native-resource-unavailable" style={{ padding: 20 }}>
-    <strong>{label}</strong>
-    <p>DSH 原生内页需要对应资源后才能显示，请从原生对话中的入口打开。</p>
+    <strong>{t(labelKey)}</strong>
+    <p>{t('editor.openThisPageFromItsResourceIn')}</p>
   </section>
 }
 
@@ -171,6 +176,7 @@ function sortEntries(entries: readonly WorkspaceDirectoryEntry[]): WorkspaceDire
  * filesystem authority; this component only renders the bounded list result.
  */
 function WorkspaceFilesEditor({ owner, ctx }: { owner: AreaProps; ctx: Context }): ReactNode {
+  const { t } = useWorkbenchLocale()
   const clientSessions = getWorkbenchClientSessions(ctx)
   const sessionId = sessionIdOf(owner)
   const sessions = useSessionSnapshot(ctx)
@@ -204,7 +210,7 @@ function WorkspaceFilesEditor({ owner, ctx }: { owner: AreaProps; ctx: Context }
   useEffect(() => {
     if (sessionId === undefined) return
     if (owner.areaId === undefined || owner.areaClaim === undefined) {
-      setError('当前文件内页的对话绑定已失效，请重新绑定对话。')
+      setError(t('native.fileBindingGone'))
       return
     }
     let live = true
@@ -213,7 +219,7 @@ function WorkspaceFilesEditor({ owner, ctx }: { owner: AreaProps; ctx: Context }
     try {
       lease = retainWorkbenchArea(clientSessions, { sessionId, areaId: owner.areaId, claim: owner.areaClaim })
     } catch {
-      setError('当前文件内页的对话绑定已失效，请重新绑定对话。')
+      setError(t('native.fileBindingGone'))
       return
     }
     void lease.ready.then(reference => {
@@ -221,7 +227,7 @@ function WorkspaceFilesEditor({ owner, ctx }: { owner: AreaProps; ctx: Context }
       renderer = createWorkbenchNativeAreaSlotRenderer(ctx, sessionId, {}, { sessionReference: reference })
       setNativePreview(renderer)
     }).catch(() => {
-      if (live) setError('当前文件内页无法连接 DSH 文件预览，请重新绑定对话。')
+      if (live) setError(t('native.filePreviewOffline'))
     })
     return () => { live = false; closePreview(); renderer?.dispose(); lease.release() }
   }, [ctx, sessionId, owner.areaId, owner.areaClaim, closePreview])
@@ -263,12 +269,12 @@ function WorkspaceFilesEditor({ owner, ctx }: { owner: AreaProps; ctx: Context }
         persist(next, expandedRef.current)
         setError(undefined)
       } else {
-        const next = { ...levelsRef.current, [path]: { status: 'failed' as const, code: result.error.code, message: fileFailureMessage(result.error) } }
+        const next = { ...levelsRef.current, [path]: { status: 'failed' as const, code: result.error.code, message: fileFailureMessage(result.error, t) } }
         levelsRef.current = next
         setLevels(next)
       }
     } catch (reason) {
-      if (!controller.signal.aborted) setError('DSH 未能读取此目录，请检查工作区连接后重试。')
+      if (!controller.signal.aborted) setError(t('native.couldNotLoadDirectory'))
     }
   // The DSH remote face is stable for the lifetime of a ClientContext. Do not
   // include its getter result in this dependency list: alpha2 may project a
@@ -291,7 +297,7 @@ function WorkspaceFilesEditor({ owner, ctx }: { owner: AreaProps; ctx: Context }
   }, [scrollTop])
 
   if (sessionId === undefined) return <MissingSession />
-  if (cwd === undefined) return <section data-workbench-official-area-state="workspace-missing" style={{ padding: 20 }}>当前 Session 没有可用工作区。</section>
+  if (cwd === undefined) return <section data-workbench-official-area-state="workspace-missing" style={{ padding: 20 }}>{t('editor.thisConversationHasNoAvailableWorkspace')}</section>
 
   const toggle = (path: string): void => {
     const previous = expandedRef.current
@@ -311,19 +317,19 @@ function WorkspaceFilesEditor({ owner, ctx }: { owner: AreaProps; ctx: Context }
   const openAddress = (address: string): void => {
     if (sessionId === undefined) return
     if (nativePreview === undefined) {
-      setError('当前 Area 没有可用的 DSH 文件预览服务。')
+      setError(t('native.previewNotAvailable'))
       return
     }
     try {
       const parsed = parseFileAddress(address)
       if (parsed?.scope !== 'session' || parsed.sessionId !== sessionId) {
-        setError('此文件不属于当前 Area 绑定的 Session。')
+        setError(t('native.fileNotInConversation'))
         return
       }
       const claim = ctx.sidebarRightTabs.claim(address)
       const definition = ctx.sidebarRightTabs.get(claim.kind)
       if (definition === undefined) {
-        setError('DSH 没有为此文件注册可用的预览器。')
+        setError(t('native.previewerAbsent'))
         return
       }
       closePreview()
@@ -343,11 +349,11 @@ function WorkspaceFilesEditor({ owner, ctx }: { owner: AreaProps; ctx: Context }
           visible: true,
           signal,
           navigation: { address, params: undefined, revision: 0 },
-          actions: { close: closePreview, openResource: (next: string) => openAddress(next), openTab: () => { throw new Error('当前 Area 仅支持文件资源预览。') } },
+          actions: { close: closePreview, openResource: (next: string) => openAddress(next), openTab: () => { throw new Error(t('native.filesOnly')) } },
         },
       } as SidebarRightTabInfo })
     } catch {
-      setError('DSH 无法打开此文件预览，请检查工作区连接后重试。')
+      setError(t('native.couldNotPreview'))
     }
   }
   const openResource = (path: string): void => {
@@ -356,9 +362,9 @@ function WorkspaceFilesEditor({ owner, ctx }: { owner: AreaProps; ctx: Context }
   }
   const renderLevel = (path: string, depth: number): ReactNode => {
     const level = levels[path]
-    if (level === undefined || level.status === 'loading') return <div style={{ paddingLeft: depth * 18 }}><WorkbenchPageLoading label="文件目录" icon="folder" compact /></div>
+    if (level === undefined || level.status === 'loading') return <div style={{ paddingLeft: depth * 18 }}><WorkbenchPageLoading label={t('editor.fileTree')} icon="folder" compact /></div>
     if (level.status === 'failed') return <div role="alert" style={{ paddingLeft: depth * 18 + 12, color: 'var(--dsw-alias-danger, #b42318)' }}>{level.message}</div>
-    if (level.entries.length === 0) return <div style={{ paddingLeft: depth * 18 + 12, opacity: .65 }}>空目录</div>
+    if (level.entries.length === 0) return <div style={{ paddingLeft: depth * 18 + 12, opacity: .65 }}>{t('editor.emptyFolder')}</div>
     const rows = level.entries.map(entry => {
       const child = `${path.replace(/[/\\]+$/u, '')}/${entry.name}`
       const isOpen = expanded.includes(child)
@@ -371,33 +377,33 @@ function WorkspaceFilesEditor({ owner, ctx }: { owner: AreaProps; ctx: Context }
         {entry.type === 'directory' && isOpen ? renderLevel(child, depth + 1) : null}
       </div>
     })
-    return <>{rows}{level.truncated ? <div style={{ paddingLeft: depth * 18 + 12, opacity: .65 }}>列表已截断，点击刷新查看最新内容。</div> : null}</>
+    return <>{rows}{level.truncated ? <div style={{ paddingLeft: depth * 18 + 12, opacity: .65 }}>{t('editor.theListIsTruncatedRefreshToGet')}</div> : null}</>
   }
   const titleParts = pathPartsOf(cwd)
   return <section className={css.officialArea} data-workbench-official-area="workspace-files" style={{ position: 'relative', display: 'flex', minHeight: 0, height: '100%', flexDirection: 'column' }}>
     <header className={css.areaToolbar} style={{ display: 'flex', alignItems: 'center', gap: 4, height: 38, boxSizing: 'border-box', padding: '0 6px 0 16px', borderBottom: '.5px solid var(--dsw-alias-border-l3, color-mix(in srgb, currentColor 16%, transparent))' }}>
-      <strong aria-label="工作区路径" title={cwd} style={{ display: 'flex', minWidth: 0, flex: 1, marginRight: 12, overflow: 'hidden', whiteSpace: 'nowrap', fontSize: 12 }}><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', color: 'var(--dsw-alias-label-tertiary, currentColor)' }}>{titleParts.directory}</span><span style={{ flex: 'none', color: 'var(--dsw-alias-label-primary, currentColor)' }}>{titleParts.name}</span></strong>
-      <button className={css.toolbarButton} type="button" aria-label="刷新工作区文件" title="刷新" onClick={() => { levelsRef.current = {}; setLevels({}); persist({}, expandedRef.current); void load(cwd) }} style={{ width: 28, height: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flex: 'none', border: 0, borderRadius: 28, background: 'transparent', color: 'var(--dsw-alias-label-secondary, currentColor)', cursor: 'pointer' }}><IconRefreshOutlineMedium /></button>
+      <strong aria-label={t('editor.workspacePath')} title={cwd} style={{ display: 'flex', minWidth: 0, flex: 1, marginRight: 12, overflow: 'hidden', whiteSpace: 'nowrap', fontSize: 12 }}><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', color: 'var(--dsw-alias-label-tertiary, currentColor)' }}>{titleParts.directory}</span><span style={{ flex: 'none', color: 'var(--dsw-alias-label-primary, currentColor)' }}>{titleParts.name}</span></strong>
+      <button className={css.toolbarButton} type="button" aria-label={t('editor.refreshWorkspaceFiles')} title={t('editor.refresh')} onClick={() => { levelsRef.current = {}; setLevels({}); persist({}, expandedRef.current); void load(cwd) }} style={{ width: 28, height: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flex: 'none', border: 0, borderRadius: 28, background: 'transparent', color: 'var(--dsw-alias-label-secondary, currentColor)', cursor: 'pointer' }}><IconRefreshOutlineMedium /></button>
     </header>
-    {nativePreview === undefined && error === undefined && levels[cwd]?.status === 'ready' ? <WorkbenchPageLoading label="文件预览" icon="file-preview" compact /> : null}
-    <div ref={scrollRef} onScroll={event => { const next = event.currentTarget.scrollTop; setScrollTop(next); persistScrollAfterIdle(next) }} style={{ minHeight: 0, flex: 1, overflow: 'auto', padding: '8px 0 8px 8px', fontSize: 'var(--dsh-content-font-size-secondary, 13px)', lineHeight: 1.5 }}>{levels[cwd] === undefined || levels[cwd]?.status === 'loading' ? <WorkbenchPageLoading label="项目文件" icon="folder" /> : renderLevel(cwd, 0)}</div>
+    {nativePreview === undefined && error === undefined && levels[cwd]?.status === 'ready' ? <WorkbenchPageLoading label={t('editor.workbench.document-preview')} icon="file-preview" compact /> : null}
+    <div ref={scrollRef} onScroll={event => { const next = event.currentTarget.scrollTop; setScrollTop(next); persistScrollAfterIdle(next) }} style={{ minHeight: 0, flex: 1, overflow: 'auto', padding: '8px 0 8px 8px', fontSize: 'var(--dsh-content-font-size-secondary, 13px)', lineHeight: 1.5 }}>{levels[cwd] === undefined || levels[cwd]?.status === 'loading' ? <WorkbenchPageLoading label={t('editor.workbench.workspace-files')} icon="folder" /> : renderLevel(cwd, 0)}</div>
     {error === undefined ? null : <p role="alert" style={{ margin: 0, padding: '10px 12px', color: 'var(--dsw-alias-state-error-primary, #b42318)', background: 'color-mix(in srgb, var(--dsw-alias-state-error-primary, #b42318) 8%, transparent)' }}>{error}</p>}
     {preview !== undefined && nativePreview !== undefined ? <aside className={css.resourcePreview} data-workbench-resource-preview="" aria-label={preview.info.tab.title} style={{ position: 'absolute', inset: 0, zIndex: 2, display: 'flex', minHeight: 0, flexDirection: 'column', background: 'var(--dsw-alias-bg-base, Canvas)' }}>
       <header className={css.areaToolbar} style={{ display: 'flex', alignItems: 'center', minHeight: 38, padding: '0 12px', borderBottom: '.5px solid var(--dsw-alias-border-l3, color-mix(in srgb, currentColor 16%, transparent))' }}>
         <strong style={{ minWidth: 0, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{preview.info.tab.title}</strong>
-        <button className={css.toolbarButton} type="button" onClick={closePreview} aria-label="关闭文件预览" title="关闭文件预览">×</button>
+        <button className={css.toolbarButton} type="button" onClick={closePreview} aria-label={t('editor.closeFilePreview')} title={t('editor.closeFilePreview')}>×</button>
       </header>
       <div style={{ minHeight: 0, flex: 1 }}>{nativePreview.render('sidebar.right.pane.tab', {}, { entryKey: preview.implementationId, hookContext: () => preview.info })}</div>
     </aside> : null}
   </section>
 }
 
-function fileFailureMessage(failure: RemoteFailure): string {
+function fileFailureMessage(failure: RemoteFailure, t: WorkbenchTranslate): string {
   switch (failure.code) {
-    case 'workspace-file/not-found': return '找不到此目录。'
-    case 'workspace-file/outside-workspace': return '此路径位于工作区之外。'
-    case 'workspace-file/not-directory': return '此路径不是目录。'
-    default: return 'DSH 未能读取此目录，请稍后重试。'
+    case 'workspace-file/not-found': return t('native.folderNotFound')
+    case 'workspace-file/outside-workspace': return t('native.outsideWorkspace')
+    case 'workspace-file/not-directory': return t('native.notDirectory')
+    default: return t('native.readDirectoryFailed')
   }
 }
 
@@ -405,19 +411,19 @@ function useNativeTerminal(ctx: Context, sessionId: SessionId, key: string, term
   return useMemo(() => ctx.webTerminals.view(sessionId, key, `workbench://terminal/${key}`, terminalId, shellPath), [ctx.webTerminals, key, sessionId, shellPath, terminalId])
 }
 
-function terminalErrorMessage(state: TerminalViewState): string | undefined {
+function terminalErrorMessage(state: TerminalViewState, t: WorkbenchTranslate): string | undefined {
   if (state.phase === 'disconnected') return undefined
-  if (state.issue === 'missingTerminal') return '此终端已不存在，请新建终端。'
-  if (state.issue === 'inputFull') return '终端输入暂时繁忙，请稍后重试。'
-  if (state.issue === 'attachmentEnded') return '终端连接已结束，请重新连接。'
-  if (state.issue === 'invalidOutput') return '终端输出无效，无法继续显示。'
-  if (state.issue === 'terminalLimit') return '已达到终端数量上限。'
-  if (state.phase === 'failed' || state.info?.state === 'failed') return '终端暂时不可用，请重试。'
+  if (state.issue === 'missingTerminal') return t('native.terminalMissing')
+  if (state.issue === 'inputFull') return t('native.terminalInputBusy')
+  if (state.issue === 'attachmentEnded') return t('native.terminalEnded')
+  if (state.issue === 'invalidOutput') return t('native.invalidTerminalOutput')
+  if (state.issue === 'terminalLimit') return t('native.terminalLimit')
+  if (state.phase === 'failed' || state.info?.state === 'failed') return t('native.terminalUnavailable')
   return undefined
 }
 
 /** DSH's native xterm renderer over the Workbench-owned Area frame. */
-function NativeTerminalScreen({ model, state, theme, visible = true, focused = false, label = '终端' }: {
+function NativeTerminalScreen({ model, state, theme, visible = true, focused = false, label }: {
   readonly model: TerminalView
   readonly state: TerminalViewState
   readonly theme: ThemeSnapshot
@@ -425,6 +431,8 @@ function NativeTerminalScreen({ model, state, theme, visible = true, focused = f
   readonly focused?: boolean
   readonly label?: string
 }): ReactNode {
+  const { t } = useWorkbenchLocale()
+  const terminalLabel = label ?? t('editor.workbench.terminal')
   const element = useRef<HTMLDivElement>(null)
   const terminal = useRef<Terminal>()
   const fit = useRef<FitAddon>()
@@ -454,7 +462,6 @@ function NativeTerminalScreen({ model, state, theme, visible = true, focused = f
     palette.update(style.backgroundColor || '#111', style.color || '#fff')
     colors.current = palette
     cursor.current = observeDshTerminalCursor(xterm, node, () => palette.cursor)
-    xterm.textarea?.setAttribute('aria-label', label)
     terminal.current = xterm
     fit.current = addon
     lastRevision.current = 0
@@ -527,15 +534,19 @@ function NativeTerminalScreen({ model, state, theme, visible = true, focused = f
   }, [model, state.environment, state.info?.cols, state.info?.rows, state.writable, visible])
 
   useEffect(() => {
-    terminal.current?.textarea?.setAttribute('aria-label', label)
-    if (focused && state.writable) terminal.current?.focus()
-  }, [focused, label, state.writable])
+    terminal.current?.textarea?.setAttribute('aria-label', terminalLabel)
+  }, [model, terminalLabel])
 
-  return <div ref={element} data-workbench-terminal-screen role="textbox" aria-label={label} tabIndex={0} style={{ minWidth: 0, minHeight: 0, flex: 1, width: '100%', overflow: 'hidden', outline: 'none', cursor: 'text', color: 'var(--dsw-alias-label-primary, #fff)', background: 'var(--dsw-alias-bg-base, #111)', padding: 8 }} />
+  useEffect(() => {
+    if (focused && state.writable) terminal.current?.focus()
+  }, [model, focused, state.writable])
+
+  return <div ref={element} data-workbench-terminal-screen role="textbox" aria-label={terminalLabel} tabIndex={0} style={{ minWidth: 0, minHeight: 0, flex: 1, width: '100%', overflow: 'hidden', outline: 'none', cursor: 'text', color: 'var(--dsw-alias-label-primary, #fff)', background: 'var(--dsw-alias-bg-base, #111)', padding: 8 }} />
 }
 
 /** Area adapter over DSH's native ClientTerminals view and lifecycle. */
 function TerminalEditor({ owner, ctx }: { owner: AreaProps; ctx: Context }): ReactNode {
+  const { t } = useWorkbenchLocale()
   const sessionId = sessionIdOf(owner)
   const [missing, setMissing] = useState<string>()
   const [renaming, setRenaming] = useState(false)
@@ -550,7 +561,7 @@ function TerminalEditor({ owner, ctx }: { owner: AreaProps; ctx: Context }): Rea
   const [recovery, setRecovery] = useState<{ phase: 'closed' | 'loading' | 'ready' | 'failed'; value?: readonly WebTerminalInfo[]; message?: string }>({ phase: 'closed' })
   const key = owner.runtimeIdentity ?? owner.instanceId
   if (sessionId === undefined) return <MissingSession />
-  if (ctx.webTerminals === undefined) return <section data-workbench-official-area-state="terminal-unavailable" style={{ padding: 20 }}>当前 DSH 没有提供终端服务。</section>
+  if (ctx.webTerminals === undefined) return <section data-workbench-official-area-state="terminal-unavailable" style={{ padding: 20 }}>{t('editor.terminalServiceIsUnavailableOnThisDsh')}</section>
   const theme = useThemeSnapshot(ctx)
   const model = useNativeTerminal(ctx, sessionId, key, terminalId, shellPath)
   const state = useSyncExternalStore(model.state.subscribe, model.state.getSnapshot, model.state.getSnapshot)
@@ -576,24 +587,24 @@ function TerminalEditor({ owner, ctx }: { owner: AreaProps; ctx: Context }): Rea
   const rename = async (): Promise<void> => {
     const value = titleDraft.trim()
     if (value === '') return
-    try { await model.rename(value); setRenaming(false) } catch { setMissing('终端重命名失败，请稍后重试。') }
+    try { await model.rename(value); setRenaming(false) } catch { setMissing(t('native.terminalRenameFailed')) }
   }
-  const title = state.info?.title ?? state.title ?? '终端'
-  const error = terminalErrorMessage(state)
+  const title = state.info?.title ?? state.title ?? t('editor.workbench.terminal')
+  const error = terminalErrorMessage(state, t)
   const ended = state.info?.state === 'exited' || state.phase === 'closed'
   const retryable = !ended && (state.phase === 'failed' || state.phase === 'disconnected')
   const readOnly = state.phase === 'connected' && state.info?.state === 'running' && !state.writable
-  const phaseLabel = state.phase === 'idle' || state.phase === 'loading' ? '正在加载…'
-    : state.phase === 'creating' || state.phase === 'connecting' ? '正在连接…'
-      : state.phase === 'disconnected' ? '连接已断开'
-        : state.info?.state === 'exited' ? `已退出（${state.info.exitCode ?? '—'}）`
-          : state.info?.state === 'failed' ? '终端不可用'
-            : state.phase === 'closed' ? '已关闭' : state.phase === 'connected' ? '已连接' : ''
+  const phaseLabel = state.phase === 'idle' || state.phase === 'loading' ? t('native.loading')
+    : state.phase === 'creating' || state.phase === 'connecting' ? t('native.connecting')
+      : state.phase === 'disconnected' ? t('native.disconnected')
+        : state.info?.state === 'exited' ? t('native.exited', { code: state.info.exitCode ?? '—' })
+          : state.info?.state === 'failed' ? t('native.terminalShortUnavailable')
+            : state.phase === 'closed' ? t('native.closed') : state.phase === 'connected' ? t('native.connected') : ''
   const recover = (): void => {
     try {
-      if (state.info === undefined || state.phase === 'failed') void model.refresh().catch(() => setMissing('终端连接失败，请重试。'))
+      if (state.info === undefined || state.phase === 'failed') void model.refresh().catch(() => setMissing(t('native.terminalConnectFailed')))
       else model.connect()
-    } catch { setMissing('终端连接失败，请重试。') }
+    } catch { setMissing(t('native.terminalConnectFailed')) }
   }
   const replaceTerminal = (nextShell?: string, nextTerminalId?: WebTerminalId): void => {
     ctx.webTerminals.close(sessionId, key, `workbench://terminal/${key}`, state.info?.id)
@@ -604,38 +615,38 @@ function TerminalEditor({ owner, ctx }: { owner: AreaProps; ctx: Context }): Rea
   const shellItems = shellChoices.phase === 'ready'
     ? (shellChoices.value?.shells ?? []).map(shell => ({ id: shell.path, label: shell.name }))
     : shellChoices.phase === 'loading'
-      ? [{ id: 'loading', label: '正在读取 Shell…', disabled: true }]
+      ? [{ id: 'loading', label: t('native.loadingShells'), disabled: true }]
       : shellChoices.phase === 'failed'
-        ? [{ id: 'error', label: '读取 Shell 失败，请重试。', disabled: true }, { id: 'retry', label: '重试' }]
-        : [{ id: 'empty', label: '选择 Shell', disabled: true }]
+        ? [{ id: 'error', label: t('native.shellsFailed'), disabled: true }, { id: 'retry', label: t('action.retry') }]
+        : [{ id: 'empty', label: t('editor.chooseShell'), disabled: true }]
   const recoveryItems = recovery.phase === 'ready'
     ? (recovery.value ?? []).map(item => ({ id: item.id, label: `${item.title} · ${item.shell.name}` }))
     : recovery.phase === 'loading'
-      ? [{ id: 'loading', label: '正在读取可恢复终端…', disabled: true }]
+      ? [{ id: 'loading', label: t('native.loadingRecoverable'), disabled: true }]
       : recovery.phase === 'failed'
-        ? [{ id: 'error', label: '读取可恢复终端失败，请重试。', disabled: true }, { id: 'retry', label: '重试' }]
-        : [{ id: 'empty', label: '恢复已退出的终端', disabled: true }]
-  const newTerminal = <Button variant="primary" size={ended ? 'md' : 'sm'} icon={<IconPlusOutlineMedium />} onClick={() => replaceTerminal(shellChoices.value?.selectedShell)}>{ended ? '新建终端' : '重建终端'}</Button>
+        ? [{ id: 'error', label: t('native.recoverableFailed'), disabled: true }, { id: 'retry', label: t('action.retry') }]
+        : [{ id: 'empty', label: t('native.restoreTerminal'), disabled: true }]
+  const newTerminal = <Button variant="primary" size={ended ? 'md' : 'sm'} icon={<IconPlusOutlineMedium />} onClick={() => replaceTerminal(shellChoices.value?.selectedShell)}>{ended ? t('native.newTerminal') : t('native.recreateTerminal')}</Button>
   return <section className={css.officialArea} data-workbench-official-area="terminal" style={{ display: 'flex', minHeight: 0, height: '100%', flexDirection: 'column', background: 'var(--dsw-alias-bg-base, #111)', color: 'var(--dsw-alias-label-primary, #fff)', fontSize: 13 }}>
     <header className={css.areaToolbar} style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 38, padding: '0 10px', borderBottom: '1px solid var(--dsw-alias-border-l4, color-mix(in srgb, currentColor 20%, transparent))' }}>
-      {renaming ? <form className={css.toolbarForm} onSubmit={event => { event.preventDefault(); void rename() }} style={{ display: 'flex', gap: 6, minWidth: 0, flex: 1 }}><input autoFocus aria-label="终端名称" maxLength={120} value={titleDraft} onChange={event => setTitleDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Escape') { setRenaming(false); event.preventDefault() } }} style={{ minWidth: 48, width: 120, maxWidth: '100%', color: 'inherit', font: 'inherit', background: 'var(--dsw-alias-bg-l1, #222)', border: '.5px solid var(--dsw-alias-border-l3, #555)', borderRadius: 4, outline: 'none', padding: '2px 4px' }} /><Button variant="outline" size="sm" type="submit">保存</Button></form> : <button className={css.toolbarTitle} type="button" onDoubleClick={() => { setTitleDraft(title); setRenaming(true) }} title="双击重命名终端" style={{ border: 0, padding: 0, background: 'transparent', color: 'inherit', cursor: 'text', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{title}</button>}
+      {renaming ? <form className={css.toolbarForm} onSubmit={event => { event.preventDefault(); void rename() }} style={{ display: 'flex', gap: 6, minWidth: 0, flex: 1 }}><input autoFocus aria-label={t('editor.terminalName')} maxLength={120} value={titleDraft} onChange={event => setTitleDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Escape') { setRenaming(false); event.preventDefault() } }} style={{ minWidth: 48, width: 120, maxWidth: '100%', color: 'inherit', font: 'inherit', background: 'var(--dsw-alias-bg-l1, #222)', border: '.5px solid var(--dsw-alias-border-l3, #555)', borderRadius: 4, outline: 'none', padding: '2px 4px' }} /><Button variant="outline" size="sm" type="submit">{t('editor.save')}</Button></form> : <button className={css.toolbarTitle} type="button" onDoubleClick={() => { setTitleDraft(title); setRenaming(true) }} title={t('editor.doubleClickToRenameTerminal')} style={{ border: 0, padding: 0, background: 'transparent', color: 'inherit', cursor: 'text', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{title}</button>}
       <span role="status" style={{ opacity: .62, fontSize: 12, whiteSpace: 'nowrap' }}>{phaseLabel}</span>
       <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 4 }}>
-        <Menu open={shellMenuOpen} portal autoFocus align="end" items={shellItems} selectedId={shellChoices.value?.selectedShell} onClose={() => setShellMenuOpen(false)} onSelect={path => { if (path === 'retry') { setShellAttempt(value => value + 1); return } ctx.webTerminals.selectShell(path); setShellMenuOpen(false); replaceTerminal(path) }} anchor={<Button variant="ghost" size="sm" aria-label="选择 Shell" aria-haspopup="menu" aria-expanded={shellMenuOpen} onClick={() => { setShellChoices({ phase: 'loading' }); setShellMenuOpen(value => !value) }} icon={<IconChevronDownOutlineMedium />}>Shell</Button>} />
-        <Menu open={recoveryOpen} portal autoFocus align="end" items={recoveryItems} onClose={() => setRecoveryOpen(false)} onSelect={id => { if (id === 'retry') { setRecoveryAttempt(value => value + 1); return } setRecoveryOpen(false); replaceTerminal(undefined, id as WebTerminalId) }} anchor={<Button variant="ghost" size="sm" aria-label="恢复终端" aria-haspopup="menu" aria-expanded={recoveryOpen} onClick={() => setRecoveryOpen(value => !value)}>恢复</Button>} />
+        <Menu open={shellMenuOpen} portal autoFocus align="end" items={shellItems} selectedId={shellChoices.value?.selectedShell} onClose={() => setShellMenuOpen(false)} onSelect={path => { if (path === 'retry') { setShellAttempt(value => value + 1); return } ctx.webTerminals.selectShell(path); setShellMenuOpen(false); replaceTerminal(path) }} anchor={<Button variant="ghost" size="sm" aria-label={t('editor.chooseShell')} aria-haspopup="menu" aria-expanded={shellMenuOpen} onClick={() => { setShellChoices({ phase: 'loading' }); setShellMenuOpen(value => !value) }} icon={<IconChevronDownOutlineMedium />}>Shell</Button>} />
+        <Menu open={recoveryOpen} portal autoFocus align="end" items={recoveryItems} onClose={() => setRecoveryOpen(false)} onSelect={id => { if (id === 'retry') { setRecoveryAttempt(value => value + 1); return } setRecoveryOpen(false); replaceTerminal(undefined, id as WebTerminalId) }} anchor={<Button variant="ghost" size="sm" aria-label={t('editor.restoreTerminal')} aria-haspopup="menu" aria-expanded={recoveryOpen} onClick={() => setRecoveryOpen(value => !value)}>{t('home.restore')}</Button>} />
       </span>
-      {state.writable ? <span aria-label="终端可输入" title="终端可输入" style={{ opacity: .55 }}>●</span> : null}
+      {state.writable ? <span aria-label={t('editor.terminalInputReady')} title={t('editor.terminalInputReady')} style={{ opacity: .55 }}>●</span> : null}
     </header>
     {retryable || readOnly || ended ? <div role="status" style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 34, padding: '5px 12px', background: 'var(--dsw-alias-bg-l2, #1c1f24)', flexWrap: 'wrap' }}>
-      {readOnly ? <><span>此页面当前只读。</span><Button variant="outline" size="sm" onClick={() => model.connect()}>接管输入</Button></> : null}
-      {retryable ? <><span>{state.phase === 'disconnected' ? '连接已断开。' : '终端暂时不可用。'}</span><Button variant="outline" size="sm" onClick={recover}>{state.phase === 'disconnected' ? '重新连接' : '重试'}</Button></> : null}
-      {ended ? <><span>终端进程已结束。</span>{newTerminal}</> : null}
+      {readOnly ? <><span>{t('editor.thisPageIsReadOnly')}</span><Button variant="outline" size="sm" onClick={() => model.connect()}>{t('editor.takeOverInput')}</Button></> : null}
+      {retryable ? <><span>{state.phase === 'disconnected' ? t('native.disconnectedNotice') : t('editor.terminalTemporarilyUnavailable')}</span><Button variant="outline" size="sm" onClick={recover}>{state.phase === 'disconnected' ? t('native.reconnect') : t('action.retry')}</Button></> : null}
+      {ended ? <><span>{t('editor.theTerminalProcessHasEnded')}</span>{newTerminal}</> : null}
     </div> : null}
-    {closeFailures.length === 0 ? null : <div role="alert" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', background: 'var(--dsw-alias-bg-l2, #1c1f24)', overflowWrap: 'anywhere' }}><span>终端「{closeFailures[0]!.title}」未能结束，请重试清理。</span><Button variant="outline" size="sm" onClick={() => ctx.webTerminals.retryClose(closeFailures[0]!.id)}>重试清理</Button></div>}
+    {closeFailures.length === 0 ? null : <div role="alert" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', background: 'var(--dsw-alias-bg-l2, #1c1f24)', overflowWrap: 'anywhere' }}><span>{t('native.terminalCloseFailed', { name: closeFailures[0]!.title })}</span><Button variant="outline" size="sm" onClick={() => ctx.webTerminals.retryClose(closeFailures[0]!.id)}>{t('editor.retryCleanup')}</Button></div>}
     {state.info === undefined
       ? state.issue === 'missingTerminal'
-        ? <div data-workbench-official-area-state="terminal-missing" style={{ display: 'flex', flex: 1, minHeight: 0, flexDirection: 'column', justifyContent: 'center', alignItems: 'center', gap: 16, padding: 24, textAlign: 'center' }}><span aria-hidden="true" style={{ fontSize: 36 }}>›_</span><p role="alert" style={{ maxWidth: '28ch', lineHeight: 1.6, margin: 0 }}>此终端已不存在，请新建终端。</p>{newTerminal}</div>
-        : state.phase === 'failed' ? <div data-workbench-official-area-state="terminal-failed" role="alert" style={{ display: 'flex', flex: 1, minHeight: 0, alignItems: 'center', justifyContent: 'center', padding: 24, color: 'var(--dsw-alias-label-tertiary, currentColor)' }}>终端暂时不可用。</div> : <WorkbenchPageLoading label="终端" icon="terminal" />
+        ? <div data-workbench-official-area-state="terminal-missing" style={{ display: 'flex', flex: 1, minHeight: 0, flexDirection: 'column', justifyContent: 'center', alignItems: 'center', gap: 16, padding: 24, textAlign: 'center' }}><span aria-hidden="true" style={{ fontSize: 36 }}>›_</span><p role="alert" style={{ maxWidth: '28ch', lineHeight: 1.6, margin: 0 }}>{t('editor.thisTerminalNoLongerExistsStartA')}</p>{newTerminal}</div>
+        : state.phase === 'failed' ? <div data-workbench-official-area-state="terminal-failed" role="alert" style={{ display: 'flex', flex: 1, minHeight: 0, alignItems: 'center', justifyContent: 'center', padding: 24, color: 'var(--dsw-alias-label-tertiary, currentColor)' }}>{t('editor.terminalTemporarilyUnavailable')}</div> : <WorkbenchPageLoading label={t('editor.workbench.terminal')} icon="terminal" />
       : <NativeTerminalScreen
         model={model}
         state={state}
@@ -673,16 +684,18 @@ function restoreBrowserState(value: unknown) {
 
 /** Web-only preview adapter. An iframe load is not proof that a site rendered. */
 function BrowserPreview({ url, title, sandboxed, onLoad, onError }: { url: string; title: string; sandboxed: boolean; onLoad: () => void; onError: () => void }) {
+  const { t } = useWorkbenchLocale()
   const [ready, setReady] = useState(false)
-  return <WorkbenchPageTransition loading={!ready} label="网页" icon="browser"><iframe title={title} src={url} sandbox={sandboxed ? 'allow-scripts allow-forms allow-same-origin allow-popups allow-popups-to-escape-sandbox' : undefined} referrerPolicy="no-referrer" onLoad={() => { setReady(true); onLoad() }} onErrorCapture={() => { setReady(true); onError() }} style={{ minHeight: 0, flex: 1, width: '100%', border: 0, background: 'var(--dsw-alias-bg-base, transparent)' }} /></WorkbenchPageTransition>
+  return <WorkbenchPageTransition loading={!ready} label={t('editor.webPage')} icon="browser"><iframe title={title} src={url} sandbox={sandboxed ? 'allow-scripts allow-forms allow-same-origin allow-popups allow-popups-to-escape-sandbox' : undefined} referrerPolicy="no-referrer" onLoad={() => { setReady(true); onLoad() }} onErrorCapture={() => { setReady(true); onError() }} style={{ minHeight: 0, flex: 1, width: '100%', border: 0, background: 'var(--dsw-alias-bg-base, transparent)' }} /></WorkbenchPageTransition>
 }
 
 function BrowserEditor({ owner }: { owner: AreaProps }): ReactNode {
+  const { t } = useWorkbenchLocale()
   const [initial] = useState(() => restoreBrowserState(owner.state))
   const [history, setHistory] = useState<readonly string[]>(initial.history)
   const [index, setIndex] = useState(initial.index)
   const [draft, setDraft] = useState(initial.history[initial.index] ?? '')
-  const [message, setMessage] = useState<string | undefined>(initial.invalid ? '已保存的网址无效，未加载此页面。请重新输入不带凭据的 HTTP(S) 地址。' : undefined)
+  const [message, setMessage] = useState<string | undefined>(initial.invalid ? t('native.badSavedUrl') : undefined)
   const [revision, setRevision] = useState(0)
   const loadedRevision = useRef<number>()
   // Remounting loads the last controlled URL, not the previous unreadable URL.
@@ -698,7 +711,7 @@ function BrowserEditor({ owner }: { owner: AreaProps }): ReactNode {
   }
   const navigate = (): void => {
     const parsed = parseBrowserAddress(draft)
-    if (parsed === undefined) { setMessage('地址无效。只支持不带凭据的 HTTP(S) 地址，且不能打开 DSH 当前页面。'); return }
+    if (parsed === undefined) { setMessage(t('native.badUrl')); return }
     const nextUrl = parsed.toString()
     const current = history[index]
     const nextHistory = current === nextUrl ? history : [...history.slice(0, index + 1), nextUrl]
@@ -725,34 +738,39 @@ function BrowserEditor({ owner }: { owner: AreaProps }): ReactNode {
   }
   return <section className={css.officialArea} data-workbench-official-area="browser" data-workbench-browser-carrier="iframe" style={{ display: 'flex', minWidth: 0, minHeight: 0, height: '100%', flexDirection: 'column' }}>
     <form className={css.browserToolbar} onSubmit={event => { event.preventDefault(); navigate() }} style={{ display: 'flex', flexWrap: 'wrap', flexShrink: 0, alignItems: 'center', gap: 4, minHeight: 38, boxSizing: 'border-box', padding: '5px 6px', borderBottom: '.5px solid var(--dsw-alias-border-l3, color-mix(in srgb, currentColor 16%, transparent))', background: 'var(--dsw-alias-bg-base, transparent)' }}>
-      <button type="button" aria-label="后退" title="后退" disabled={unknown || index <= 0} onClick={() => go(-1)} style={{ width: 28, height: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flex: 'none', border: 0, borderRadius: 6, background: 'transparent', color: 'var(--dsw-alias-label-secondary, currentColor)', cursor: 'pointer' }}><IconChevronLeftOutlineMedium /></button>
-      <button type="button" aria-label="前进" title="前进" disabled={unknown || index >= history.length - 1} onClick={() => go(1)} style={{ width: 28, height: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flex: 'none', border: 0, borderRadius: 6, background: 'transparent', color: 'var(--dsw-alias-label-secondary, currentColor)', cursor: 'pointer' }}><IconChevronRightOutlineMedium /></button>
-      <button type="button" aria-label="刷新" title="刷新" disabled={url === undefined} onClick={reload} style={{ width: 28, height: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flex: 'none', border: 0, borderRadius: 6, background: 'transparent', color: 'var(--dsw-alias-label-secondary, currentColor)', cursor: 'pointer' }}><IconRefreshOutlineMedium /></button>
-      <div style={{ display: 'flex', minWidth: 0, flex: '1 1 120px', alignItems: 'center', gap: 4, position: 'relative' }}><input aria-label="浏览器地址" value={draft} onChange={event => setDraft(event.target.value)} placeholder="输入 HTTP(S) 地址" spellCheck={false} style={{ boxSizing: 'border-box', width: '100%', height: 28, minWidth: 0, padding: '0 9px', color: unknown ? 'var(--dsw-alias-label-tertiary, currentColor)' : 'var(--dsw-alias-label-primary, currentColor)', font: 'inherit', background: unknown ? 'var(--dsw-alias-bg-layer-2, #222)' : 'var(--dsw-alias-bg-layer-1, #222)', border: '.5px solid var(--dsw-alias-border-l2, #555)', borderRadius: 6, outline: 'none' }} /></div>
-      <button type="submit" aria-label="前往" title="前往" style={{ width: 28, height: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flex: 'none', border: 0, background: 'transparent', color: 'inherit', cursor: 'pointer' }}><IconChevronRightOutlineMedium /></button>
-      <button type="button" aria-label="在新标签页打开当前已知网址" title="在新标签页打开当前已知网址" disabled={url === undefined || unknown} onClick={() => { if (url !== undefined && typeof window !== 'undefined') window.open(url, '_blank', 'noopener,noreferrer') }} style={{ width: 28, height: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flex: 'none', border: 0, borderRadius: 6, background: 'transparent', color: 'var(--dsw-alias-label-secondary, currentColor)', cursor: 'pointer' }}><IconRightUpOutlineMedium /></button>
-      <button type="button" aria-label={sandboxed ? '关闭沙箱限制' : '恢复沙箱限制'} title={sandboxed ? '关闭沙箱限制' : '恢复沙箱限制'} disabled={url === undefined} aria-pressed={!sandboxed} onClick={() => { setSandboxed(value => !value); reload() }} style={{ width: 28, height: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flex: 'none', border: 0, borderRadius: 6, background: sandboxed ? 'transparent' : 'color-mix(in srgb, var(--dsw-alias-state-error-primary, #b42318) 10%, transparent)', color: sandboxed ? 'var(--dsw-alias-label-secondary, currentColor)' : 'var(--dsw-alias-state-error-primary, #b42318)', cursor: 'pointer' }}><IconShieldOutlineMedium /></button>
+      <button type="button" aria-label={t('editor.back3')} title={t('editor.back3')} disabled={unknown || index <= 0} onClick={() => go(-1)} style={{ width: 28, height: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flex: 'none', border: 0, borderRadius: 6, background: 'transparent', color: 'var(--dsw-alias-label-secondary, currentColor)', cursor: 'pointer' }}><IconChevronLeftOutlineMedium /></button>
+      <button type="button" aria-label={t('editor.forward')} title={t('editor.forward')} disabled={unknown || index >= history.length - 1} onClick={() => go(1)} style={{ width: 28, height: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flex: 'none', border: 0, borderRadius: 6, background: 'transparent', color: 'var(--dsw-alias-label-secondary, currentColor)', cursor: 'pointer' }}><IconChevronRightOutlineMedium /></button>
+      <button type="button" aria-label={t('editor.refresh')} title={t('editor.refresh')} disabled={url === undefined} onClick={reload} style={{ width: 28, height: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flex: 'none', border: 0, borderRadius: 6, background: 'transparent', color: 'var(--dsw-alias-label-secondary, currentColor)', cursor: 'pointer' }}><IconRefreshOutlineMedium /></button>
+      <div style={{ display: 'flex', minWidth: 0, flex: '1 1 120px', alignItems: 'center', gap: 4, position: 'relative' }}><input aria-label={t('editor.browserAddress')} value={draft} onChange={event => setDraft(event.target.value)} placeholder={t('editor.enterAnHttpSAddress')} spellCheck={false} style={{ boxSizing: 'border-box', width: '100%', height: 28, minWidth: 0, padding: '0 9px', color: unknown ? 'var(--dsw-alias-label-tertiary, currentColor)' : 'var(--dsw-alias-label-primary, currentColor)', font: 'inherit', background: unknown ? 'var(--dsw-alias-bg-layer-2, #222)' : 'var(--dsw-alias-bg-layer-1, #222)', border: '.5px solid var(--dsw-alias-border-l2, #555)', borderRadius: 6, outline: 'none' }} /></div>
+      <button type="submit" aria-label={t('editor.go')} title={t('editor.go')} style={{ width: 28, height: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flex: 'none', border: 0, background: 'transparent', color: 'inherit', cursor: 'pointer' }}><IconChevronRightOutlineMedium /></button>
+      <button type="button" aria-label={t('editor.openTheCurrentKnownAddressInA')} title={t('editor.openTheCurrentKnownAddressInA')} disabled={url === undefined || unknown} onClick={() => { if (url !== undefined && typeof window !== 'undefined') window.open(url, '_blank', 'noopener,noreferrer') }} style={{ width: 28, height: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flex: 'none', border: 0, borderRadius: 6, background: 'transparent', color: 'var(--dsw-alias-label-secondary, currentColor)', cursor: 'pointer' }}><IconRightUpOutlineMedium /></button>
+      <button type="button" aria-label={sandboxed ? t('native.disableSandbox') : t('native.restoreSandbox')} title={sandboxed ? t('native.disableSandbox') : t('native.restoreSandbox')} disabled={url === undefined} aria-pressed={!sandboxed} onClick={() => { setSandboxed(value => !value); reload() }} style={{ width: 28, height: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flex: 'none', border: 0, borderRadius: 6, background: sandboxed ? 'transparent' : 'color-mix(in srgb, var(--dsw-alias-state-error-primary, #b42318) 10%, transparent)', color: sandboxed ? 'var(--dsw-alias-label-secondary, currentColor)' : 'var(--dsw-alias-state-error-primary, #b42318)', cursor: 'pointer' }}><IconShieldOutlineMedium /></button>
     </form>
     <div className={css.browserNotice} data-workbench-browser-web-limit="" style={{ display: 'flex', flexWrap: 'wrap', flexShrink: 0, alignItems: 'center', gap: '4px 12px', padding: '6px 10px', fontSize: 12, lineHeight: 1.5, borderBottom: '.5px solid var(--dsw-alias-border-l3, transparent)', color: 'var(--dsw-alias-label-secondary, currentColor)' }}>
-      <span style={{ flex: '1 1 180px', minWidth: 0, overflowWrap: 'anywhere' }}>Web 网页预览：部分网站禁止内嵌。空白或拒绝连接时请在新标签页打开；关闭沙箱不能解除网站限制。</span>
-      {externalDraft === undefined ? null : <a aria-label="在新标签页打开地址栏网址" href={externalDraft} target="_blank" rel="noopener noreferrer" title="打开地址栏中输入的网址" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--dsw-alias-label-link, #2380b8)', overflowWrap: 'anywhere' }}><IconRightUpOutlineMedium />新标签页打开</a>}
+      <span style={{ flex: '1 1 180px', minWidth: 0, overflowWrap: 'anywhere' }}>{t('editor.someSitesBlockEmbeddingIfAPage')}</span>
+      {externalDraft === undefined ? null : <a aria-label={t('editor.openTheAddressInANewTab')} href={externalDraft} target="_blank" rel="noopener noreferrer" title={t('editor.openTheAddressEnteredInTheAddress')} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--dsw-alias-label-link, #2380b8)', overflowWrap: 'anywhere' }}><IconRightUpOutlineMedium />{t('editor.openInNewTab')}</a>}
     </div>
-    {!sandboxed ? <div role="status" style={{ padding: '6px 12px', background: 'color-mix(in srgb, var(--dsw-alias-state-warning-primary, #8a4b08) 8%, transparent)', color: 'var(--dsw-alias-state-warning-primary, #8a4b08)', fontSize: 11 }}>沙箱限制已关闭；页面可以导航顶层应用，并使用下载、模态对话框与输入锁定。</div> : null}
-    {loadFailed ? <div role="status" style={{ padding: '6px 12px', color: 'var(--dsw-alias-state-error-primary, #b42318)', background: 'color-mix(in srgb, var(--dsw-alias-state-error-primary, #b42318) 8%, transparent)', fontSize: 11 }}>页面报告加载失败，请检查地址或在新标签页打开。</div> : null}
+    {!sandboxed ? <div role="status" style={{ padding: '6px 12px', background: 'color-mix(in srgb, var(--dsw-alias-state-warning-primary, #8a4b08) 8%, transparent)', color: 'var(--dsw-alias-state-warning-primary, #8a4b08)', fontSize: 11 }}>{t('editor.sandboxingIsOffThisPageCanNavigate')}</div> : null}
+    {loadFailed ? <div role="status" style={{ padding: '6px 12px', color: 'var(--dsw-alias-state-error-primary, #b42318)', background: 'color-mix(in srgb, var(--dsw-alias-state-error-primary, #b42318) 8%, transparent)', fontSize: 11 }}>{t('editor.thePageCouldNotLoadCheckThe')}</div> : null}
     {message === undefined ? null : <p role="alert" style={{ overflowWrap: 'anywhere', margin: 0, padding: '10px 12px', color: 'var(--dsw-alias-state-error-primary, #b42318)', background: 'color-mix(in srgb, var(--dsw-alias-state-error-primary, #b42318) 8%, transparent)' }}>{message}</p>}
-    {paused ? <div data-workbench-official-area-state="browser-paused" role="status" style={{ display: 'flex', flex: 1, minHeight: 0, justifyContent: 'center', alignItems: 'center', padding: 24, color: 'var(--dsw-alias-label-tertiary, currentColor)', textAlign: 'center' }}>后台区域已暂停网页预览；激活此区域后恢复。</div> : url === undefined ? <div data-workbench-official-area-state="browser-empty" style={{ display: 'flex', flex: 1, minHeight: 0, justifyContent: 'center', alignItems: 'center', padding: 24, color: 'var(--dsw-alias-label-tertiary, currentColor)', textAlign: 'center' }}>输入 HTTP(S) 地址开始浏览</div> : <BrowserPreview key={`${url}:${String(revision)}:${sandboxed ? 'sandbox' : 'open'}`} title={currentHost === undefined ? 'Workbench 浏览器' : currentHost} url={url} sandboxed={sandboxed} onLoad={reportLoaded} onError={() => setLoadFailed(true)} />}
-    {unknown ? <p style={{ margin: 0, padding: '4px 10px', color: 'var(--dsw-alias-label-tertiary, currentColor)', fontSize: 11, borderTop: '.5px solid var(--dsw-alias-border-l3, transparent)' }}>页面已在 iframe 内跳转；当前 URL 无法由 DSH 读取。地址栏保留最后输入的网址；刷新会返回该地址。</p> : null}
+    {paused ? <div data-workbench-official-area-state="browser-paused" role="status" style={{ display: 'flex', flex: 1, minHeight: 0, justifyContent: 'center', alignItems: 'center', padding: 24, color: 'var(--dsw-alias-label-tertiary, currentColor)', textAlign: 'center' }}>{t('editor.previewPausedInTheBackgroundActivateThis')}</div> : url === undefined ? <div data-workbench-official-area-state="browser-empty" style={{ display: 'flex', flex: 1, minHeight: 0, justifyContent: 'center', alignItems: 'center', padding: 24, color: 'var(--dsw-alias-label-tertiary, currentColor)', textAlign: 'center' }}>{t('editor.enterAnHttpSAddressToBrowse')}</div> : <BrowserPreview key={`${url}:${String(revision)}:${sandboxed ? 'sandbox' : 'open'}`} title={currentHost === undefined ? t('native.browserTitle') : currentHost} url={url} sandboxed={sandboxed} onLoad={reportLoaded} onError={() => setLoadFailed(true)} />}
+    {unknown ? <p style={{ margin: 0, padding: '4px 10px', color: 'var(--dsw-alias-label-tertiary, currentColor)', fontSize: 11, borderTop: '.5px solid var(--dsw-alias-border-l3, transparent)' }}>{t('editor.theEmbeddedPageNavigatedDshCannotRead')}</p> : null}
   </section>
 }
 
-function resourcePreviewTitle(owner: AreaProps): string {
+function DocumentPreviewUnavailable(): ReactNode {
+  const { t } = useWorkbenchLocale()
+  return <section data-workbench-official-area-state="document-preview-unavailable" style={{ padding: 20 }}>{t('native.documentPreviewUnavailable')}</section>
+}
+
+function resourcePreviewTitle(owner: AreaProps): string | undefined {
   const state = owner.state !== null && typeof owner.state === 'object' && !Array.isArray(owner.state)
     ? owner.state as { readonly resourceAddress?: unknown }
     : undefined
   const address = typeof state?.resourceAddress === 'string' ? state.resourceAddress : undefined
-  if (address === undefined || address.length === 0) return '文件预览'
+  if (address === undefined || address.length === 0) return undefined
   const name = address.slice(address.lastIndexOf('/') + 1)
-  if (name.length === 0) return '文件预览'
+  if (name.length === 0) return undefined
   try { return decodeURIComponent(name) } catch { return name }
 }
 
@@ -780,7 +798,6 @@ export function createWorkbenchOfficialAreaEditors(ctx: Context): WorkbenchOffic
       owner={owner}
       ctx={ctx}
       kind="terminal"
-      title="终端"
       entryKey={NATIVE_TAB_ENTRY_KEYS.terminal}
       fallback={<TerminalEditor owner={owner} ctx={ctx} />}
     />,
@@ -789,7 +806,6 @@ export function createWorkbenchOfficialAreaEditors(ctx: Context): WorkbenchOffic
       owner={owner}
       ctx={ctx}
       kind="browser"
-      title="浏览器"
       entryKey={NATIVE_TAB_ENTRY_KEYS.browser}
       fallback={<BrowserEditor owner={owner} />}
     />,
@@ -800,13 +816,13 @@ export function createWorkbenchOfficialAreaEditors(ctx: Context): WorkbenchOffic
       kind="documentpreview"
       title={resourcePreviewTitle(owner)}
       entryKey={NATIVE_TAB_ENTRY_KEYS.documentPreview}
-      fallback={<section data-workbench-official-area-state="document-preview-unavailable" style={{ padding: 20 }}>当前宿主没有可用的 DSH 原生文件预览。</section>}
+      fallback={<DocumentPreviewUnavailable />}
     />,
-    changesReview: owner => <NativeSidebarAreaEditor key={`${owner.instanceId}:${owner.sessionId}:${owner.runtimeIdentity ? owner.bindingGeneration : owner.areaClaim}`} owner={owner} ctx={ctx} kind="changes-review" title="变更审查" entryKey={NATIVE_TAB_ENTRY_KEYS.changesReview} fallback={<NativeResourceUnavailable label="变更审查" />} />,
-    plan: owner => <NativeSidebarAreaEditor key={`${owner.instanceId}:${owner.sessionId}:${owner.runtimeIdentity ? owner.bindingGeneration : owner.areaClaim}`} owner={owner} ctx={ctx} kind="plan" title="计划" entryKey={NATIVE_TAB_ENTRY_KEYS.plan} fallback={<NativeResourceUnavailable label="计划" />} />,
-    scheduleTask: owner => <NativeSidebarAreaEditor key={`${owner.instanceId}:${owner.sessionId}:${owner.runtimeIdentity ? owner.bindingGeneration : owner.areaClaim}`} owner={owner} ctx={ctx} kind="schedule-task" title="计划任务" entryKey={NATIVE_TAB_ENTRY_KEYS.scheduleTask} fallback={<NativeResourceUnavailable label="计划任务" />} />,
-    guide: owner => <NativeSidebarAreaEditor key={`${owner.instanceId}:${owner.sessionId}:${owner.runtimeIdentity ? owner.bindingGeneration : owner.areaClaim}`} owner={owner} ctx={ctx} kind="guide" title="功能指南" entryKey={NATIVE_TAB_ENTRY_KEYS.guide} fallback={<NativeResourceUnavailable label="功能指南" />} />,
-    subagentChat: owner => <NativeSidebarAreaEditor key={`${owner.instanceId}:${owner.sessionId}:${owner.runtimeIdentity ? owner.bindingGeneration : owner.areaClaim}`} owner={owner} ctx={ctx} kind="subagent-chat" title="子 Agent 对话" entryKey={NATIVE_TAB_ENTRY_KEYS.subagentChat} fallback={<NativeResourceUnavailable label="子 Agent 对话" />} />,
+    changesReview: owner => <NativeSidebarAreaEditor key={`${owner.instanceId}:${owner.sessionId}:${owner.runtimeIdentity ? owner.bindingGeneration : owner.areaClaim}`} owner={owner} ctx={ctx} kind="changes-review" entryKey={NATIVE_TAB_ENTRY_KEYS.changesReview} fallback={<NativeResourceUnavailable labelKey="editor.workbench.changes-review" />} />,
+    plan: owner => <NativeSidebarAreaEditor key={`${owner.instanceId}:${owner.sessionId}:${owner.runtimeIdentity ? owner.bindingGeneration : owner.areaClaim}`} owner={owner} ctx={ctx} kind="plan" entryKey={NATIVE_TAB_ENTRY_KEYS.plan} fallback={<NativeResourceUnavailable labelKey="editor.workbench.plan" />} />,
+    scheduleTask: owner => <NativeSidebarAreaEditor key={`${owner.instanceId}:${owner.sessionId}:${owner.runtimeIdentity ? owner.bindingGeneration : owner.areaClaim}`} owner={owner} ctx={ctx} kind="schedule-task" entryKey={NATIVE_TAB_ENTRY_KEYS.scheduleTask} fallback={<NativeResourceUnavailable labelKey="editor.workbench.schedule-task" />} />,
+    guide: owner => <NativeSidebarAreaEditor key={`${owner.instanceId}:${owner.sessionId}:${owner.runtimeIdentity ? owner.bindingGeneration : owner.areaClaim}`} owner={owner} ctx={ctx} kind="guide" entryKey={NATIVE_TAB_ENTRY_KEYS.guide} fallback={<NativeResourceUnavailable labelKey="editor.workbench.guide" />} />,
+    subagentChat: owner => <NativeSidebarAreaEditor key={`${owner.instanceId}:${owner.sessionId}:${owner.runtimeIdentity ? owner.bindingGeneration : owner.areaClaim}`} owner={owner} ctx={ctx} kind="subagent-chat" entryKey={NATIVE_TAB_ENTRY_KEYS.subagentChat} fallback={<NativeResourceUnavailable labelKey="editor.workbench.subagent-chat" />} />,
     start: conversation.start as unknown as (owner: AreaProps) => ReactNode,
     conversation: conversation.conversation as unknown as (owner: AreaProps) => ReactNode,
     trajectory: conversation.trajectory as unknown as (owner: AreaProps) => ReactNode,

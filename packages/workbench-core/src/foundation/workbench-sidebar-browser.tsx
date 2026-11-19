@@ -1,3 +1,4 @@
+import { useWorkbenchLocale, type WorkbenchTranslate } from './workbench-locale.ts'
 import { useEffect, useMemo, useRef, useSyncExternalStore, type ReactNode } from 'react'
 import type { ContextMenuButtonProps, ContextMenus } from '@deepseek-ai/dsh-client-ui-context-menu/client'
 import type { HostObservable } from '@deepseek-ai/dsh-client-ui-slots'
@@ -14,7 +15,7 @@ import type { UseSectionScroller } from './workbench-sidebar/generated/upstream/
 import { WorkspaceBrowser } from './workbench-sidebar/generated/upstream/ui-workspace/WorkspaceBrowser.tsx'
 import { createWorkspaceViewStore } from './workbench-sidebar/generated/upstream/ui-workspace/stores.ts'
 import { createWorkspaceShortcutControls } from './workbench-sidebar/generated/upstream/ui-workspace/shortcuts.ts'
-import { zh as workspaceZh } from './workbench-sidebar/generated/upstream/ui-workspace/locales.ts'
+import { en as workspaceEn, zh as workspaceZh } from './workbench-sidebar/generated/upstream/ui-workspace/locales.ts'
 import type { DirectoryFlowOwnerProps, WorkspaceBrowserProps } from './workbench-sidebar/generated/upstream/ui-workspace/contract/slots.ts'
 /** Structural routing face supplied by Core.  Shell deliberately does not
  * import Workbench's repository/session-placement implementation. */
@@ -73,17 +74,13 @@ const EMPTY_WORKSPACE_SHORTCUTS: WorkspaceShortcutState = {
   renameTarget: null,
 }
 
-const workspaceLabels: Readonly<Record<string, string>> = {
-  ...workspaceZh,
-  copy: '复制',
-  search: '搜索',
-  close: '关闭',
-  cancel: '取消',
-}
-
-/** Include the common labels normally supplied by the official locale seat. */
-function workspaceTranslate(key: string, vars?: Record<string, string | number>): string {
-  const value = workspaceLabels[key] ?? key
+function workspaceTranslate(t: WorkbenchTranslate, labels: Readonly<Record<string, string>>, key: string, vars?: Record<string, string | number>): string {
+  const value = key === 'workspace.defaultName' ? t('sidebar.defaultWorkspace')
+    : key === 'copy' ? t('sidebar.copy')
+    : key === 'search' ? t('sidebar.search')
+    : key === 'close' ? t('action.close')
+    : key === 'cancel' ? t('action.cancel')
+    : labels[key] ?? key
   if (vars === undefined) return value
   return value.replace(/\{(\w+)\}/g, (_match, name: string) => String(vars[name] ?? `{${name}}`))
 }
@@ -157,6 +154,9 @@ export function WorkbenchSidebarBrowser({
   useSessionStatus, useSessionRetainInfo, useSessionAccess, useWorkspaceAccess, usePanelInfo, useRemoteAccess, useContextMenu, useResource,
   useSectionScroller,
 }: WorkbenchSidebarBrowserProps): ReactNode {
+  const { t, language } = useWorkbenchLocale()
+  const labels = language === undefined || language === 'zh' ? workspaceZh : workspaceEn
+  const translate = useMemo(() => workspaceTranslate.bind(undefined, t, labels), [t, labels])
   const routeSnapshot = useSyncExternalStore(routing.subscribe, routing.getSnapshot, routing.getSnapshot)
   const storeRef = useRef<ReturnType<ReturnType<typeof createWorkspaceViewStore>['create']>>()
   if (storeRef.current === undefined) storeRef.current = createWorkspaceViewStore().create('workbench-mode')
@@ -295,7 +295,7 @@ export function WorkbenchSidebarBrowser({
     useSectionScroller,
     renderFactorySlot,
     renderSlot,
-    t: workspaceTranslate as never,
+    t: translate,
   } as unknown as WorkspaceBrowserProps
   return <WorkspaceBrowser {...browserProps} />
 }

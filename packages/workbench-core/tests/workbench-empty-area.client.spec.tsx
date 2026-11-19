@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React, { createRef } from 'react'
-import { cleanup, fireEvent, render, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { WorkbenchEmptyArea } from '../src/foundation/WorkbenchEmptyArea.tsx'
 import { WorkbenchEditorPicker } from '../src/foundation/WorkbenchEditorPicker.tsx'
@@ -8,6 +8,8 @@ import { editorsAvailableForWorkbenchContext, selectableWorkbenchEditors } from 
 import type { WorkbenchEditorCatalogRow } from '../src/foundation/catalog.ts'
 import { WorkbenchFrame } from '../src/foundation/WorkbenchFrame.tsx'
 import { defaultLayout } from '../src/foundation/model.ts'
+import { WorkbenchLocaleContext } from '../src/foundation/workbench-locale.ts'
+import { createTestWorkbenchLocale } from './workbench-locale-fixture.ts'
 afterEach(cleanup)
 const editors: WorkbenchEditorCatalogRow[] = [
   { id: 'private.notes', scope: 'root', label: '团队笔记', iconSvg: { version: 1, paths: ['M4 4h16v16H4Z', 'M8 8h8'] } },
@@ -15,14 +17,14 @@ const editors: WorkbenchEditorCatalogRow[] = [
   { id: 'private.hidden', scope: 'root', label: '已隐藏' },
   { id: 'workbench.plan', scope: 'session', label: '资源专用计划' },
 ]
-function renderEmptyFrame() {
+function renderEmptyFrame(locale?: ReturnType<typeof createTestWorkbenchLocale>) {
   const layout = defaultLayout()
   layout.root = { kind: 'split', id: 'two-areas', axis: 'horizontal', ratio: .5, first: layout.root, second: { kind: 'group', id: 'other-area', tabs: [] } }
   const snapshot = { status: 'ready', revision: 1, writable: true, mode: 'host', value: { version: 2, layouts: { ungrouped: layout }, invalidLayouts: {}, sessionMarkers: {} } }
   const sessions = { ids: [], byId: {}, phase: 'ready' }
   const workspaces = { items: [], archivedSessionIds: [], phase: 'ready' }
   const selectSession = vi.fn(), renderSlot = vi.fn((_name: string, _owner: unknown, options: { only?: string }) => <div data-testid={options.only} />)
-  const view = render(<WorkbenchFrame {...{
+  const view = render(<WorkbenchLocaleContext.Provider value={locale}><WorkbenchFrame {...{
     renderSidebar: () => null, renderSlot, projectNeutral: true,
     useSessions: (select: (value: unknown) => unknown) => select(sessions),
     useWorkspaces: (select: (value: unknown) => unknown) => select(workspaces),
@@ -30,10 +32,41 @@ function renderEmptyFrame() {
     settings: { getSnapshot: () => snapshot, subscribe: () => () => {}, patch: async () => ({ status: 'committed', revision: 2 }) },
     editorCatalog: { getSnapshot: () => editors, subscribe: () => () => {} },
     sidebarCompatibility: { getSnapshot: () => undefined, subscribe: () => () => {} },
-  } as never} />)
+  } as never} /></WorkbenchLocaleContext.Provider>)
   return { view, selectSession, renderSlot }
 }
 describe('Empty Area launch surface', () => {
+  it('preserves an open page picker and custom page names across language changes', async () => {
+    const locale = createTestWorkbenchLocale()
+    const { view } = renderEmptyFrame(locale)
+    const area = within(view.getAllByRole('tablist', { name: '区域内页' })[0]!.closest('section')!)
+    fireEvent.click(area.getByRole('button', { name: '添加内页标签' }))
+    const search = view.getByRole<HTMLInputElement>('searchbox', { name: '搜索内页' })
+    fireEvent.change(search, { target: { value: '团队' } })
+    act(() => locale.setLocale('en'))
+    expect(view.getByRole('searchbox', { name: 'Search pages' })).toBe(search)
+    expect(search.value).toBe('团队')
+    fireEvent.click(view.getByRole('menuitem', { name: 'Add 团队笔记 as a tab' }))
+    await view.findByRole('tab', { name: 'Current page: 团队笔记. Open page actions' })
+    act(() => locale.setLocale('zh'))
+    expect(view.getByRole('tab', { name: /当前内页：团队笔记/ })).toBeTruthy()
+  })
+
+  it('offers the new conversation shortcut and searches its English name after project setup', () => {
+    const locale = createTestWorkbenchLocale()
+    const start = { id: 'workbench.conversation.start', label: '新建对话', scope: 'root' } as const
+    const onSelect = vi.fn()
+    const ready = render(<WorkbenchLocaleContext.Provider value={locale}>
+      <WorkbenchEmptyArea editors={[start]} context={{ hasWorkspace: true, hasSession: false }} onSelect={onSelect} onBrowse={vi.fn()} triggerRef={createRef()} expanded={false} />
+      <WorkbenchEditorPicker editors={[start]} mode="add" onSelect={onSelect} />
+    </WorkbenchLocaleContext.Provider>)
+    act(() => locale.setLocale('en'))
+    expect(ready.getByText('Project ready')).toBeTruthy()
+    expect(ready.getByRole('button', { name: 'Add page: New conversation' })).toBeTruthy()
+    fireEvent.change(ready.getByRole('searchbox', { name: 'Search pages' }), { target: { value: 'new conversation' } })
+    fireEvent.click(ready.getByRole('menuitem', { name: 'Add New conversation as a tab' }))
+    expect(onSelect).toHaveBeenCalledExactlyOnceWith(start)
+  })
   it('folds category folders, searches inside folded folders, and restores their state after searching and reopening', () => {
     const preferences = { folders: [{ id: 'picker-test-notes', name: '内容创作' }], assignments: { 'private.notes': 'picker-test-notes' } }
     const onSelect = vi.fn()
@@ -88,8 +121,14 @@ describe('Empty Area launch surface', () => {
   })
   it('makes the project-free empty state actionable', () => {
     const onSetProject = vi.fn()
-    const view = render(<WorkbenchEmptyArea editors={[editors[0]]} context={{ hasWorkspace: false, hasSession: false }} onSelect={vi.fn()} onBrowse={vi.fn()} onSetProject={onSetProject} triggerRef={createRef()} expanded={false} />)
-    fireEvent.click(view.getByRole('button', { name: '设置项目' }))
+    const locale = createTestWorkbenchLocale()
+    const view = render(<WorkbenchLocaleContext.Provider value={locale}>
+      <WorkbenchEmptyArea editors={[editors[0]]} context={{ hasWorkspace: false, hasSession: false }} onSelect={vi.fn()} onBrowse={vi.fn()} onSetProject={onSetProject} triggerRef={createRef()} expanded={false} />
+    </WorkbenchLocaleContext.Provider>)
+    expect(view.getByRole('heading', { name: '先设置项目' })).toBeTruthy()
+    act(() => locale.setLocale('en'))
+    expect(view.getByRole('heading', { name: 'Set up a project first' })).toBeTruthy()
+    fireEvent.click(view.getByRole('button', { name: 'Set up project' }))
     expect(onSetProject).toHaveBeenCalledOnce()
   })
   it('uses the live visible catalog, with SVG and readable names on every shortcut', () => {

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { WorkbenchPageLoading, WorkbenchPageTransition } from '../foundation/WorkbenchPageLoading.tsx'
+import { useWorkbenchLocale } from '../foundation/workbench-locale.ts'
 import type { Context } from '@deepseek-ai/cordis'
 import type { SessionReference } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
@@ -23,7 +24,7 @@ type NativeOwner = WorkbenchEditorOwnerProps & PropsRenderFactories & {
 type StartPlacement =
   | { readonly phase: 'idle' }
   | { readonly phase: 'placing'; readonly workspaceId: string }
-  | { readonly phase: 'failed'; readonly workspaceId: string; readonly message: string }
+  | { readonly phase: 'failed'; readonly workspaceId: string; readonly message: 'start.alreadyBound' | 'start.stale' | 'start.failed' }
 
 const TrajectoryView: FactoryLocalComponent<'conversation.content', 'views'> = ({ renderSlot }) =>
   renderSlot('conversation.session', { view: 'trajectory' })
@@ -177,6 +178,7 @@ function CollaborationPresenceBar({ ctx, owner, binding, scopeRef, client, sessi
   session?: SessionSnapshot
   conversation?: ConversationSnapshot
 }) {
+  const { t } = useWorkbenchLocale()
   const snapshot = useSyncExternalStore(
     client.subscribe,
     client.getSnapshot,
@@ -306,7 +308,7 @@ function CollaborationPresenceBar({ ctx, owner, binding, scopeRef, client, sessi
     {remote.map(presence => {
       const location = [presence.areaId, presence.editorId, presence.sessionId].filter(Boolean).join(' / ')
        return <div key={presence.participantId} data-workbench-collaboration-participant={presence.participantId}>
-         <strong>{presence.displayName || (presence.role === 'owner' ? '房主' : '协作者')} · {presence.intent === 'editing' ? '正在编辑' : presence.intent === 'sending' ? '正在发送' : presence.intent === 'running' ? '正在执行任务' : presence.intent === 'recovering' ? '正在恢复' : '正在查看'}</strong>
+         <strong>{presence.displayName || (presence.role === 'owner' ? t('presence.owner') : t('presence.collaborator'))} · {presence.intent === 'editing' ? t('presence.editing') : presence.intent === 'sending' ? t('presence.sending') : presence.intent === 'running' ? t('presence.running') : presence.intent === 'recovering' ? t('presence.recovering') : t('presence.viewing')}</strong>
         {location ? <span> · {location}</span> : null}
       </div>
     })}
@@ -360,15 +362,16 @@ function useSummaryBlank(ctx: Context, sessionId: string | undefined): boolean |
 export function createWorkbenchNativeConversationEditors(ctx: Context) {
   const sessions = getWorkbenchClientSessions(ctx)
   function useDraftCloseGuard(owner: NativeOwner, binding?: SessionReference['binding']) {
+    const { t } = useWorkbenchLocale()
     useEffect(() => owner.registerCloseGuard?.(() => {
       if (!binding) return true
       try {
         const input = conversationInputState(ctx, binding)?.getSnapshot()
         if (!input) return false
         const draft = typeof input?.draft === 'string' ? input.draft.trim() : ''
-        return !draft && !input?.attachmentIds?.length || globalThis.confirm('此对话还有未发��的文字或附件，确定关闭这个内页吗？')
+        return !draft && !input?.attachmentIds?.length || globalThis.confirm(t('start.closeDraft'))
       } catch { return false }
-    }), [owner.registerCloseGuard, binding])
+    }), [owner.registerCloseGuard, binding, t])
   }
   /**
    * React StrictMode replays passive effects without replacing the committed
@@ -424,6 +427,7 @@ export function createWorkbenchNativeConversationEditors(ctx: Context) {
     renderer: ReturnType<typeof createWorkbenchNativeAreaSlotRenderer>
     placement: StartPlacement
   }) {
+    const { t } = useWorkbenchLocale()
     const presentation = conversationPresentationOf(undefined, undefined, undefined, undefined)
     const content = renderer.renderFactory('conversation.content', {
       variant: 'embedded', phase: presentation.phase, hero: presentation.hero,
@@ -435,9 +439,9 @@ export function createWorkbenchNativeConversationEditors(ctx: Context) {
       aria-busy={placement.phase === 'placing' || undefined}
       style={{ display: 'flex', minHeight: 0, height: '100%', flexDirection: 'column' }}
     >
-      <WorkbenchPageTransition loading={placement.phase === 'placing'} label="对话" icon="message">{content}</WorkbenchPageTransition>
+      <WorkbenchPageTransition loading={placement.phase === 'placing'} label={t('editor.workbench.conversation')} icon="message">{content}</WorkbenchPageTransition>
       {placement.phase === 'failed' ? <p role="alert" style={{ margin: 0, padding: '8px 12px', color: 'var(--dsw-alias-state-error-primary, #b42318)' }}>
-        {placement.message}
+        {t(placement.message)}
       </p> : null}
     </section>
   }
@@ -448,6 +452,7 @@ export function createWorkbenchNativeConversationEditors(ctx: Context) {
     renderer: ReturnType<typeof createWorkbenchNativeAreaSlotRenderer>
     placement: StartPlacement
   }) {
+    const { t } = useWorkbenchLocale()
     useDraftCloseGuard(owner, reference.binding)
     const session = reference.binding.session
     const subscribe = useCallback((listener: () => void) => session.subscribe(listener), [session])
@@ -499,14 +504,15 @@ export function createWorkbenchNativeConversationEditors(ctx: Context) {
       aria-busy={placement.phase === 'placing' || undefined}
       style={{ display: 'flex', minHeight: 0, height: '100%', flexDirection: 'column' }}
     >
-      <WorkbenchPageTransition loading={placement.phase === 'placing' || presentation.phase === 'settling'} label="对话" icon="message">{content}</WorkbenchPageTransition>
+      <WorkbenchPageTransition loading={placement.phase === 'placing' || presentation.phase === 'settling'} label={t('editor.workbench.conversation')} icon="message">{content}</WorkbenchPageTransition>
       {placement.phase === 'failed' ? <p role="alert" style={{ margin: 0, padding: '8px 12px', color: 'var(--dsw-alias-state-error-primary, #b42318)' }}>
-        {placement.message}
+        {t(placement.message)}
       </p> : null}
     </section>
   }
 
   function Start(suppliedOwner: NativeOwner) {
+    const { t } = useWorkbenchLocale()
     const owner = suppliedOwner.runtimeIdentity ? { ...suppliedOwner, areaId: suppliedOwner.runtimeIdentity, areaClaim: suppliedOwner.runtimeIdentity + ':' + (suppliedOwner.bindingGeneration ?? 0) } : suppliedOwner
     const placementRef = useRef<Promise<void>>()
     const mountedRef = useRef(true)
@@ -573,10 +579,10 @@ export function createWorkbenchNativeConversationEditors(ctx: Context) {
         if (mountedRef.current) setPlacement({
           phase: 'failed', workspaceId,
           message: code === 'area-already-bound'
-            ? '\u76ee\u6807\u5185\u9875\u5df2\u53d1\u751f\u53d8\u5316\uff0c\u8bf7\u91cd\u65b0\u6253\u5f00\u65b0\u5efa\u5bf9\u8bdd\u5165\u53e3\u3002'
+            ? 'start.alreadyBound'
             : code === 'placement-stale'
-              ? '\u76ee\u6807\u5185\u9875\u6216\u9879\u76ee\u5df2\u53d1\u751f\u53d8\u5316\uff0c\u8bf7\u91cd\u8bd5\u3002'
-              : '\u65e0\u6cd5\u51c6\u5907\u6b64\u5de5\u4f5c\u533a\u5bf9\u8bdd\uff0c\u8bf7\u91cd\u8bd5\u3002',
+              ? 'start.stale'
+              : 'start.failed',
         })
         throw reason
       }).finally(() => {
@@ -606,15 +612,15 @@ export function createWorkbenchNativeConversationEditors(ctx: Context) {
 
     if (owner.sessionId !== undefined) {
       if (retained?.sessionId !== owner.sessionId || retained.areaClaim !== owner.areaClaim) {
-        return <WorkbenchPageLoading label="对话" icon="message" />
+        return <WorkbenchPageLoading label={t('editor.workbench.conversation')} icon="message" />
       }
       if (retained.failed || retained.reference === undefined) {
-        return <p role="alert">{'\u5f53\u524d\u5bf9\u8bdd\u6682\u65f6\u65e0\u6cd5\u8fde\u63a5\uff0c\u8bf7\u91cd\u65b0\u8fdb\u5165\u6b64\u5de5\u4f5c\u53f0\u3002'}</p>
+        return <p role="alert">{t('start.unavailable')}</p>
       }
       return <PreparedStart owner={owner} reference={retained.reference} renderer={renderer} placement={placement} />
     }
     return <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
-      {owner.workspaceId ? <button type="button" disabled={placement.phase === 'placing'} onClick={() => { void selectWorkspace(owner.workspaceId!).catch(() => {}) }}>在区域项目中新建对话</button> : null}
+      {owner.workspaceId ? <button type="button" disabled={placement.phase === 'placing'} onClick={() => { void selectWorkspace(owner.workspaceId!).catch(() => {}) }}>{t('start.inProject')}</button> : null}
       <StartSurface owner={owner} renderer={renderer} placement={placement} />
     </div>
   }
@@ -625,6 +631,7 @@ export function createWorkbenchNativeConversationEditors(ctx: Context) {
     view: 'chat' | 'trajectory'
     nativeRenderer: ReturnType<typeof createWorkbenchNativeAreaSlotRenderer> | undefined
   }) {
+    const { t } = useWorkbenchLocale()
     useDraftCloseGuard(owner, reference.binding)
     const binding = reference.binding
     const source = useMemo(() => ctx.uiConversation.binding(binding).snapshot, [binding])
@@ -659,11 +666,12 @@ export function createWorkbenchNativeConversationEditors(ctx: Context) {
     const scopeRef = useRef<HTMLDivElement>(null)
     return <div ref={scopeRef} data-workbench-native-conversation={view} data-workbench-session-id={owner.sessionId} data-workbench-conversation-ready={presentation.phase !== 'settling'} style={{ position: 'relative', display: 'flex', minHeight: 0, height: '100%', flexDirection: 'column' }}>
       {view === 'chat' ? <SharePresenceBar ctx={ctx} owner={owner} binding={reference.binding} scopeRef={scopeRef} session={session as SessionSnapshot} conversation={conversation} /> : null}
-      <WorkbenchPageTransition loading={presentation.phase === 'settling'} label={view === 'trajectory' ? '轨迹' : owner.instanceId === 'bay-agent-main' ? 'Bay Agent' : '对话'} icon={view === 'trajectory' ? 'trajectory' : 'message'}>{renderedContent}</WorkbenchPageTransition>
+      <WorkbenchPageTransition loading={presentation.phase === 'settling'} label={view === 'trajectory' ? t('conversation.trace') : owner.instanceId === 'bay-agent-main' ? 'Bay Agent' : t('editor.workbench.conversation')} icon={view === 'trajectory' ? 'trajectory' : 'message'}>{renderedContent}</WorkbenchPageTransition>
     </div>
   }
 
   function Bound({ owner: suppliedOwner, view }: { owner: NativeOwner; view: 'chat' | 'trajectory' }) {
+    const { t } = useWorkbenchLocale()
     const owner = suppliedOwner.runtimeIdentity ? { ...suppliedOwner, areaId: suppliedOwner.runtimeIdentity, areaClaim: suppliedOwner.runtimeIdentity + ':' + (suppliedOwner.bindingGeneration ?? 0) } : suppliedOwner
     const [reference, setReference] = useState<SessionReference>()
     const [error, setError] = useState('')
@@ -725,8 +733,8 @@ export function createWorkbenchNativeConversationEditors(ctx: Context) {
         readInspectCallId,
       }), [ctx, onInspectCall, owner.areaId, owner.instanceId, onOpenResource, owner.sessionId, reference])
     useNativeRendererLifetime(nativeRenderer)
-    if (error) return <div role="alert"><p>暂时无法连接此对话：{error}</p><button type="button" onClick={() => setRetry(value => value + 1)}>重新连接对话</button></div>
-    if (!reference) return <WorkbenchPageLoading label={view === 'trajectory' ? '轨迹' : owner.instanceId === 'bay-agent-main' ? 'Bay Agent' : '对话'} icon={view === 'trajectory' ? 'trajectory' : 'message'} />
+    if (error) return <div role="alert"><p>{t('editor.couldNotConnectToThisConversation')}{error}</p><button type="button" onClick={() => setRetry(value => value + 1)}>{t('editor.reconnectConversation')}</button></div>
+    if (!reference) return <WorkbenchPageLoading label={view === 'trajectory' ? t('conversation.trace') : owner.instanceId === 'bay-agent-main' ? 'Bay Agent' : t('editor.workbench.conversation')} icon={view === 'trajectory' ? 'trajectory' : 'message'} />
     return <Content owner={owner} reference={reference} view={view} nativeRenderer={nativeRenderer} />
   }
 

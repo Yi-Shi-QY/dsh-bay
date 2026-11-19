@@ -49,7 +49,7 @@ describe('conversation tab status from native session observations', () => {
     const f = fixture([turn(1, 1)], { running: true }); f.watch()
     for (const [kind, label] of [['approval', '等待审批'], ['plan-review', '等待计划确认'], ['question', '等待答复']]) {
       f.pending(kind)
-      expect(f.read()).toEqual({ status: 'attention', label })
+      expect(f.read()).toMatchObject({ status: 'attention', label })
     }
     f.pending()
     expect(f.read()?.status).toBe('running')
@@ -88,7 +88,7 @@ describe('conversation tab status from native session observations', () => {
   it('does not flash green between accepted/queued input and the new run', () => {
     const f = fixture([turn(1, 1), turn(1, 3, 'completed')]); f.watch()
     f.inbox.set({ 'next-turn': [{ text: 'next' }], 'next-step': [] })
-    expect(f.read()).toEqual({ status: 'running', label: '有输入等待处理' })
+    expect(f.read()).toMatchObject({ status: 'running', label: '有输入等待处理', labelKey: 'conversation.queued' })
     f.inbox.set({ 'next-turn': [], 'next-step': [] })
     expect(f.read()?.status).toBe('unknown')
     f.journal([turn(2, 4)]); f.update({ running: true })

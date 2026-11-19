@@ -5,6 +5,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { WorkbenchEditorOwnerProps } from '../src/client/editor-slots.ts'
 import { WorkbenchFrame } from '../src/foundation/WorkbenchFrame.tsx'
 import { defaultLayout } from '../src/foundation/model.ts'
+import { WorkbenchLocaleContext } from '../src/foundation/workbench-locale.ts'
+import { createTestWorkbenchLocale } from './workbench-locale-fixture.ts'
 
 afterEach(cleanup)
 
@@ -41,7 +43,8 @@ describe('Prepared native Start through the Frame', () => {
       target: { workspaceId: 'w', sessionId: 'created' }, reusedBlank: false,
     }))
     const patch = vi.fn(async () => ({ status: 'committed', revision: 2 }))
-    const view = render(<WorkbenchFrame {...{
+    const locale = createTestWorkbenchLocale()
+    const view = render(<WorkbenchLocaleContext.Provider value={locale}><WorkbenchFrame {...{
       projectNeutral: true, renderSidebar: () => null,
       renderSlot: (_: string, next: WorkbenchEditorOwnerProps, options: { only?: string }) => {
         owner = next
@@ -53,7 +56,7 @@ describe('Prepared native Start through the Frame', () => {
       settings: { getSnapshot: () => settings, subscribe: () => () => {}, patch },
       editorCatalog: { getSnapshot: () => entries, subscribe: () => () => {} },
       sidebarCompatibility: { getSnapshot: () => undefined, subscribe: () => () => {} },
-    } as never} />)
+    } as never} /></WorkbenchLocaleContext.Provider>)
     expect(owner.workspaceId).toBe('w')
     expect(owner.sessionId).toBeUndefined()
     await act(async () => { await owner.placeConversation!({ workspaceId: 'w', presentation: 'start' }) })
@@ -64,6 +67,13 @@ describe('Prepared native Start through the Frame', () => {
     expect(view.getAllByRole('tab')).toHaveLength(1)
     expect(createWorkspaceSession).toHaveBeenCalledOnce()
     expect(selectSession).not.toHaveBeenCalled()
+    const start = view.getByRole('tab', { name: /当前内页：新建对话/ })
+    act(() => locale.setLocale('en'))
+    expect(view.getByRole('tab', { name: 'Current page: New conversation. Open page actions' })).toBe(start)
+    act(() => locale.setLocale('zh'))
+    expect(view.getByRole('tab', { name: /当前内页：新建对话/ })).toBe(start)
+    expect(owner.sessionId).toBe('created')
+    expect(createWorkspaceSession).toHaveBeenCalledOnce()
     const prepared = owner
     if (action === 'replace') {
       const activeTab = view.container.querySelector('[data-workbench-active-tab="true"]')

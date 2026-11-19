@@ -1,3 +1,4 @@
+import { useWorkbenchLocale, workbenchPageTitle } from '../foundation/workbench-locale.ts'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { WorkbenchPageLoading } from '../foundation/WorkbenchPageLoading.tsx'
 import type { Context } from '@deepseek-ai/cordis'
@@ -230,7 +231,7 @@ export interface NativeSidebarAreaEditorProps {
   readonly ctx: Context
   readonly entryKey: string
   readonly kind: string
-  readonly title: string
+  readonly title?: string | undefined
   readonly contentId?: string
   readonly fallback?: ReactNode
   readonly children?: ReactNode
@@ -248,12 +249,14 @@ export interface NativeSidebarAreaEditorProps {
  * and close actions remain owned by the Workbench Area.
  */
 export function NativeSidebarAreaEditor({
-  owner, ctx, entryKey, kind, title, contentId = `workbench://${kind}/${owner.instanceId}`,
+  owner, ctx, entryKey, kind, title: suppliedTitle, contentId = `workbench://${kind}/${owner.instanceId}`,
   fallback = null, children, onOpenResource, onOpenTab, onClose,
 }: NativeSidebarAreaEditorProps): ReactNode {
+  const { t } = useWorkbenchLocale()
   const sessions = getWorkbenchClientSessions(ctx)
   const nativeInstanceId = owner.runtimeIdentity ?? owner.instanceId
   const nativeDefinition = workbenchNativeSidebarForKind(kind)
+  const title = suppliedTitle ?? (nativeDefinition?.editorId ? workbenchPageTitle(t, nativeDefinition.editorId, nativeDefinition.label) : nativeDefinition?.label ?? kind)
   const resourceOnly = nativeDefinition?.resourceOnly === true
   const sessionId = owner.sessionId
   const areaId = owner.runtimeIdentity ?? owner.areaId
@@ -567,8 +570,8 @@ export function NativeSidebarAreaEditor({
 
   if (sessionId === undefined || areaId === undefined || claim === undefined) {
     return <section data-workbench-official-area-state="missing-session" style={{ padding: 20 }}>
-      <strong>此内页需要来源对话</strong>
-      <p>请选择此内页的来源对话。</p>
+      <strong>{t('editor.thisPageRequiresASourceConversation')}</strong>
+      <p>{t('editor.chooseASourceConversationForThisPage')}</p>
     </section>
   }
   if (!resourceReady) return <section data-workbench-native-resource-state="waiting" style={{ display: 'flex', minWidth: 0, minHeight: 0, height: '100%', flexDirection: 'column' }}>{fallback}</section>
@@ -588,7 +591,7 @@ export function NativeSidebarAreaEditor({
       {native.render('sidebar.right.pane.tab', {}, {
         entryKey: preview.entryKey,
         hookContext: previewOccurrence,
-        fallback: <p role="status" style={{ margin: 0, padding: 12 }}>DSH 没有可用的资源预览。</p>,
+        fallback: <p role="status" style={{ margin: 0, padding: 12 }}>{t('editor.noDshResourcePreviewIsAvailable')}</p>,
       })}
     </div> : null}
     {children}

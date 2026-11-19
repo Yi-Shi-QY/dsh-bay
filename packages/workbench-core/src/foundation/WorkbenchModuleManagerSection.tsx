@@ -1,3 +1,4 @@
+import { useWorkbenchLocale } from './workbench-locale.ts'
 import { useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type ChangeEvent, type ReactNode } from 'react'
 import { IconDownloadOutlineMedium, IconRefreshOutlineMedium, IconFolderOpenOutlineMedium, IconCordisPluginOutlineMedium,
   IconNewChatOutlineMedium, IconBranchOutlineMedium, IconCheckOutlineMedium, IconShareOutlineMedium, IconChevronDownOutlineMedium } from '@deepseek-ai/dsh-client-ui-primitives'
@@ -27,11 +28,12 @@ function localizeUiError(value: string): string {
 }
 
 function PagePreview({ kind }: { kind: string }) {
-  return <div className={css.preview} data-page-preview={kind} aria-label="内页示例">
-    {kind === 'start' ? <><strong>新建对话</strong><div className={css.sampleOptions}>工作区 <span>Agent</span><span>模型</span></div><div className={css.sampleInput}>输入消息…</div></>
-      : kind === 'conversation' ? <><strong>对话</strong><div className={css.sampleMessage}>整理项目的实现计划</div><div>已完成项目结构检查。</div><div className={css.sampleInput}>发送消息…</div></>
-      : kind === 'extension' ? <><strong>扩展内页</strong><div className={css.sampleOptions}>由已安装模块提供</div><div className={css.sampleInput}>预览不可用</div></>
-        : <><strong>Agent 轨迹</strong><ol><li>分析项目结构</li><li>读取关联文件</li><li>整理实现计划</li></ol></>}
+  const { t } = useWorkbenchLocale()
+  return <div className={css.preview} data-page-preview={kind} aria-label={t('modules.pageExample')}>
+    {kind === 'start' ? <><strong>{t('editor.workbench.conversation.start')}</strong><div className={css.sampleOptions}>{t('shell.workspace')} <span>Agent</span><span>{t('settings.model')}</span></div><div className={css.sampleInput}>{t('modules.enterAMessage')}</div></>
+      : kind === 'conversation' ? <><strong>{t('editor.workbench.conversation')}</strong><div className={css.sampleMessage}>{t('modules.outlineTheImplementationPlan')}</div><div>{t('modules.theProjectStructureHasBeenChecked')}</div><div className={css.sampleInput}>{t('modules.sendAMessage')}</div></>
+      : kind === 'extension' ? <><strong>{t('transfer.extensionPages')}</strong><div className={css.sampleOptions}>{t('modules.providedByInstalledModules')}</div><div className={css.sampleInput}>{t('modules.previewUnavailable')}</div></>
+        : <><strong>{t('editor.workbench.agent-trajectory')}</strong><ol><li>{t('modules.analyzeProjectStructure')}</li><li>{t('modules.readRelatedFiles')}</li><li>{t('modules.outlineImplementationPlan')}</li></ol></>}
   </div>
 }
 
@@ -45,6 +47,7 @@ export function WorkbenchModuleManagerSection({ moduleManager, workbenchDirector
   onShare?: (mode: 'import' | 'export') => void
   children?: ReactNode
 }) {
+  const { t } = useWorkbenchLocale()
   const subscribe = useCallback((listener: () => void) => moduleManager?.subscribe(listener) ?? (() => {}), [moduleManager])
   const getSnapshot = useCallback(() => moduleManager?.getSnapshot() ?? EMPTY_SNAPSHOT, [moduleManager])
   const snapshot = useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
@@ -134,21 +137,21 @@ export function WorkbenchModuleManagerSection({ moduleManager, workbenchDirector
       setMessage({ text: '团队目录已验证并保存。' })
     })
   }
-  const viewTitles = { catalog: '扩展目录', installable: '可安装扩展', installed: '已安装扩展', trust: '来源与信任' } as const
+  const viewTitles = { catalog: '扩展目录', installable: '可安装扩展', installed: '已安装扩展', trust: t('modules.sourcesAndTrust') } as const
   const viewVisible = view === 'catalog' || view === 'trust' || (view === 'installable' && inventoryNeedsInstall) || (view === 'installed' && ((inventory?.profilePresence === 'present') || otherInventory.length > 0))
   const viewDescription = view === 'catalog' ? '浏览受信目录及其提供的内页能力。'
     : view === 'installable' ? '只显示 Profile 中不存在、且通过完整预检的扩展。'
       : view === 'installed' ? '显示 Profile 中实际存在的包，并区分 Workbench 所有权和激活状态。'
         : '查看目录签名、信任根、来源和离线导入信息。'
-  return <section className={css.center} data-workbench-module-manager="v1" aria-label="容器内页中心" aria-busy={busy}>
+  return <section className={css.center} data-workbench-module-manager="v1" aria-label={t('modules.pageCenter')} aria-busy={busy}>
     <header className={css.header}>
-      <div><h2>容器内页中心</h2><span className={css.subtle}>查看已安装扩展、预览内页，并管理所有工作台的入口</span></div>
+      <div><h2>{t('modules.pageCenter')}</h2><span className={css.subtle}>{t('modules.reviewInstalledExtensionsPreviewPagesAndManage')}</span></div>
       <div className={css.actions}>
-        {nativeAvailable ? <button className={css.command} type="button" disabled={busy} onClick={() => { void run(async () => { await nativePluginNavigation!.open(); close?.() }) }}><IconCordisPluginOutlineMedium />打开 DSH 原生插件管理</button> : null}
-        <input className={css.fileInput} ref={fileInput} aria-label="本地签名目录归档" type="file" accept=".zip,.dshcatalog,application/zip"
+        {nativeAvailable ? <button className={css.command} type="button" disabled={busy} onClick={() => { void run(async () => { await nativePluginNavigation!.open(); close?.() }) }}><IconCordisPluginOutlineMedium />{t('modules.openDshPluginManager')}</button> : null}
+        <input className={css.fileInput} ref={fileInput} aria-label={t('modules.localSignedCatalogArchive')} type="file" accept=".zip,.dshcatalog,application/zip"
           disabled={busy || moduleManager === undefined || restart} onChange={importCatalog} />
-        <button className={css.command} type="button" disabled={busy || moduleManager === undefined || restart} onClick={() => fileInput.current?.click()}><IconFolderOpenOutlineMedium />导入扩展目录</button>
-        <button className={css.iconButton} type="button" title="刷新模块状态" aria-label="刷新模块状态" disabled={busy || moduleManager?.refresh === undefined}
+        <button className={css.command} type="button" disabled={busy || moduleManager === undefined || restart} onClick={() => fileInput.current?.click()}><IconFolderOpenOutlineMedium />{t('modules.importExtensionCatalog')}</button>
+        <button className={css.iconButton} type="button" title={t('modules.refreshModuleStatus')} aria-label={t('modules.refreshModuleStatus')} disabled={busy || moduleManager?.refresh === undefined}
           onClick={() => { void run(async () => { await moduleManager?.refresh?.() }) }}><IconRefreshOutlineMedium /></button>
       </div>
     </header>
@@ -156,20 +159,20 @@ export function WorkbenchModuleManagerSection({ moduleManager, workbenchDirector
     <section className={css.versionInfo} data-workbench-version-info="true"
       data-workbench-core-version={WORKBENCH_CORE_VERSION}
       data-workbench-native-pages-version={WORKBENCH_CORE_VERSION}
-      aria-label="Workbench 版本信息">
+      aria-label={t('modules.workbenchVersionInformation')}>
       <article className={css.versionCard} data-workbench-version-card="core">
-        <div className={css.versionCardHeading}><h3>Workbench Core</h3><span className={css.badge} data-tone="success">当前运行</span></div>
+        <div className={css.versionCardHeading}><h3>Workbench Core</h3><span className={css.badge} data-tone="success">{t('modules.runningVersion')}</span></div>
         <strong className={css.versionNumber}>{WORKBENCH_CORE_VERSION}</strong>
         <span className={css.subtle}>dsh-bay</span>
       </article>
       <article className={css.versionCard} data-workbench-version-card="native-pages">
-        <div className={css.versionCardHeading}><h3>默认 DSH 原生内页</h3><span className={css.badge}>随 Core 交付</span></div>
+        <div className={css.versionCardHeading}><h3>{t('modules.defaultNativeDshPages')}</h3><span className={css.badge}>{t('modules.includedWithCore')}</span></div>
         <strong className={css.versionNumber}>{WORKBENCH_CORE_VERSION}</strong>
-        <span className={css.subtle}>没有单独安装包 · 适配 DSH {WORKBENCH_DSH_GENERATION}</span>
+        <span className={css.subtle}>{t('modules.noSeparatePackageDshCompatibility')} {WORKBENCH_DSH_GENERATION}</span>
       </article>
     </section>
-    <p className={css.viewDescription}>官方内置模块复用 DSH 原生能力；功能扩展模块才提供 DSH 原版之外的能力。DSH 原生插件管理负责安装、更新、启停与卸载，Workbench 只展示验证结果和入口偏好。</p>
-    <nav role="tablist" aria-label="扩展管理视图" className={css.viewTabs}>
+    <p className={css.viewDescription}>{t('modules.builtInModulesReuseDshFeaturesExtensions')}</p>
+    <nav role="tablist" aria-label={t('modules.extensionManagementViews')} className={css.viewTabs}>
       {(Object.keys(viewTitles) as Array<keyof typeof viewTitles>).map(key => {
         const count = key === 'installable' ? (inventoryNeedsInstall ? 1 : 0) : key === 'installed' ? (inventory?.profilePresence === 'present' ? 1 : 0) : undefined
         return <button key={key} type="button" role="tab" aria-selected={view === key} className={view === key ? css.viewTabActive : css.viewTab} onClick={() => setView(key)}>{viewTitles[key]}{count === undefined ? null : <span className={css.viewCount}>{count}</span>}</button>
@@ -178,97 +181,97 @@ export function WorkbenchModuleManagerSection({ moduleManager, workbenchDirector
     <p className={css.viewDescription}>{viewDescription}</p>
     {!snapshot.restartErrorCode && (snapshot.restartPending || snapshot.restartStatus) ? <div className={css.notice} role="status">
       {snapshot.restartStatus ? workbenchRestartMessage(snapshot.restartStatus) : '正在重新连接 DSH 并恢复重启状态…'}
-      {snapshot.restartStatus ? <details><summary>操作详情</summary><div>事务 ID：{snapshot.restartStatus.transactionId}</div><div>重启操作 ID：{snapshot.restartStatus.operationId}</div></details> : null}
+      {snapshot.restartStatus ? <details><summary>{t('modules.operationDetails')}</summary><div>{t('modules.transactionId')}{snapshot.restartStatus.transactionId}</div><div>{t('modules.restartOperationId')}{snapshot.restartStatus.operationId}</div></details> : null}
     </div> : null}
     {message === undefined ? null : <div className={css.notice} data-tone={message.error ? 'error' : 'success'} role={message.error ? 'alert' : 'status'}>{message.text}</div>}
     {snapshot.error === undefined ? null : <div className={css.notice} data-tone="error" role="alert">{snapshot.restartErrorCode === undefined ? localizeUiError(snapshot.error) : new WorkbenchRestartError(snapshot.restartErrorCode).message}</div>}
-    {moduleManager === undefined ? <div className={css.notice} role="status">当前 DSH 未提供模块安装服务。</div> : null}
-    {view === 'catalog' ? <section className={css.moduleKinds} aria-label="模块类别">
-      <div className={css.moduleKind} data-module-kind="official-builtin"><div><h3>官方内置模块</h3><p>随 Workbench Core 提供，复用 DSH 原生会话、对话和轨迹能力。它们不是社区扩展，不通过 npm / Git 直接来源安装。</p></div><span className={css.kindCount}>{officialCatalogEntries.length || (officialInventory.length > 0 ? officialInventory.length : coreNativeReady ? 1 : 0)} 项</span></div>
-      <div className={css.moduleKind} data-module-kind="extension"><div><h3>功能扩展模块</h3><p>在 DSH 原版能力之外增加功能的容器内页，未来通过受信 Catalog 管理。当前目录中有 {extensionCatalogEntries.length} 项。</p></div><span className={css.kindCount}>{extensionCatalogEntries.length} 项</span></div>
+    {moduleManager === undefined ? <div className={css.notice} role="status">{t('modules.thisDshHostDoesNotProvideModule')}</div> : null}
+    {view === 'catalog' ? <section className={css.moduleKinds} aria-label={t('modules.moduleCategory')}>
+      <div className={css.moduleKind} data-module-kind="official-builtin"><div><h3>{t('modules.builtInModules')}</h3><p>{t('modules.coreIncludesNativeDshConversationsAndTraces')}</p></div><span className={css.kindCount}>{officialCatalogEntries.length || (officialInventory.length > 0 ? officialInventory.length : coreNativeReady ? 1 : 0)} 项</span></div>
+      <div className={css.moduleKind} data-module-kind="extension"><div><h3>{t('modules.extensionModules')}</h3><p>{t('modules.pagesThatExtendNativeDshFeaturesAnd')} {extensionCatalogEntries.length} {t('modules.label')}</p></div><span className={css.kindCount}>{extensionCatalogEntries.length} 项</span></div>
     </section> : null}
-    {!viewVisible ? <div className={css.empty} role="tabpanel"><h3>当前视图暂无扩展</h3><p>{view === 'installable' ? '当前没有可安装的功能扩展；官方内置能力已随 Core 提供。' : 'Profile 和受信目录中没有符合此视图的模块。'}</p></div> : view === 'trust' ? <section className={css.trustPanel} role="tabpanel">
-      <h3>来源与信任</h3><p>官方内置模块随 Core 的受信发布一起交付；功能扩展只接受完整签名目录或离线包。浏览器不会直接编辑信任根。</p>
-      <dl><div><dt>目录状态</dt><dd>{snapshot.catalogId === undefined ? '尚未导入' : '已验证并保存'}</dd></div><div><dt>Catalog ID</dt><dd><code>{snapshot.catalogId ?? '—'}</code></dd></div><div><dt>发布者 Key ID</dt><dd>{WORKBENCH_TEAM_TRUST_ROOT_V1.keyId}</dd></div><div><dt>DSH 代际</dt><dd>{suite?.signedCatalog?.dshGeneration ?? WORKBENCH_DSH_GENERATION}</dd></div><div><dt>撤销状态</dt><dd>{suite?.signedCatalog?.revoked ? '已撤销' : suite === undefined ? '未知' : '未撤销'}</dd></div></dl>
-      <div className={css.trustActions}><button className={css.command} type="button" disabled={busy || moduleManager === undefined} onClick={() => fileInput.current?.click()}><IconFolderOpenOutlineMedium />重新导入签名目录</button>{onShare === undefined ? null : <button className={css.command} type="button" disabled={busy} onClick={() => onShare('import')}><IconShareOutlineMedium />导入离线包</button>}</div>
-      {moduleManager?.installDirectSource === undefined || snapshot.host?.directSourceAvailable !== true || extensionCatalogEntries.length === 0 ? null : <details className={css.directSource}><summary>高级安装：功能扩展 npm / Git 直接来源</summary><p className={css.subtle}>仅用于 DSH 原版之外的功能扩展。你必须明确选择来源；Host 会固定版本或 commit，校验包内清单，并在真实重启后验证，来源不会自动进入公共目录。</p><label>来源类型<select value={directKind} onChange={event => setDirectKind(event.target.value as 'npm' | 'git')}><option value="npm">npm</option><option value="git">Git（HTTPS）</option></select></label>{directKind === 'npm' ? <label>包名<input value={directPackage} onChange={event => setDirectPackage(event.target.value)} placeholder="@scope/package" /></label> : <><label>仓库地址<input value={directPackage} onChange={event => setDirectPackage(event.target.value)} placeholder="https://github.com/example/module.git" /></label><label>分支、标签或 commit<input value={directRef} onChange={event => setDirectRef(event.target.value)} placeholder="v1.2.3 或 commit" /></label></>}<button type="button" className={css.command + ' ' + css.primary} disabled={busy || directPackage.trim() === '' || (directKind === 'git' && directRef.trim() === '')} onClick={() => { void run(async () => { const source: WorkbenchModuleSourceRequestV1 = directKind === 'npm' ? { kind: 'npm', packageName: directPackage.trim() } : { kind: 'git', repository: directPackage.trim(), ref: directRef.trim() }; await moduleManager.installDirectSource!(source); setMessage({ text: '直接来源已暂存，请重启 DSH 完成验证。' }) }) }}>校验并安装直接来源</button></details>}
-    </section> : view === 'catalog' && coreNativeReady && inventory?.profilePresence !== 'present' ? <section className={css.moduleList} role="tabpanel" aria-label="Workbench 官方内置能力">
-      <h3>Workbench Core 官方内置</h3>
-      <p className={css.subtle}>以下容器内页直接复用 DSH {WORKBENCH_DSH_GENERATION} 原生能力，随 Core 一起提供，不需要单独安装或导入 Conversation Suite。</p>
+    {!viewVisible ? <div className={css.empty} role="tabpanel"><h3>{t('modules.noExtensionsInThisView')}</h3><p>{view === 'installable' ? '当前没有可安装的功能扩展；官方内置能力已随 Core 提供。' : 'Profile 和受信目录中没有符合此视图的模块。'}</p></div> : view === 'trust' ? <section className={css.trustPanel} role="tabpanel">
+      <h3>{t('modules.sourcesAndTrust')}</h3><p>{t('modules.builtInModulesShipWithATrusted')}</p>
+      <dl><div><dt>{t('modules.catalogStatus')}</dt><dd>{snapshot.catalogId === undefined ? '尚未导入' : '已验证并保存'}</dd></div><div><dt>Catalog ID</dt><dd><code>{snapshot.catalogId ?? '—'}</code></dd></div><div><dt>{t('modules.publisherKeyId')}</dt><dd>{WORKBENCH_TEAM_TRUST_ROOT_V1.keyId}</dd></div><div><dt>{t('modules.dshGeneration')}</dt><dd>{suite?.signedCatalog?.dshGeneration ?? WORKBENCH_DSH_GENERATION}</dd></div><div><dt>{t('modules.revocationStatus')}</dt><dd>{suite?.signedCatalog?.revoked ? '已撤销' : suite === undefined ? '未知' : '未撤销'}</dd></div></dl>
+      <div className={css.trustActions}><button className={css.command} type="button" disabled={busy || moduleManager === undefined} onClick={() => fileInput.current?.click()}><IconFolderOpenOutlineMedium />{t('modules.reimportSignedCatalog')}</button>{onShare === undefined ? null : <button className={css.command} type="button" disabled={busy} onClick={() => onShare('import')}><IconShareOutlineMedium />{t('modules.importOfflinePackage')}</button>}</div>
+      {moduleManager?.installDirectSource === undefined || snapshot.host?.directSourceAvailable !== true || extensionCatalogEntries.length === 0 ? null : <details className={css.directSource}><summary>{t('modules.advancedInstallAnExtensionFromNpmOr')}</summary><p className={css.subtle}>{t('modules.forExtensionsOnlyChooseASourceExplicitly')}</p><label>{t('modules.sourceType')}<select value={directKind} onChange={event => setDirectKind(event.target.value as 'npm' | 'git')}><option value="npm">npm</option><option value="git">Git（HTTPS）</option></select></label>{directKind === 'npm' ? <label>{t('modules.packageName')}<input value={directPackage} onChange={event => setDirectPackage(event.target.value)} placeholder="@scope/package" /></label> : <><label>{t('modules.repositoryUrl')}<input value={directPackage} onChange={event => setDirectPackage(event.target.value)} placeholder="https://github.com/example/module.git" /></label><label>{t('modules.branchTagOrCommit')}<input value={directRef} onChange={event => setDirectRef(event.target.value)} placeholder="v1.2.3 或 commit" /></label></>}<button type="button" className={css.command + ' ' + css.primary} disabled={busy || directPackage.trim() === '' || (directKind === 'git' && directRef.trim() === '')} onClick={() => { void run(async () => { const source: WorkbenchModuleSourceRequestV1 = directKind === 'npm' ? { kind: 'npm', packageName: directPackage.trim() } : { kind: 'git', repository: directPackage.trim(), ref: directRef.trim() }; await moduleManager.installDirectSource!(source); setMessage({ text: '直接来源已暂存，请重启 DSH 完成验证。' }) }) }}>{t('modules.verifyAndInstallFromSource')}</button></details>}
+    </section> : view === 'catalog' && coreNativeReady && inventory?.profilePresence !== 'present' ? <section className={css.moduleList} role="tabpanel" aria-label={t('modules.builtInWorkbenchCapabilities')}>
+      <h3>{t('modules.builtIntoWorkbenchCore')}</h3>
+      <p className={css.subtle}>{t('modules.thesePagesUseDsh')} {WORKBENCH_DSH_GENERATION} {t('modules.nativeFeaturesAndShipWithCoreNo')}</p>
       <article className={css.module} data-workbench-module-identity="workbench.core">
-        <div className={css.moduleSummary}><span className={css.moduleIcon}><IconCordisPluginOutlineMedium size={24} /></span><div className={css.moduleName}><h3>DSH 原生会话工作台</h3><span className={css.subtle}>Core 内置 · {liveEditors.filter(editor => nativeConversationEditorIds.has(editor.id)).length} 个容器内页</span></div><span className={css.badge} data-tone="success"><IconCheckOutlineMedium />随 Core 已就绪</span></div>
-        <dl className={css.trust}><div><dt>能力来源</dt><dd>DSH 原生 Session、Conversation、Trajectory</dd></div><div><dt>Workbench 责任</dt><dd>Area、布局、入口显示和绑定生命周期</dd></div><div><dt>安装方式</dt><dd>随 dsh-bay 交付</dd></div></dl>
-        <p className={css.notice}>会话数据、Composer、工作区选择和轨迹视图由 DSH 原生实现；Workbench 不复制运行时，也不把它们作为社区扩展安装。</p>
-        {suite !== undefined ? <p className={css.notice} data-tone="warning">当前受信目录中的 Conversation Suite 是历史迁移包，仅用于旧 Profile 的验证、认领和修复；全新 Profile 不需要安装它。</p> : null}
+        <div className={css.moduleSummary}><span className={css.moduleIcon}><IconCordisPluginOutlineMedium size={24} /></span><div className={css.moduleName}><h3>{t('modules.nativeDshConversationWorkbench')}</h3><span className={css.subtle}>{t('modules.builtIntoCore')} {liveEditors.filter(editor => nativeConversationEditorIds.has(editor.id)).length} {t('modules.pages')}</span></div><span className={css.badge} data-tone="success"><IconCheckOutlineMedium />{t('modules.readyWithCore')}</span></div>
+        <dl className={css.trust}><div><dt>{t('modules.capabilitySource')}</dt><dd>{t('modules.nativeDshSessionsConversationsAndTraces')}</dd></div><div><dt>{t('modules.workbenchResponsibilities')}</dt><dd>{t('modules.areasLayoutsPageVisibilityAndBindingLifecycle')}</dd></div><div><dt>{t('modules.installation')}</dt><dd>{t('modules.includedWithDshBay')}</dd></div></dl>
+        <p className={css.notice}>{t('modules.dshProvidesSessionDataTheComposerWorkspace')}</p>
+        {suite !== undefined ? <p className={css.notice} data-tone="warning">{t('modules.conversationSuiteIsALegacyMigrationPackage')}</p> : null}
       </article>
     </section> : identity === undefined && otherInventory.length === 0 && extensionCatalogEntries.length === 0 ? <div className={css.empty}>
-      <span className={css.emptyIcon}><IconCordisPluginOutlineMedium size={28} /></span><h3>暂无团队内页模块</h3><p>尚未导入团队目录</p>
-      {onShare === undefined ? null : <button className={css.command} type="button" onClick={() => onShare('import')}><IconShareOutlineMedium />导入工作台离线包</button>}
-    </div> : identity === undefined ? <section className={css.moduleList} role="tabpanel" aria-label="Profile 中的其他扩展">
-      <h3>功能扩展模块</h3>
-      <p className={css.subtle}>这些模块由 Host 根据 Profile 实际内容投影。Workbench 不会因为目录条目存在就假定它们可安装。</p>
+      <span className={css.emptyIcon}><IconCordisPluginOutlineMedium size={28} /></span><h3>{t('modules.noTeamPageModulesYet')}</h3><p>{t('modules.noTeamCatalogImportedYet')}</p>
+      {onShare === undefined ? null : <button className={css.command} type="button" onClick={() => onShare('import')}><IconShareOutlineMedium />{t('modules.importOfflineWorkbenchPackage')}</button>}
+    </div> : identity === undefined ? <section className={css.moduleList} role="tabpanel" aria-label={t('modules.otherProfileExtensions')}>
+      <h3>{t('modules.extensionModules')}</h3>
+      <p className={css.subtle}>{t('modules.theHostReportsModulesFromTheProfile')}</p>
       {extensionCatalogEntries.map(entry => <article className={css.module} key={`catalog-${entry.moduleId}`} data-workbench-module-identity={entry.moduleId}>
-        <div className={css.moduleSummary}><span className={css.moduleIcon}><IconCordisPluginOutlineMedium size={24} /></span><div className={css.moduleName}><h3>{entry.moduleId}</h3><span className={css.subtle}>功能扩展 · {entry.version}</span></div><span className={css.badge} data-tone="neutral">受信目录条目</span></div>
-        <dl className={css.trust}><div><dt>模块类别</dt><dd>功能扩展模块</dd></div><div><dt>安装身份</dt><dd><code>{entry.artifactDigest}</code></dd></div><div><dt>来源</dt><dd>签名 Catalog</dd></div></dl>
-        <p className={css.notice}>此条目属于 DSH 原版之外的功能扩展。当前实验版先完成分类和信任投影，安装事务会在扩展 Host API 完成后开放。</p>
+        <div className={css.moduleSummary}><span className={css.moduleIcon}><IconCordisPluginOutlineMedium size={24} /></span><div className={css.moduleName}><h3>{entry.moduleId}</h3><span className={css.subtle}>{t('modules.extension')} {entry.version}</span></div><span className={css.badge} data-tone="neutral">{t('modules.trustedCatalogEntry')}</span></div>
+        <dl className={css.trust}><div><dt>{t('modules.moduleCategory')}</dt><dd>{t('modules.extensionModules')}</dd></div><div><dt>{t('modules.installationIdentity')}</dt><dd><code>{entry.artifactDigest}</code></dd></div><div><dt>{t('modules.source')}</dt><dd>{t('modules.signedCatalog')}</dd></div></dl>
+        <p className={css.notice}>{t('modules.thisExtensionAddsFeaturesBeyondDshThis')}</p>
       </article>)}
       {otherInventory.map(item => <article className={css.module} key={item.moduleId} data-workbench-module-identity={item.moduleId}>
         <div className={css.moduleSummary}><span className={css.moduleIcon}><IconCordisPluginOutlineMedium size={24} /></span><div className={css.moduleName}><h3>{item.moduleId}</h3><span className={css.subtle}>{item.packageName}</span></div>
           <span className={css.badge} data-tone={item.activation === 'active' ? 'success' : item.ownership === 'owned' ? 'warning' : 'error'}>{item.kind === 'official-builtin' ? '官方内置' : item.activation === 'active' ? '已激活' : item.ownership === 'owned' ? '需要处理' : '外部安装'}</span></div>
-        <dl className={css.trust}><div><dt>Profile 状态</dt><dd>{item.profilePresence === 'present' ? '已存在' : '不存在'}</dd></div><div><dt>Workbench 所有权</dt><dd>{item.ownership === 'owned' ? '已接管' : item.ownership === 'unowned' ? '未接管' : item.ownership}</dd></div><div><dt>运行状态</dt><dd>{item.activation}</dd></div><div><dt>信任</dt><dd>{item.trust ?? '未知'}</dd></div>{item.diagnosticCode === undefined ? null : <div><dt>诊断</dt><dd>{item.diagnosticCode}</dd></div>}</dl>
-        {item.allowedActions.includes('external-uninstall-required') ? <p className={css.notice} data-tone="error">当前 Profile 中存在其他来源安装的同名扩展。请使用原安装来源卸载或升级，Workbench 不会覆盖它。</p> : null}
+        <dl className={css.trust}><div><dt>{t('modules.profileStatus')}</dt><dd>{item.profilePresence === 'present' ? '已存在' : '不存在'}</dd></div><div><dt>{t('modules.workbenchOwnership')}</dt><dd>{item.ownership === 'owned' ? '已接管' : item.ownership === 'unowned' ? '未接管' : item.ownership}</dd></div><div><dt>{t('modules.runtimeStatus')}</dt><dd>{item.activation}</dd></div><div><dt>{t('modules.trust')}</dt><dd>{item.trust ?? '未知'}</dd></div>{item.diagnosticCode === undefined ? null : <div><dt>{t('modules.diagnostics')}</dt><dd>{item.diagnosticCode}</dd></div>}</dl>
+        {item.allowedActions.includes('external-uninstall-required') ? <p className={css.notice} data-tone="error">{t('modules.anExtensionWithThisNameCameFrom')}</p> : null}
       </article>)}
     </section> : <>
-      <div className={css.categoryHeading}><h3>官方内置模块</h3><span className={css.subtle}>复用 DSH 原生能力，Workbench 只管理布局入口和验证状态</span></div>
+      <div className={css.categoryHeading}><h3>{t('modules.builtInModules')}</h3><span className={css.subtle}>{t('modules.usesNativeDshFeaturesBayManagesPage')}</span></div>
       <section className={css.module} data-workbench-module-identity={identity.moduleId}>
         <div className={css.moduleSummary}>
           <span className={css.moduleIcon}><IconCordisPluginOutlineMedium size={24} /></span>
-          <div className={css.moduleName}><h3>{legacySuiteInProfile ? 'DSH 原生会话工作台' : 'Conversation Suite'}</h3><span className={css.subtle}>{legacySuiteInProfile ? 'Core 内置 · 历史 Suite 包已留存' : `${identity.version} · ${pages.length} 个容器内页`}</span></div>
+          <div className={css.moduleName}><h3>{legacySuiteInProfile ? t('modules.nativeDshConversationWorkbench') : 'Conversation Suite'}</h3><span className={css.subtle}>{legacySuiteInProfile ? 'Core 内置 · 历史 Suite 包已留存' : `${identity.version} · ${pages.length} 个容器内页`}</span></div>
           <span className={css.badge} data-tone={active ? 'success' : restart ? 'warning' : profileConflict || repair || installedConflict ? 'error' : 'neutral'} data-module-status>{active ? <IconCheckOutlineMedium /> : null}{label}</span>
           {!legacySuiteInProfile && inventoryNeedsClaim && !suiteIsOfficialBuiltin ? <button type="button" className={css.command + ' ' + css.primary} disabled={busy || restart}
-            onClick={() => { void run(async () => { await moduleManager!.claim('workbench.conversation-suite'); setMessage({ text: '包身份已验证并认领，请重启 DSH 完成激活。' }) }) }}><IconCheckOutlineMedium />验证并认领</button>
+            onClick={() => { void run(async () => { await moduleManager!.claim('workbench.conversation-suite'); setMessage({ text: '包身份已验证并认领，请重启 DSH 完成激活。' }) }) }}><IconCheckOutlineMedium />{t('modules.verifyAndAdopt')}</button>
             : !legacySuiteInProfile && !active && !profileConflict && (!suiteIsOfficialBuiltin || officialNeedsProvision) ? <button type="button" className={css.command + ' ' + css.primary} disabled={busy || plan?.status !== 'ready' || restart || (!inventoryNeedsInstall && !officialNeedsProvision && !inventory?.allowedActions.includes('repair'))}
             onClick={() => { void run(async () => {
               const result = await moduleManager!.install('workbench.conversation-suite')
               setMessage({ text: result.state === 'active' ? '官方内置组件已激活。' : '官方内置组件已交付，请重启 DSH。' })
             }) }}><IconDownloadOutlineMedium />{suiteIsOfficialBuiltin ? '补齐官方内置组件' : repair ? '修复功能扩展' : '安装功能扩展'}</button> : null}
         </div>
-        {restart ? <div className={css.notice} data-tone="warning" role="status"><IconRefreshOutlineMedium /><div><strong>等待重启 DSH</strong><p>新增或修复的内页尚未激活；重启不会删除布局和已有工作台配置。</p>
+        {restart ? <div className={css.notice} data-tone="warning" role="status"><IconRefreshOutlineMedium /><div><strong>{t('modules.waitingForDshRestart')}</strong><p>{t('modules.newOrRepairedPagesAreNotActive')}</p>
           {moduleManager?.restartAvailability === 'available' && (snapshot.restartRequiredTransaction?.transactionId ?? snapshot.host?.restartTransactionId) !== undefined
-            ? <button className={css.command + ' ' + css.primary} type="button" disabled={busy} onClick={requestRestart}>一键安全重启</button>
+            ? <button className={css.command + ' ' + css.primary} type="button" disabled={busy} onClick={requestRestart}>{t('modules.restartSafely')}</button>
             : <p className={css.subtle}>{moduleManager?.restartAvailability === 'busy' ? '已有操作正在进行，请等待当前操作完成。' : moduleManager?.restartAvailability === 'transaction-missing' ? '当前安装事务没有可用的重启标识，请先刷新或恢复事务状态。' : moduleManager?.restartAvailability === 'supervisor-owned' ? '当前实例由其他宿主进程管理，请从宿主控制面板执行重启。' : moduleManager?.restartAvailability === 'debugger-attached' ? '调试模式不支持一键安全重启，请手动重启实例。' : '当前启动方式不支持一键安全重启。请先关闭此 DSH 实例，再使用相同 Profile 重新启动，然后返回此处继续验证。'}</p>}
         </div></div> : null}
-        {profileConflict && !inventoryNeedsClaim ? <div className={css.notice} data-tone="error" role="alert">当前 Profile 已存在未由 Workbench 管理的内页模块，无法直接接管。请使用原安装来源修复，或在干净 Profile 中重新安装。</div> : null}
-        {inventory?.nativeRuntime === 'disabled' ? <div className={css.notice} data-tone="warning" role="status">此官方内置模块已由 DSH 原生插件管理停用。请在 DSH 原生插件管理中启用并按提示重启；Workbench 不会在这里重复提供启停按钮。</div> : null}
-        {legacySuiteInProfile ? <div className={css.notice} data-tone="warning" role="status">当前会话能力已由 Core 内置并直接使用 DSH 原生实现。Profile 中的 Conversation Suite 是历史残留，Workbench 不会重复安装、覆盖或通过此页启停它。</div> : null}
-        {suiteIsOfficialBuiltin && inventory?.profilePresence !== 'present' && !coreNativeReady ? <div className={css.notice} data-tone="warning" role="status">此模块属于 Workbench 官方内置交付，不是社区扩展。当前 Core 官方发行单元尚未带齐它，可以补齐官方组件；这里不会把它当作 Catalog/npm/Git 扩展安装。</div> : null}
-        {inventory?.diagnosticCode === 'profile-identity-conflict' ? <div className={css.notice} data-tone="error" role="alert">当前 Profile 中存在其他来源安装的同名扩展。Workbench 不会覆盖它，请使用原安装来源卸载或升级后返回此处重新检查。</div> : null}
-        {inventoryNeedsClaim && !suiteIsOfficialBuiltin ? <div className={css.notice} data-tone="warning" role="status">发现同名功能扩展。请先验证包身份并认领，Workbench 不会重复安装或覆盖现有文件。</div> : null}
+        {profileConflict && !inventoryNeedsClaim ? <div className={css.notice} data-tone="error" role="alert">{t('modules.theProfileAlreadyHasAnUnmanagedVersion')}</div> : null}
+        {inventory?.nativeRuntime === 'disabled' ? <div className={css.notice} data-tone="warning" role="status">{t('modules.thisBuiltInModuleIsDisabledIn')}</div> : null}
+        {legacySuiteInProfile ? <div className={css.notice} data-tone="warning" role="status">{t('modules.coreNowUsesNativeDshConversationsThe')}</div> : null}
+        {suiteIsOfficialBuiltin && inventory?.profilePresence !== 'present' && !coreNativeReady ? <div className={css.notice} data-tone="warning" role="status">{t('modules.thisModuleBelongsToTheOfficialWorkbench')}</div> : null}
+        {inventory?.diagnosticCode === 'profile-identity-conflict' ? <div className={css.notice} data-tone="error" role="alert">{t('modules.thisProfileHasASameNameExtension')}</div> : null}
+        {inventoryNeedsClaim && !suiteIsOfficialBuiltin ? <div className={css.notice} data-tone="warning" role="status">{t('modules.aSameNameExtensionWasFoundVerify')}</div> : null}
         {plan?.status === 'blocked' && !profileConflict ? <div className={css.notice} data-tone="error" role="status">{workbenchUserError(suite?.signedCatalog?.revoked ? 'catalog-revoked' : 'module-incompatible').message}</div> : null}
-        <details className={css.trust}><summary>模块身份、权限与来源</summary><dl>
-          <div><dt>模块</dt><dd>{identity.moduleId}</dd></div>
-          <div><dt>包名</dt><dd>{inventory?.packageName ?? suite?.signedCatalog?.packageName ?? '—'}</dd></div>
-          <div><dt>模块类别</dt><dd>官方内置 · DSH 原生能力复用</dd></div>
-          <div><dt>DSH 原生运行</dt><dd>{inventory?.nativeRuntime === 'enabled' ? '已启用' : inventory?.nativeRuntime === 'disabled' ? '已停用（请在 DSH 原生插件管理中启用）' : inventory?.nativeRuntime === 'restart-required' ? '等待重启' : '未确认'}</dd></div>
-          <div><dt>来源</dt><dd>{inventory?.source?.kind ?? (suite === undefined ? '未知' : 'official-builtin')}</dd></div>
-          <div><dt>信任</dt><dd>{inventory?.trust ?? (suite === undefined ? '未知' : 'catalog-verified')}</dd></div>
+        <details className={css.trust}><summary>{t('modules.moduleIdentityPermissionsAndSource')}</summary><dl>
+          <div><dt>{t('modules.module')}</dt><dd>{identity.moduleId}</dd></div>
+          <div><dt>{t('modules.packageName')}</dt><dd>{inventory?.packageName ?? suite?.signedCatalog?.packageName ?? '—'}</dd></div>
+          <div><dt>{t('modules.moduleCategory')}</dt><dd>{t('modules.builtInUsesNativeDshFeatures')}</dd></div>
+          <div><dt>{t('modules.nativeDshRuntime')}</dt><dd>{inventory?.nativeRuntime === 'enabled' ? '已启用' : inventory?.nativeRuntime === 'disabled' ? '已停用（请在 DSH 原生插件管理中启用）' : inventory?.nativeRuntime === 'restart-required' ? '等待重启' : '未确认'}</dd></div>
+          <div><dt>{t('modules.source')}</dt><dd>{inventory?.source?.kind ?? (suite === undefined ? '未知' : 'official-builtin')}</dd></div>
+          <div><dt>{t('modules.trust')}</dt><dd>{inventory?.trust ?? (suite === undefined ? '未知' : 'catalog-verified')}</dd></div>
           <div><dt>SHA-256</dt><dd><code>{identity.artifactDigest}</code></dd></div>
-          <div><dt>权限</dt><dd>{suite?.signedCatalog?.permissions.join(', ') ?? '目录待验证'}</dd></div>
-          <div><dt>团队目录</dt><dd data-catalog-state={suite === undefined ? 'missing' : 'verified'}>{snapshot.catalogId ?? '尚未导入'}</dd></div>
-          <div><dt>发布者</dt><dd>{WORKBENCH_TEAM_TRUST_ROOT_V1.keyId}</dd></div>
-          <div><dt>DSH 代际</dt><dd>{suite?.signedCatalog?.dshGeneration ?? WORKBENCH_DSH_GENERATION}</dd></div>
-          <div><dt>所需能力</dt><dd>{suite?.requires.capabilities.join(', ') ?? '目录待验证'}</dd></div>
-          <div><dt>上游</dt><dd><code>{suite?.signedCatalog?.provenance.upstreamCommit}</code></dd></div>
-          <div><dt>源摘要</dt><dd><code>{suite?.signedCatalog?.provenance.sourceDigest}</code></dd></div>
-          <div><dt>补丁摘要</dt><dd><code>{suite?.signedCatalog?.provenance.patchDigest}</code></dd></div>
-          {installedConflict ? <div><dt>已安装身份</dt><dd>{snapshot.host?.installed?.version}<br /><code>{snapshot.host?.installed?.artifactDigest}</code></dd></div> : null}
+          <div><dt>{t('modules.permissions')}</dt><dd>{suite?.signedCatalog?.permissions.join(', ') ?? '目录待验证'}</dd></div>
+          <div><dt>{t('modules.teamCatalog')}</dt><dd data-catalog-state={suite === undefined ? 'missing' : 'verified'}>{snapshot.catalogId ?? '尚未导入'}</dd></div>
+          <div><dt>{t('tools.publisher')}</dt><dd>{WORKBENCH_TEAM_TRUST_ROOT_V1.keyId}</dd></div>
+          <div><dt>{t('modules.dshGeneration')}</dt><dd>{suite?.signedCatalog?.dshGeneration ?? WORKBENCH_DSH_GENERATION}</dd></div>
+          <div><dt>{t('modules.requiredCapabilities')}</dt><dd>{suite?.requires.capabilities.join(', ') ?? '目录待验证'}</dd></div>
+          <div><dt>{t('modules.upstream')}</dt><dd><code>{suite?.signedCatalog?.provenance.upstreamCommit}</code></dd></div>
+          <div><dt>{t('modules.sourceDigest')}</dt><dd><code>{suite?.signedCatalog?.provenance.sourceDigest}</code></dd></div>
+          <div><dt>{t('modules.patchDigest')}</dt><dd><code>{suite?.signedCatalog?.provenance.patchDigest}</code></dd></div>
+          {installedConflict ? <div><dt>{t('modules.installedIdentity')}</dt><dd>{snapshot.host?.installed?.version}<br /><code>{snapshot.host?.installed?.artifactDigest}</code></dd></div> : null}
         </dl></details>
       </section>
       <div className={css.scopeBar}>
-          <div><strong>Workbench 入口显示</strong><span className={css.subtle}>适用于所有工作台和新建工作台，不会启用或停用 DSH 插件</span></div>
-        <span className={css.subtle}>{pages.filter(page => liveEditors.some(editor => editor.id === page.id) && !globalHiddenEditorIds.includes(page.id)).length} / {pages.length} 个入口已显示</span>
+          <div><strong>{t('modules.workbenchPageVisibility')}</strong><span className={css.subtle}>{t('modules.appliesToExistingAndNewWorkbenchesDoes')}</span></div>
+        <span className={css.subtle}>{pages.filter(page => liveEditors.some(editor => editor.id === page.id) && !globalHiddenEditorIds.includes(page.id)).length} / {pages.length} {t('modules.visiblePages')}</span>
       </div>
-       <div className={css.pageHeading}><h3>管理内页入口</h3><span id={scopeId} className={css.subtle}>这里只控制 Workbench 的“添加内页”菜单显示；插件启停请使用 DSH 原生插件管理</span></div>
+       <div className={css.pageHeading}><h3>{t('modules.managePageVisibility')}</h3><span id={scopeId} className={css.subtle}>{t('modules.controlsTheAddPageMenuOnlyManage')}</span></div>
       <div className={css.pages}>
       {pages.map(page => <article className={css.page} key={page.id} data-module-page={page.id}>
         <div className={css.pageRow}>
@@ -290,11 +293,11 @@ export function WorkbenchModuleManagerSection({ moduleManager, workbenchDirector
           </label>
           })()}
         </div>
-        <details className={css.pageDetails}><summary><IconChevronDownOutlineMedium />内页预览</summary><PagePreview kind={page.preview} /></details>
+        <details className={css.pageDetails}><summary><IconChevronDownOutlineMedium />{t('modules.pagePreview')}</summary><PagePreview kind={page.preview} /></details>
       </article>)}</div>
-      {pages.length === 0 ? <p className={css.empty}>内页预览不可用</p> : null}
-       {onShare === undefined ? null : <footer className={css.sectionFooter}><span className={css.subtle}>这里的偏好对所有工作台生效；正在使用的标签不会被关闭，只会影响之后添加的入口。</span>
-        <button className={css.command} type="button" disabled={busy} onClick={() => onShare('export')}><IconShareOutlineMedium />分享工作台布局</button></footer>}
+      {pages.length === 0 ? <p className={css.empty}>{t('modules.pagePreviewUnavailable')}</p> : null}
+       {onShare === undefined ? null : <footer className={css.sectionFooter}><span className={css.subtle}>{t('modules.appliesToAllWorkbenchesAndOnlyAffects')}</span>
+        <button className={css.command} type="button" disabled={busy} onClick={() => onShare('export')}><IconShareOutlineMedium />{t('modules.shareWorkbenchLayout')}</button></footer>}
     </>}
   </section>
 }

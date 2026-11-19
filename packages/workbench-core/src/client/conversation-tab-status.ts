@@ -1,3 +1,5 @@
+import { defaultWorkbenchTranslate } from '../foundation/workbench-locale.ts'
+import type { WorkbenchMessageKey } from '../foundation/workbench-messages.ts'
 import type { ISessions, SessionReference, SessionSnapshot, SessionEventWindow } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { SessionStatusSnapshot } from '@deepseek-ai/dsh-client-ui-session/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
@@ -8,13 +10,17 @@ declare module '@deepseek-ai/dsh-api-session-controller/client' {
 
 interface Source<T> { getSnapshot(): T; subscribe(listener: () => void): () => void }
 export type ConversationTabPhase = 'idle' | 'running' | 'attention' | 'completed' | 'failed' | 'stopped' | 'unknown'
-export interface ConversationTabStatus { readonly status: ConversationTabPhase; readonly label: string }
+export interface ConversationTabStatus { readonly status: ConversationTabPhase; readonly label: string; readonly labelKey?: WorkbenchMessageKey }
 export interface ConversationTabStatusSource extends Source<ReadonlyMap<string, ConversationTabStatus>> {
   /** Observe only conversations with an open tab; duplicate views share one reference. */
   watch(sessionIds: readonly string[]): () => void
 }
 
-export const UNKNOWN_CONVERSATION_STATUS: ConversationTabStatus = { status: 'unknown', label: '正在同步对话状态' }
+function conversationStatus(status: ConversationTabPhase, labelKey: WorkbenchMessageKey): ConversationTabStatus {
+  return { status, label: defaultWorkbenchTranslate(labelKey), labelKey }
+}
+
+export const UNKNOWN_CONVERSATION_STATUS = conversationStatus('unknown', 'conversation.syncing')
 
 interface TurnOutcome { turn: number; seq: number; reason?: string }
 
@@ -42,27 +48,27 @@ function hasQueuedInput(value: unknown): boolean {
 }
 
 function phaseOf(snapshot: SessionSnapshot, pending: string | undefined, turn: TurnOutcome | undefined, awaitingNewTurn: boolean, queued: boolean, liveFailure: boolean): ConversationTabStatus {
-  if (snapshot.removed) return { status: 'failed', label: '对话已不可用' }
-  if (snapshot.openState === 'error' || snapshot.openError) return { status: 'failed', label: '无法连接对话' }
+  if (snapshot.removed) return conversationStatus('failed', 'conversation.unavailable')
+  if (snapshot.openState === 'error' || snapshot.openError) return conversationStatus('failed', 'conversation.connectionFailed')
   if (snapshot.openState !== 'open') return UNKNOWN_CONVERSATION_STATUS
-  if (pending) return { status: 'attention', label: pending === 'approval' ? '等待审批'
-    : pending === 'plan-review' ? '等待计划确认' : pending === 'question' ? '等待答复' : '等待你处理' }
-  if (snapshot.running) return { status: 'running', label: '进行中' }
-  if (snapshot.pendingSubmissions.length || snapshot.awaitingFirstTurn) return { status: 'running', label: '等待开始本轮' }
-  if (snapshot.promptError?.op === 'send') return { status: 'failed', label: '消息发送失败' }
-  if (liveFailure || snapshot.lastAgentError && (!turn?.reason || awaitingNewTurn)) return { status: 'failed', label: '本轮失败' }
-  if (queued) return { status: 'running', label: '有输入等待处理' }
-  if (awaitingNewTurn) return { status: 'unknown', label: '正在确认本轮结果' }
-  if (!turn) return snapshot.blank ? { status: 'idle', label: '尚未开始' } : { status: 'unknown', label: '暂无法确认本轮结果' }
+  if (pending) return conversationStatus('attention', pending === 'approval' ? 'conversation.awaitingApproval'
+    : pending === 'plan-review' ? 'conversation.awaitingPlan' : pending === 'question' ? 'conversation.awaitingAnswer' : 'conversation.attention')
+  if (snapshot.running) return conversationStatus('running', 'conversation.running')
+  if (snapshot.pendingSubmissions.length || snapshot.awaitingFirstTurn) return conversationStatus('running', 'conversation.awaitingTurn')
+  if (snapshot.promptError?.op === 'send') return conversationStatus('failed', 'conversation.sendFailed')
+  if (liveFailure || snapshot.lastAgentError && (!turn?.reason || awaitingNewTurn)) return conversationStatus('failed', 'conversation.failed')
+  if (queued) return conversationStatus('running', 'conversation.queued')
+  if (awaitingNewTurn) return conversationStatus('unknown', 'conversation.confirming')
+  if (!turn) return snapshot.blank ? conversationStatus('idle', 'conversation.idle') : conversationStatus('unknown', 'conversation.unknown')
   switch (turn.reason) {
-    case 'completed': return { status: 'completed', label: '本轮已完成' }
-    case 'aborted': return { status: 'stopped', label: '本轮已停止' }
-    case 'interrupted': return { status: 'stopped', label: '本轮已中断' }
-    case 'forked': return { status: 'stopped', label: '从未结束的轮次分叉' }
-    case 'error': return { status: 'failed', label: '本轮失败' }
-    case 'blocked': return { status: 'failed', label: '本轮受阻' }
-    case 'max-tokens': return { status: 'failed', label: '本轮达到输出上限' }
-    default: return { status: 'unknown', label: '暂无法确认本轮结果' }
+    case 'completed': return conversationStatus('completed', 'conversation.completed')
+    case 'aborted': return conversationStatus('stopped', 'conversation.stopped')
+    case 'interrupted': return conversationStatus('stopped', 'conversation.interrupted')
+    case 'forked': return conversationStatus('stopped', 'conversation.forked')
+    case 'error': return conversationStatus('failed', 'conversation.failed')
+    case 'blocked': return conversationStatus('failed', 'conversation.blocked')
+    case 'max-tokens': return conversationStatus('failed', 'conversation.outputLimit')
+    default: return conversationStatus('unknown', 'conversation.unknown')
   }
 }
 
@@ -94,7 +100,7 @@ export function createConversationTabStatusSource(options: {
   let disposed = false
   const publish = (id: string, next: ConversationTabStatus | undefined) => {
     const previous = snapshot.get(id)
-    if (previous?.status === next?.status && previous?.label === next?.label) return
+    if (previous?.status === next?.status && previous?.label === next?.label && previous?.labelKey === next?.labelKey) return
     const updated = new Map(snapshot)
     if (next) updated.set(id, next); else updated.delete(id)
     snapshot = updated
@@ -103,10 +109,10 @@ export function createConversationTabStatusSource(options: {
   const update = (id: string, observation: Observation) => {
     if (disposed || observations.get(id) !== observation) return
     if (generation === undefined || !observation.fresh) {
-      publish(id, { status: 'unknown', label: generation === undefined ? '连接已断开，状态待同步' : '正在同步对话状态' })
+      publish(id, conversationStatus('unknown', generation === undefined ? 'conversation.disconnected' : 'conversation.syncing'))
       return
     }
-    if (observation.failed || !observation.reference) { publish(id, { status: 'failed', label: '无法连接对话' }); return }
+    if (observation.failed || !observation.reference) { publish(id, conversationStatus('failed', 'conversation.connectionFailed')); return }
     try {
       const binding = observation.reference.binding
       const session = binding.session.getSnapshot()
@@ -134,7 +140,7 @@ export function createConversationTabStatusSource(options: {
       observation.busy = busy
       const interaction = options.interactions.getSnapshot().get(id as SessionId)?.pendingInteraction?.kind
       publish(id, phaseOf(session, interaction, observation.turn, observation.previousEnd !== undefined, queued, observation.agentErrorBoundary !== undefined))
-    } catch { publish(id, { status: 'unknown', label: '对话状态待重新同步' }) }
+    } catch { publish(id, conversationStatus('unknown', 'conversation.resync')) }
   }
   const acquire = (id: string, observation: Observation) => {
     try {

@@ -1,3 +1,5 @@
+import { useWorkbenchLocale, workbenchErrorNotice, workbenchNoticeText, WorkbenchMessageError, type WorkbenchNotice } from './workbench-locale.ts'
+import type { WorkbenchMessageKey } from './workbench-messages.ts'
 import { browserSafeUuid } from '../browser-safe-id.ts'
 import { useRef, useState } from 'react'
 import { Button, Input, Modal, IconCloseOutlineMedium, IconFolderOpenOutlineMedium, IconPlusOutlineMedium, IconPanelLeftOutlineMedium, IconDatabaseOutlineMedium } from '@deepseek-ai/dsh-client-ui-primitives'
@@ -10,14 +12,14 @@ import folders from './WorkbenchFolders.module.css'
 import design from './WorkbenchCreateDialog.module.css'
 import { workbenchFolderNameError, workbenchTargetPath } from '../workbench-folder-name.ts'
 
-function errorMessage(result: WorkbenchDirectoryCreateResult): string {
+function errorMessage(result: WorkbenchDirectoryCreateResult): WorkbenchMessageKey {
   if (result.status === 'rejected') {
-    if (result.reason === 'duplicate-name') return '已经有同名工作台，请换一个名称。'
-    if (result.reason === 'invalid-name') return '请输入工作台名称。'
-    if (result.reason === 'invalid-preset') return '区域划分已失效，请重新选择。'
+    if (result.reason === 'duplicate-name') return 'home.createError.duplicate'
+    if (result.reason === 'invalid-name') return 'home.createError.invalidName'
+    if (result.reason === 'invalid-preset') return 'home.createError.invalidLayout'
   }
-  if (result.status === 'conflict') return '设置刚刚发生了变化，请重试。'
-  return '暂时无法创建工作台，请恢复连接或处理未保存的布局后重试。'
+  if (result.status === 'conflict') return 'home.createError.conflict'
+  return 'home.createError.unavailable'
 }
 
 /** Creation names a layout and lets the user review an optional AI draft before saving it. */
@@ -25,6 +27,7 @@ export function WorkbenchCreateDialog({ directory, presetId, onClose, onCreated,
   directory: WorkbenchDirectory; presetId: WorkbenchLayoutPresetId; onClose(): void; onCreated(workbenchId: string): void | Promise<void>
   generateDraft?: (input: WorkbenchCreationDraftInputV1) => Promise<string>
 }) {
+  const { t } = useWorkbenchLocale()
   const [name, setName] = useState('')
   const [parentPath, setParentPath] = useState('')
   const [folderName, setFolderName] = useState('')
@@ -32,78 +35,80 @@ export function WorkbenchCreateDialog({ directory, presetId, onClose, onCreated,
   const [layout, setLayout] = useState(presetId)
   const [description, setDescription] = useState('')
   const [background, setBackground] = useState('')
-  const [backgroundNotice, setBackgroundNotice] = useState<string>()
+  const [backgroundNotice, setBackgroundNotice] = useState<WorkbenchMessageKey>()
   const [phase, setPhase] = useState<'idle' | 'draft' | 'picking' | 'checking' | 'creating' | 'opening'>('idle')
   const [submitted, setSubmitted] = useState(false)
   const pending = useRef(false)
-  const [error, setError] = useState<string>()
+  const [error, setError] = useState<WorkbenchNotice>()
+  const [errorKey, setErrorKey] = useState<WorkbenchMessageKey>()
+  const visibleError = errorKey ? t(errorKey) : workbenchNoticeText(t, error)
   const busy = phase !== 'idle'
   const locked = busy || submitted
   const needsLocation = directory.pickParentDirectory !== undefined
-  const folderError = workbenchFolderNameError(folderName || name.trim())
+  const folderError = workbenchFolderNameError(folderName || name.trim(), t)
   const canCreate = !!name.trim() && (!needsLocation || !!parentPath.trim() && !folderError)
   const targetPath = workbenchTargetPath(parentPath, folderName || name.trim())
   const preset = WORKBENCH_LAYOUT_PRESETS.find(row => row.id === layout)!
   const assist = async () => {
     if (pending.current || submitted) return
-    if (generateDraft === undefined) { setError('当前环境未连接 DSH 原生 AI 服务。'); return }
-    if (!name.trim()) { setError('请先输入工作台名称。'); return }
-    pending.current = true; setPhase('draft'); setError(undefined); setBackgroundNotice('正在根据当前名称和简介生成背景草稿…')
+    if (generateDraft === undefined) { setErrorKey('home.theDshAiServiceIsNotConnected'); return }
+    if (!name.trim()) { setErrorKey('home.enterAWorkbenchNameFirst'); return }
+    pending.current = true; setPhase('draft'); setError(undefined); setErrorKey(undefined); setBackgroundNotice('home.draftingContextFromTheWorkbenchNameAnd')
     try {
       const draft = await generateDraft({ scope: 'create', name, description, currentValue: background })
-      if (draft.trim() === '') throw new Error('AI 返回了空的背景草稿。')
+      if (draft.trim() === '') throw new WorkbenchMessageError('home.aiReturnedAnEmptyContextDraft')
       setBackground(draft)
-      setBackgroundNotice('已根据名称和简介生成草稿，请编辑确认后创建。')
-    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); setBackgroundNotice(undefined) }
+      setBackgroundNotice('home.reviewAndEditTheDraftBeforeCreating')
+    } catch (cause) { setError(workbenchErrorNotice(cause, 'settings.saveFailed')); setBackgroundNotice(undefined) }
     finally { pending.current = false; setPhase('idle') }
   }
   const create = async () => {
     if (pending.current || !canCreate) return
-    pending.current = true; setPhase(submitted ? 'creating' : 'checking'); setError(undefined)
+    pending.current = true; setPhase(submitted ? 'creating' : 'checking'); setError(undefined); setErrorKey(undefined)
     try {
       if (!submitted && directory.checkCreateLocation) await directory.checkCreateLocation(parentPath, folderName || name.trim())
       setSubmitted(true); setPhase('creating')
       const result = await directory.create({ name, description, parentPath, folderName: folderName || name.trim(), requestId, layoutPresetId: layout, ...(background.trim() === '' ? {} : { background }) })
-      if (result.status !== 'committed') { setSubmitted(false); setError(errorMessage(result)); return }
+      if (result.status !== 'committed') { setSubmitted(false); setErrorKey(errorMessage(result)); return }
       const id = 'workbenchId' in result ? result.workbenchId : directory.getSnapshot().activeWorkbenchId
       if (id) { setPhase('opening'); await onCreated(id) }
       onClose()
-    } catch (cause) { setError(cause instanceof Error ? cause.message : '暂时无法创建工作台，请恢复连接后重试。') } finally { pending.current = false; setPhase('idle') }
+    } catch (cause) { setError(workbenchErrorNotice(cause, 'home.couldNotCreateTheWorkbenchReconnectAnd')) } finally { pending.current = false; setPhase('idle') }
   }
   const close = () => { if (!busy) onClose() }
   const pickLocation = async () => {
     if (pending.current || submitted || !directory.pickParentDirectory) return
-    pending.current = true; setPhase('picking'); setError(undefined)
+    pending.current = true; setPhase('picking'); setError(undefined); setErrorKey(undefined)
     try { const selected = await directory.pickParentDirectory(); if (selected) setParentPath(selected) }
-    catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) }
+    catch (cause) { setError(workbenchErrorNotice(cause, 'settings.saveFailed')) }
     finally { pending.current = false; setPhase('idle') }
   }
-  return <Modal open onClose={close} title="创建工作台" headless className={`${css.wizardModal} ${design.modal}`}>
+  return <Modal open onClose={close} title={t('home.createWorkbench')} headless className={`${css.wizardModal} ${design.modal}`}>
     <form className={css.wizard} onSubmit={event => { event.preventDefault(); void create() }}>
-      <header className={css.wizardHeader}><span className={design.headerIcon}><IconPlusOutlineMedium size={22} /></span><div className={design.heading}><h2>创建工作台</h2><p className={css.formHint}>为项目、对话和工作进展安放一个空间。</p></div><Button type="button" aria-label="关闭创建窗口" disabled={busy} onClick={close}><IconCloseOutlineMedium size={18} /></Button></header>
+      <header className={css.wizardHeader}><span className={design.headerIcon}><IconPlusOutlineMedium size={22} /></span><div className={design.heading}><h2>{t('home.createWorkbench')}</h2><p className={css.formHint}>{t('home.createAPlaceForYourProjectsConversations')}</p></div><Button type="button" aria-label={t('home.closeTheCreationDialog')} disabled={busy} onClick={close}><IconCloseOutlineMedium size={18} /></Button></header>
       <div className={css.wizardBody}>
-        <label>名称<Input className={css.formInput ?? ''} data-modal-autofocus maxLength={160} value={name} disabled={locked} onChange={event => setName(event.target.value)} placeholder="例如：产品研发、学习笔记" /></label>
+        <label>{t('home.name')}<Input className={css.formInput ?? ''} data-modal-autofocus maxLength={160} value={name} disabled={locked} onChange={event => setName(event.target.value)} placeholder={t('home.eGProductDevelopmentOrStudyNotes')} /></label>
         {directory.pickParentDirectory ? <>
           <div className={css.locationField}>
-            <label>存放位置<Input className={css.formInput ?? ''} value={parentPath} disabled={locked} onChange={event => setParentPath(event.target.value)} placeholder="选择父文件夹" /></label>
-            <Button variant="outline" type="button" disabled={locked} onClick={() => { void pickLocation() }}><IconFolderOpenOutlineMedium size={16} />选择文件夹</Button>
+            <label>{t('home.location')}<Input className={css.formInput ?? ''} value={parentPath} disabled={locked} onChange={event => setParentPath(event.target.value)} placeholder={t('home.chooseParentFolder')} /></label>
+            <Button variant="outline" type="button" disabled={locked} onClick={() => { void pickLocation() }}><IconFolderOpenOutlineMedium size={16} />{t('home.chooseFolder')}</Button>
           </div>
-          <details className={design.folderDetails}><summary>自定义文件夹名称</summary><label>文件夹名称<Input className={css.formInput ?? ''} maxLength={160} value={folderName} disabled={locked} onChange={event => setFolderName(event.target.value)} placeholder={name || '默认使用工作台名称'} /></label></details>
-          {targetPath ? <div className={`${folders.preview} ${design.path}`}><IconFolderOpenOutlineMedium size={18} /><div><span className={folders.caption}>将在这里创建</span><p className={folders.path}>{targetPath}</p></div></div> : null}
+          <details className={design.folderDetails}><summary>{t('home.customizeFolderName')}</summary><label>{t('project.folderName')}<Input className={css.formInput ?? ''} maxLength={160} value={folderName} disabled={locked} onChange={event => setFolderName(event.target.value)} placeholder={name || t('home.defaultsToTheWorkbenchName')} /></label></details>
+          {targetPath ? <div className={`${folders.preview} ${design.path}`}><IconFolderOpenOutlineMedium size={18} /><div><span className={folders.caption}>{t('home.willBeCreatedHere')}</span><p className={folders.path}>{targetPath}</p></div></div> : null}
           {(folderName || name) && folderError ? <p className={css.error} role="alert">{folderError}</p> : null}
         </> : null}
-        <details className={design.section}><summary><IconPanelLeftOutlineMedium size={18} /><span>区域布局<small>{preset.name} · {preset.areas} 个区域</small></span></summary><div className={design.presets} role="group" aria-label="选择区域布局">{WORKBENCH_LAYOUT_PRESETS.map(row => <button key={row.id} type="button" aria-pressed={layout === row.id} disabled={locked} onClick={() => setLayout(row.id)}><WorkbenchPresetIcon node={row.root} /><span>{row.name}</span></button>)}</div><p className={css.formHint}>创建后可以调整布局，并为各区域关联项目文件夹。</p></details>
-        <details className={design.section}><summary><IconDatabaseOutlineMedium size={18} /><span>工作背景<small>可选，之后也可以补充</small></span></summary><div className={design.background}>
-          <label>简介（可选）<textarea rows={2} maxLength={4000} value={description} disabled={locked} onChange={event => setDescription(event.target.value)} placeholder="写下这个工作台的用途" /></label>
-          <label>工作台背景（可选）<textarea rows={4} maxLength={20_000} value={background} disabled={locked} onChange={event => { setBackground(event.target.value); setBackgroundNotice(undefined) }} placeholder="目标、长期约束、偏好和成功标准" /></label>
-          <div className={css.assistActions}><Button variant="outline" size="sm" type="button" disabled={locked || !generateDraft || !name.trim()} onClick={() => { void assist() }}>AI 辅助生成背景草稿</Button><span className={css.formHint}>{generateDraft ? '草稿由你确认后保存' : '当前环境未连接 DSH 原生 AI 服务，可直接手动填写'}</span></div>
-          {backgroundNotice ? <p className={css.formHint} role="status">{backgroundNotice}</p> : null}
+        <details className={design.section}><summary><IconPanelLeftOutlineMedium size={18} /><span>{t('home.areaLayout2')}<small>{t(`layout.preset.${preset.id}`)} · {t('layout.areaCount', { count: preset.areas })}</small></span></summary><div className={design.presets} role="group" aria-label={t('home.chooseAreaLayout')}>{WORKBENCH_LAYOUT_PRESETS.map(row => <button key={row.id} type="button" aria-pressed={layout === row.id} disabled={locked} onClick={() => setLayout(row.id)}><WorkbenchPresetIcon node={row.root} /><span>{t(`layout.preset.${row.id}`)}</span></button>)}</div><p className={css.formHint}>{t('home.youCanChangeTheLayoutAndAssign')}</p></details>
+        <details className={design.section}><summary><IconDatabaseOutlineMedium size={18} /><span>{t('home.workContext')}<small>{t('home.optionalYouCanAddItLater')}</small></span></summary><div className={design.background}>
+          <label>{t('home.descriptionOptional')}<textarea rows={2} maxLength={4000} value={description} disabled={locked} onChange={event => setDescription(event.target.value)} placeholder={t('home.describeWhatThisWorkbenchIsFor')} /></label>
+          <label>{t('home.workbenchContextOptional')}<textarea rows={4} maxLength={20_000} value={background} disabled={locked} onChange={event => { setBackground(event.target.value); setBackgroundNotice(undefined) }} placeholder={t('home.goalsLongTermConstraintsPreferencesAndSuccess')} /></label>
+          <div className={css.assistActions}><Button variant="outline" size="sm" type="button" disabled={locked || !generateDraft || !name.trim()} onClick={() => { void assist() }}>{t('home.draftContextWithAi')}</Button><span className={css.formHint}>{generateDraft ? t('home.reviewTheDraftBeforeItIsSaved') : t('home.theDshAiServiceIsDisconnectedEnter')}</span></div>
+          {backgroundNotice ? <p className={css.formHint} role="status">{t(backgroundNotice)}</p> : null}
         </div></details>
-        {error ? <p className={css.error} role="alert">{error}</p> : null}
-        {error && submitted ? <p className={css.formHint}>继续创建会恢复同一次操作，不会重复建立工作台。</p> : null}
-        {['checking', 'creating', 'opening'].includes(phase) ? <div className={design.progress} role="status"><progress aria-label="创建工作台进度" /><span>{phase === 'checking' ? '正在检查目标目录…' : phase === 'creating' ? '正在创建工作台并准备主会话…' : '正在打开工作台…'}</span></div> : null}
+        {visibleError ? <p className={css.error} role="alert">{visibleError}</p> : null}
+        {error && submitted ? <p className={css.formHint}>{t('home.continuingResumesTheSameOperationWithoutCreating')}</p> : null}
+        {['checking', 'creating', 'opening'].includes(phase) ? <div className={design.progress} role="status"><progress aria-label={t('home.workbenchCreationProgress')} /><span>{phase === 'checking' ? t('home.checkingTheDestinationFolder') : phase === 'creating' ? t('home.creatingTheWorkbenchAndPreparingItsMain') : t('home.openingWorkbench')}</span></div> : null}
       </div>
-      <footer className={css.wizardActions}><Button type="button" disabled={busy} onClick={close}>取消</Button><Button type="submit" variant="primary" disabled={busy || !canCreate}>{phase === 'draft' ? '正在生成草稿…' : phase === 'checking' ? '正在检查…' : phase === 'picking' ? '正在选择位置…' : phase === 'creating' ? '正在创建…' : phase === 'opening' ? '正在打开…' : submitted ? '继续创建' : '创建并打开'}</Button></footer>
+      <footer className={css.wizardActions}><Button type="button" disabled={busy} onClick={close}>{t('action.cancel')}</Button><Button type="submit" variant="primary" disabled={busy || !canCreate}>{phase === 'draft' ? t('home.generatingDraft') : phase === 'checking' ? t('home.checking') : phase === 'picking' ? t('home.choosingLocation') : phase === 'creating' ? t('project.creating') : phase === 'opening' ? t('home.opening') : submitted ? t('home.resumeCreation') : t('home.createAndOpen')}</Button></footer>
     </form>
   </Modal>
 }

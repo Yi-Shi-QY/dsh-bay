@@ -1,3 +1,4 @@
+import { useWorkbenchLocale } from './workbench-locale.ts'
 import { cloneElement, useEffect, useState, type ComponentProps } from 'react'
 import { Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { WorkbenchAreaTabSummary } from './area-tab-rows.ts'
@@ -9,6 +10,7 @@ export function WorkbenchTabTooltip({ summary, children, disabled = false, side 
   disabled?: boolean
   side?: ComponentProps<typeof Tooltip>['side']
 }) {
+  const { t } = useWorkbenchLocale()
   const [hovered, setHovered] = useState(false)
   const [focused, setFocused] = useState(false)
   const [dismissed, setDismissed] = useState(false)
@@ -18,7 +20,7 @@ export function WorkbenchTabTooltip({ summary, children, disabled = false, side 
     window.addEventListener('keydown', dismiss)
     return () => window.removeEventListener('keydown', dismiss)
   }, [hovered, focused])
-  return <Tooltip label={summary.information?.tooltip ?? `${summary.title}\n状态：${summary.statusLabel}`}
+  return <Tooltip label={summary.information?.tooltip ?? `${summary.title}\n${t('tab.info.status', { status: summary.statusLabel })}`}
     portal delayMs={350} focusDelayMs={200} maxWidth={420} side={side} disabled={disabled || dismissed}>
     {cloneElement(children, {
       onPointerEnter: event => { children.props.onPointerEnter?.(event); setHovered(true) },

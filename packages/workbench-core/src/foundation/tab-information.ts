@@ -1,3 +1,4 @@
+import { defaultWorkbenchTranslate, workbenchPageTitle, type WorkbenchTranslate } from './workbench-locale.ts'
 import { parseFileAddress } from '@deepseek-ai/dsh-util-workspace-path'
 import { workbenchBrowserUrlFromAddress, workbenchResourceSessionId } from '../client/workbench-resource-opener.ts'
 import { workbenchAgentPresetLabel } from './agent-preset-label.ts'
@@ -47,14 +48,17 @@ function browserUrl(value: unknown): string | undefined {
 /** Derive display-only information from current facts. Never mount editors or fetch on hover. */
 export function buildWorkbenchTabInformation(input: {
   tab: TabDocument
+  title?: string
   editor: WorkbenchEditorCatalogRow | undefined
   areaBinding: SessionBindingV1 | undefined
   statusLabel: string
   ordinal: number
   facts?: WorkbenchTabInformationFacts
+  t?: WorkbenchTranslate
 }): WorkbenchTabInformation {
-  const { tab, editor, facts } = input
-  const lines = [tab.lastKnownTitle, `类型：${editor?.label ?? '不可用内页'}`]
+  const { tab, editor, facts, t = defaultWorkbenchTranslate } = input
+  const title = input.title ?? tab.lastKnownTitle
+  const lines = [title, t('tab.info.type', { name: editor ? workbenchPageTitle(t, editor.id, editor.label) : t('tab.unavailablePage') })]
   const details: string[] = []
   const state = record(tab.state)
   const address = text(state?.resourceAddress)
@@ -69,47 +73,47 @@ export function buildWorkbenchTabInformation(input: {
   const marker = workspace && sessionId ? facts?.markersByWorkspace?.[workspace.workspaceId]?.[sessionId]?.label : undefined
   const conversationTitle = text(session?.title) ?? text(session?.displayTitle)
   if (sessionId) {
-    const name = [marker, conversationTitle ?? '对话信息暂不可用'].filter(Boolean).join(' · ')
-    lines.push(`对话：${name}`)
+    const name = [marker, conversationTitle ?? t('tab.conversationInfoUnavailable')].filter(Boolean).join(' · ')
+    lines.push(t('tab.info.conversation', { name }))
     details.push(name)
     const preset = session?.projectionValues?.agentPreset
-    const mode = preset === null ? '未配置模式' : preset ? workbenchAgentPresetLabel(preset) : '暂未同步'
-    lines.push(`Agent 模式：${mode}`)
+    const mode = preset === null ? t('tab.modeNotSet') : preset ? workbenchAgentPresetLabel(preset) : t('tab.notSynced')
+    lines.push(t('tab.info.mode', { name: mode }))
     if (preset) details.push(mode)
   } else if (tab.editorScope === 'session' || pending) {
-    lines.push('对话：待绑定')
+    lines.push(t('tab.pendingConversation'))
   }
   const project = text(workspace?.title) ?? text(workspace?.path)?.split(/[\\/]/).filter(Boolean).at(-1)
-  if (project) { lines.push(`项目：${project}`); details.push(project) }
+  if (project) { lines.push(t('tab.info.project', { name: project })); details.push(project) }
 
   if (!pending) {
     let path: string | undefined
     if (address) {
       try { path = parseFileAddress(address)?.path } catch { /* An invalid saved address is not display metadata. */ }
     }
-    if (path) { lines.push(`文件：${path}`); details.push(path) }
+    if (path) { lines.push(t('tab.info.file', { path })); details.push(path) }
     if (tab.editorId === 'workbench.workspace-files' || tab.editorId === 'workbench.terminal') {
       const directory = text(session?.cwd) ?? text(workspace?.path)
-      if (directory) { lines.push(`${tab.editorId === 'workbench.terminal' ? '对话目录' : '目录'}：${directory}`); details.push(directory) }
+      if (directory) { lines.push(t(tab.editorId === 'workbench.terminal' ? 'tab.info.conversationFolder' : 'tab.info.folder', { path: directory })); details.push(directory) }
     }
     if (tab.editorId === 'workbench.browser') {
       const history = state?.history
       const index = state?.index
       const persistedUrl = browserUrl(Array.isArray(history) && typeof index === 'number' ? history[index] : undefined) ?? browserUrl(state?.url)
       const url = persistedUrl ?? (address ? browserUrl(workbenchBrowserUrlFromAddress(address)) : undefined)
-      if (url) { lines.push(`${persistedUrl && state?.unknown === true ? '上次已知地址' : '已打开地址'}：${url}`); details.push(url) }
+      if (url) { lines.push(t(persistedUrl && state?.unknown === true ? 'tab.info.lastUrl' : 'tab.info.openUrl', { url })); details.push(url) }
     }
     if (tab.editorId === 'workbench.plan') {
       const planTitle = text(record(record(state?.nativeParams)?.planReview)?.title)
-      if (planTitle) { lines.push(`计划：${planTitle}`); details.push(planTitle) }
+      if (planTitle) { lines.push(t('tab.info.plan', { name: planTitle })); details.push(planTitle) }
     }
   }
-  lines.push(`状态：${input.statusLabel}`)
-  if (facts?.location) lines.push(`位置：${facts.location} · 第 ${input.ordinal} 个内页`)
+  lines.push(t('tab.info.status', { status: input.statusLabel }))
+  if (facts?.location) lines.push(t('tab.info.location', { location: facts.location, index: input.ordinal }))
   return {
     tooltip: lines.join('\n'),
     detail: details.join(' · '),
     searchText: [...lines, session?.projectionValues?.agentPreset ?? ''].join(' ').toLocaleLowerCase('zh-CN'),
-    accessibleLabel: [tab.lastKnownTitle, ...details].join(' · '),
+    accessibleLabel: [title, ...details].join(' · '),
   }
 }

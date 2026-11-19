@@ -19,6 +19,8 @@ import { createFileWorkbenchSettings } from '../src/client/file-workbench-settin
 import { WORKBENCH_DIRECTORY_ROUTE } from '../src/workbench-directory-contract.ts'
 import { WORKBENCH_ACCESS_HEADER } from '../src/workbench-access-contract.ts'
 import { createProjectNeutralFrameSettings } from '../src/foundation/frame-settings-adapter.ts'
+import { WORKBENCH_LOCALE_NAMESPACE, workbenchMessages } from '../src/foundation/workbench-messages.ts'
+import { createTestWorkbenchLocale } from './workbench-locale-fixture.ts'
 
 const cleanup: Array<() => Promise<void> | void> = []
 afterEach(async () => { for (const dispose of cleanup.splice(0).reverse()) await dispose(); vi.unstubAllGlobals() })
@@ -120,13 +122,16 @@ async function bench(configForms?: unknown, modeController?: Parameters<typeof a
       }
     },
   }
+  const locale = createTestWorkbenchLocale(false)
+  vi.spyOn(locale, 'register')
   const ctx = {
     remote: { settings: { mutate: vi.fn() }, $on: vi.fn(() => () => {}) },
+    locale,
     ...(configForms === undefined ? {} : { configForms }),
     uiSession: { sessionStatus: { getSnapshot: () => new Map(), subscribe: () => () => {} } },
     uiWorkspace: { connectWorkspace: vi.fn(async () => 'new-session'), pickDirectory: vi.fn() },
     effect: vi.fn((handler?: () => unknown, name?: string) => {
-      if (name === 'workbench: file authority') { const dispose = handler?.(); if (typeof dispose === 'function') cleanup.push(dispose as () => void) }
+      if (name === 'workbench: file authority' || name === 'workbench: dictionaries') { const dispose = handler?.(); if (typeof dispose === 'function') cleanup.push(dispose as () => void) }
       return () => {}
     }),
     slots,
@@ -268,8 +273,22 @@ describe('Core additive browser foundation', () => {
     expect(b.open).not.toHaveBeenCalled()
   })
 
+  it('registers bilingual Bay copy on the host locale and provides that locale to the workbench', async () => {
+    const b = await bench()
+    expect(b.ctx.locale.register).toHaveBeenCalledExactlyOnceWith(WORKBENCH_LOCALE_NAMESPACE, workbenchMessages)
+    const injectSurface = b.slots.entries('shell.overlay')[0]?.inject as () => { locale: unknown }
+    expect(injectSurface().locale).toBe(b.ctx.locale)
+    const label = b.slots.entries('settings.section')[0]?.options?.label as () => string
+    expect(label()).toBe('工作台')
+    b.ctx.locale.setLocale('en')
+    expect(label()).toBe('Workbench')
+    b.ctx.locale.setLocale('zh')
+    expect(label()).toBe('工作台')
+  })
+
   it('registers the read-only Creator provider through the optional native client bridge and releases it', async () => {
     const b = await bench()
+    b.ctx.locale = createTestWorkbenchLocale(false)
     const dispose = vi.fn()
     const register = vi.fn(() => dispose)
     Object.assign(b.ctx, { get: (name: string) => name === 'cordisInspect' ? { register } : undefined })
@@ -288,6 +307,7 @@ describe('Core additive browser foundation', () => {
 
   it('does not read an undeclared optional model service from the Cordis Context', async () => {
     const b = await bench()
+    b.ctx.locale = createTestWorkbenchLocale(false)
     const strict = new Proxy(b.ctx, { get(target, key, receiver) {
       if (key === 'modelSelectionSource') throw new Error('undeclared service')
       return Reflect.get(target, key, receiver)
@@ -297,6 +317,7 @@ describe('Core additive browser foundation', () => {
 
   it('resolves the browser window RPC from the injected Connection service', async () => {
     const b = await bench()
+    b.ctx.locale = createTestWorkbenchLocale(false)
     const rpc = { call: vi.fn() }
     Object.assign(b.ctx, { get: vi.fn((name: string) => name === 'connection' ? { rpc } : undefined) })
     const result = applyWorkbenchCoreFoundation(b.ctx as never)

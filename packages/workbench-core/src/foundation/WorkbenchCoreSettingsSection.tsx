@@ -18,8 +18,10 @@ import type { DistributionPackageService } from './distribution-package-service.
 import { DESKTOP_SETTINGS_CONTEXT, scopeSettingsSnapshot, settingsViewMemory, type WorkbenchSettingsContextV1, type WorkbenchSettingsOpenOptionsV1 } from './settings-context.ts'
 import css from './WorkbenchSettings.module.css'
 import { WorkbenchBackgroundAiSettings } from './WorkbenchBackgroundAiSettings.tsx'
+import { useWorkbenchLocale, WorkbenchLocaleContext, type WorkbenchLocaleSource } from './workbench-locale.ts'
 
 export type WorkbenchCoreSettingsSectionProps = ComponentProps<typeof WorkbenchSettingsSection> & {
+  locale?: WorkbenchLocaleSource | undefined
   settingsSource?: import('@deepseek-ai/dsh-client-ui-slots').HostObservable<SettingsScopeSnapshot<WorkbenchSettingsV4>>
   settingsContext?: WorkbenchSettingsContextV1
   openOptions?: WorkbenchSettingsOpenOptionsV1
@@ -41,6 +43,13 @@ export type WorkbenchCoreSettingsSectionProps = ComponentProps<typeof WorkbenchS
 
 /** One settings view shared by the native DSH entry and the Workbench dialog. */
 export function WorkbenchCoreSettingsSection(props: WorkbenchCoreSettingsSectionProps) {
+  return props.locale === undefined
+    ? <WorkbenchCoreSettingsContent {...props} />
+    : <WorkbenchLocaleContext.Provider value={props.locale}><WorkbenchCoreSettingsContent {...props} /></WorkbenchLocaleContext.Provider>
+}
+
+function WorkbenchCoreSettingsContent(props: WorkbenchCoreSettingsSectionProps) {
+  const { t } = useWorkbenchLocale()
   const context = props.settingsContext ?? DESKTOP_SETTINGS_CONTEXT
   const browser = context.mode === 'browser-workbench'
   const memory = settingsViewMemory(context)
@@ -72,20 +81,20 @@ export function WorkbenchCoreSettingsSection(props: WorkbenchCoreSettingsSection
   useEffect(() => props.registerCloseRequest?.(() => attempt(() => props.close())), [props.registerCloseRequest, attempt, props.close])
   useEffect(() => { if (panel.current) panel.current.scrollTop = memory.scroll[section] ?? 0 }, [section, memory])
   useEffect(() => { const start = performance.now(); const mark = `workbench-settings:${id}`; performance.mark(mark); return () => { performance.measure('workbench-settings-lifetime', { start, end: performance.now() }); performance.clearMarks(mark) } }, [id])
-  const tabs = browser ? [{ id: 'workbenches', label: '当前工作台', icon: <IconPanelLeftOutlineMedium /> }, { id: 'pages', label: '使用中的内页', icon: <IconCordisPluginOutlineMedium /> }, { id: 'interactions', label: '背景 AI', icon: <IconSettingsOutlineMedium /> }, { id: 'sharing', label: '导入与分享', icon: <IconShareOutlineMedium /> }]
-    : [{ id: 'pages', label: '内页与扩展', icon: <IconCordisPluginOutlineMedium /> }, { id: 'interactions', label: '交互偏好', icon: <IconSettingsOutlineMedium /> }]
+  const tabs = browser ? [{ id: 'workbenches', label: t('home.currentWorkbench'), icon: <IconPanelLeftOutlineMedium /> }, { id: 'pages', label: t('home.pagesInUse'), icon: <IconCordisPluginOutlineMedium /> }, { id: 'interactions', label: t('home.backgroundAi'), icon: <IconSettingsOutlineMedium /> }, { id: 'sharing', label: t('home.importAndSharing'), icon: <IconShareOutlineMedium /> }]
+    : [{ id: 'pages', label: t('empty.manage'), icon: <IconCordisPluginOutlineMedium /> }, { id: 'interactions', label: t('home.interactionPreferences'), icon: <IconSettingsOutlineMedium /> }]
   const actualSection = tabs.some(tab => tab.id === section) ? section : browser ? 'workbenches' : 'pages'
   const editors = browser ? allEditors.filter(editor => Object.values(scoped.value?.workbenches ?? {}).some(record => areasOf(record.document.root).some(area => area.moduleHistory.some(page => page.editorId === editor.id && page.editorScope === editor.scope)))) : allEditors
   const pageProps = { ...props, settingsContext: context, ...(openOptions ? { openOptions } : {}), value: scoped.value ?? lastValue.current, settingsWritable: snapshot.status === 'ready' && snapshot.writable, settingsRevision: snapshot.revision, editors, memory, navigate, onDirty }
   return <div className={css.settingsRoot} data-workbench-settings="core" data-settings-mode={context.mode}>
     <div className={css.settingsLayout}>
-      <nav className={css.navigation} aria-label="工作台设置分类"><div className={css.wideNavigation} role="tablist" aria-orientation="vertical">{tabs.map((tab, index) => <button key={tab.id} role="tab" id={`${id}-${tab.id}`} aria-controls={`${id}-content`} aria-selected={actualSection === tab.id} tabIndex={actualSection === tab.id ? 0 : -1} onClick={() => navigate({ section: tab.id as typeof section })} onKeyDown={event => {
+      <nav className={css.navigation} aria-label={t('home.workbenchSettingsCategories')}><div className={css.wideNavigation} role="tablist" aria-orientation="vertical">{tabs.map((tab, index) => <button key={tab.id} role="tab" id={`${id}-${tab.id}`} aria-controls={`${id}-content`} aria-selected={actualSection === tab.id} tabIndex={actualSection === tab.id ? 0 : -1} onClick={() => navigate({ section: tab.id as typeof section })} onKeyDown={event => {
         if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
         event.preventDefault(); const next = event.key === 'Home' ? tabs[0] : event.key === 'End' ? tabs[tabs.length - 1] : tabs[(index + (['ArrowUp', 'ArrowLeft'].includes(event.key) ? tabs.length - 1 : 1)) % tabs.length]
         if (next) { navigate({ section: next.id as typeof section }); document.getElementById(`${id}-${next.id}`)?.focus() }
-      }}><span className={css.navIcon}>{tab.icon}</span>{tab.label}</button>)}</div><label className={css.narrowNavigation}>设置分类<select aria-label="工作台设置分类" value={actualSection} onChange={event => navigate({ section: event.target.value as typeof section })}>{tabs.map(tab => <option key={tab.id} value={tab.id}>{tab.label}</option>)}</select></label></nav>
+      }}><span className={css.navIcon}>{tab.icon}</span>{tab.label}</button>)}</div><label className={css.narrowNavigation}>{t('home.settingsCategory')}<select aria-label={t('home.workbenchSettingsCategories')} value={actualSection} onChange={event => navigate({ section: event.target.value as typeof section })}>{tabs.map(tab => <option key={tab.id} value={tab.id}>{tab.label}</option>)}</select></label></nav>
       <div ref={panel} className={css.content} id={`${id}-content`} role="tabpanel" aria-label={tabs.find(tab => tab.id === actualSection)?.label} tabIndex={0} onScroll={event => { memory.scroll[section] = event.currentTarget.scrollTop }}>
-        {snapshot.status === 'loading' ? <p role="status">正在读取工作台设置…</p> : snapshot.status !== 'ready' ? <p role="alert">设置连接中断，请恢复 DSH 连接后重试。未保存资料保留在当前表单中。</p> : null}
+        {snapshot.status === 'loading' ? <p role="status">{t('home.loadingWorkbenchSettings')}</p> : snapshot.status !== 'ready' ? <p role="alert">{t('home.reconnectToDshToLoadSettingsUnsaved')}</p> : null}
         {actualSection === 'workbenches' ? <WorkbenchManagementPage {...pageProps} /> : actualSection === 'pages' ? <InnerPagesSettingsPage {...pageProps} /> : actualSection === 'interactions' ? browser ? <WorkbenchBackgroundAiSettings {...pageProps} /> : <InteractionSettingsPage {...pageProps} /> : browser ? <WorkbenchSharingPage {...pageProps} /> : null}
       </div>
     </div>

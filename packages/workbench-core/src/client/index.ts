@@ -1,3 +1,4 @@
+import { translateWorkbenchMessage, type WorkbenchLocaleSource, type WorkbenchTranslate } from '../foundation/workbench-locale.ts'
 import { waitForFileWorkbench } from './workbench-access.ts'
 export { createWorkbenchBundleClient } from './workbench-bundle.ts'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
@@ -186,6 +187,7 @@ interface WorkbenchCoreClientContextV1 {
   remote?: { $on(event: 'plugin-manager/changed', listener: () => void): () => void }
   on?: (event: 'connection/reset', listener: () => void) => () => void
   connection?: { rpc?: import('@deepseek-ai/dsh-client-connection/client').ClientConnectionRpc }
+  locale?: WorkbenchLocaleSource
 }
 
 function waitForWorkbenchSurface(workbenchId: string, timeoutMs = 20_000): Promise<boolean> {
@@ -215,20 +217,21 @@ function waitForWorkbenchSurface(workbenchId: string, timeoutMs = 20_000): Promi
  * Workbench Modules remain separate and arrive through their own lifecycle.
  */
 export async function apply(ctx: WorkbenchCoreClientContextV1): Promise<void> {
+  const t: WorkbenchTranslate = (key, params) => translateWorkbenchMessage(ctx.locale?.getSnapshot().active ?? 'zh', key, params)
   const browserIntent = hasBrowserWorkbenchIntent()
   if (browserIntent) {
-    mountBrowserWorkbenchStatusShell('正在验证 Workbench 浏览器窗口…')
+    mountBrowserWorkbenchStatusShell(t('window.validating'))
     ctx.effect?.(() => () => { unmountBrowserWorkbenchShell() }, 'workbench: browser isolation shell')
   }
   const resolution = await resolveBrowserWorkbenchView(ctx as never)
   if (resolution.status === 'failed') {
-    mountBrowserWorkbenchStatusShell(`无法打开 Workbench 浏览器窗口（${resolution.code}）。请从 DSH 客户端重新打开。`)
+    mountBrowserWorkbenchStatusShell(t('window.resolveFailed', { code: resolution.code }))
     return
   }
   const windowView = resolution.status === 'ready' ? resolution.view : browserIntent ? undefined : readWorkbenchWindowView()
   if (windowView) {
     try { await waitForFileWorkbench(windowView.workbenchId) }
-    catch (error) { mountBrowserWorkbenchStatusShell(`工作台目录尚不可用：${error instanceof Error ? error.message : String(error)}`); reportBrowserWorkbenchClosed(ctx as never, windowView); return }
+    catch (error) { mountBrowserWorkbenchStatusShell(t('window.notReady', { detail: error instanceof Error ? error.message : String(error) })); reportBrowserWorkbenchClosed(ctx as never, windowView); return }
   }
   const runtime = createWorkbenchCoreRuntime({
     core: WORKBENCH_CORE_MANIFEST,
@@ -292,7 +295,7 @@ export async function apply(ctx: WorkbenchCoreClientContextV1): Promise<void> {
         const result = await ctx.connection.rpc.call(WORKBENCH_WINDOW_RPC_CHANNEL, workbenchWindowRpcEndpoint('floating-read'), {
           windowId: windowView.windowId, closeToken: windowView.closeToken,
         }, AbortSignal.timeout(8_000))
-        if (!result.ok) throw new Error('浮动工作区交接读取失败')
+        if (!result.ok) throw new Error(t('window.failedToReadHandoff'))
         const snapshot = (result.value as { snapshot?: unknown }).snapshot
         if (snapshot != null) foundation.floatingRuntime.restoreHandoff(windowView.workbenchId, snapshot)
       }
@@ -300,13 +303,13 @@ export async function apply(ctx: WorkbenchCoreClientContextV1): Promise<void> {
       if (await waitForWorkbenchSurface(windowView.workbenchId)) {
         const shell = mountBrowserWorkbenchShell(windowView.workbenchId)
         if (shell.status !== 'ready') {
-          mountBrowserWorkbenchStatusShell('目标工作台无法在此 DSH 页面中安全挂载。DSH 页面内容已隔离，请从客户端重新打开工作台。')
+          mountBrowserWorkbenchStatusShell(t('window.rootCannotMount'))
           await reportBrowserWorkbenchFailed(ctx as never, windowView, shell.code ?? 'browser-shell-unsupported')
           return
         }
         const ready = await reportBrowserWorkbenchReady(ctx as never, windowView)
         if (!ready) {
-          mountBrowserWorkbenchStatusShell('DSH Host 未确认此工作台视图，页面已锁定。请返回客户端重新打开工作台。')
+          mountBrowserWorkbenchStatusShell(t('window.unconfirmed'))
           return
         }
         if (!stopped) stopHeartbeat = startBrowserWorkbenchHeartbeat(ctx as never, windowView, state => {
@@ -333,12 +336,12 @@ export async function apply(ctx: WorkbenchCoreClientContextV1): Promise<void> {
         }
       }
       else {
-        mountBrowserWorkbenchStatusShell('目标工作台未能安全挂载。DSH 页面内容已隔离，请从客户端重新打开工作台。')
+        mountBrowserWorkbenchStatusShell(t('window.mountFailed'))
         await reportBrowserWorkbenchFailed(ctx as never, windowView, 'browser-view-mount-timeout')
       }
     })().catch(async error => {
       const diagnostic = error instanceof Error ? error.message : String(error)
-      mountBrowserWorkbenchStatusShell(`Workbench 浏览器窗口启动失败：${diagnostic}。请从客户端重新打开工作台。`)
+      mountBrowserWorkbenchStatusShell(t('window.startupFailed', { detail: diagnostic }))
       await reportBrowserWorkbenchFailed(ctx as never, windowView, 'browser-view-enter-failed')
     })
   }

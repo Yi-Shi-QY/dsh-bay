@@ -1,9 +1,11 @@
+import { useWorkbenchLocale } from './workbench-locale.ts'
 import { useId, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { IconFolderOpenOutlineMedium } from '@deepseek-ai/dsh-client-ui-primitives'
 import css from './WorkbenchFrame.module.css'
 
 export function WorkbenchBrowserFolderButton({ rootPath }: { rootPath: string }) {
+  const { t } = useWorkbenchLocale()
   const [open, setOpen] = useState(false)
   const [position, setPosition] = useState({ top: 0, left: 12 })
   const trigger = useRef<HTMLButtonElement>(null)
@@ -41,12 +43,12 @@ export function WorkbenchBrowserFolderButton({ rootPath }: { rootPath: string })
   }, [open])
   return <div className={css.browserWorkspacePath}>
     <button ref={trigger} type="button" className={css.browserWorkspaceIconButton}
-      title="查看工作台文件夹路径" aria-label="查看工作台文件夹路径"
+      title={t('editor.viewWorkbenchFolderPath')} aria-label={t('editor.viewWorkbenchFolderPath')}
       aria-haspopup="dialog" aria-expanded={open} aria-controls={open ? id : undefined}
       onClick={() => setOpen(value => !value)}><IconFolderOpenOutlineMedium size={17} /></button>
-    {open ? createPortal(<div ref={popover} id={id} role="dialog" aria-label="工作台文件夹路径" tabIndex={-1}
+    {open ? createPortal(<div ref={popover} id={id} role="dialog" aria-label={t('editor.workbenchFolderPath')} tabIndex={-1}
       className={css.browserWorkspacePathPopover} style={position}>
-      <strong>工作台文件夹</strong><code>{rootPath}</code>
+      <strong>{t('editor.workbenchFolder')}</strong><code>{rootPath}</code>
     </div>, document.body) : null}
   </div>
 }

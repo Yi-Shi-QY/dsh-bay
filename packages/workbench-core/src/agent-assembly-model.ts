@@ -64,7 +64,20 @@ export interface AgentAssemblyRegistrationV1 {
 /** Where an imported registration suggestion came from. Unsigned packages deserve a closer look. */
 export type AgentImportSourceV1 = 'complete' | 'template-signed' | 'template-unsigned'
 
-export interface AgentAssemblyProblemV1 { readonly field: string; readonly message: string }
+export type AgentAssemblyValidationKey = `assembly.invalid.${'schemaVersion' | 'agentId' | 'name' | 'description' | 'basePreset' | 'instructions' | 'blocks' | 'tools' | 'skillBlock' | 'skillTool' | 'guestAccess' | 'revision'}`
+
+export interface AgentAssemblyProblemV1 {
+  readonly field: string
+  readonly message: string
+  readonly messageKey: AgentAssemblyValidationKey
+  readonly params?: Record<string, string>
+}
+
+export class AgentAssemblyError extends Error {
+  constructor(message: string, readonly messageKey: AgentAssemblyValidationKey | 'assembly.requiredField' | 'assembly.missingExecutors' | 'assembly.revisionMissing' | 'assembly.invalidRequest', readonly params?: Record<string, string>) {
+    super(message)
+  }
+}
 
 const BLOCKS: readonly AgentAssemblyBlockV1[] = [
   { id: 'agent-instructions', label: 'AGENTS.md', description: '读取项目和用户目录里的 AGENTS.md。', source: 'dsh', basePresets: ['standard'] },
@@ -178,19 +191,19 @@ export async function fetchPortableAgents(workbenchId: string, fetchImpl: typeof
 /** Reject a definition before it is written or registered. */
 export function agentDefinitionProblems(definition: WorkbenchAgentDefinitionV1, knownToolIds: ReadonlySet<string>): readonly AgentAssemblyProblemV1[] {
   const problems: AgentAssemblyProblemV1[] = []
-  if (definition.schemaVersion !== AGENT_DEFINITION_SCHEMA_VERSION) problems.push({ field: 'schemaVersion', message: '不支持的 Agent 定义版本。' })
-  if (!AGENT_ID_PATTERN.test(definition.agentId)) problems.push({ field: 'agentId', message: '标识需以小写字母开头，只含小写字母、数字和连字符。' })
-  if (!definition.name.trim() || definition.name.length > 80) problems.push({ field: 'name', message: '名称需要 1 到 80 个字符。' })
-  if (!definition.description.trim() || definition.description.length > 400) problems.push({ field: 'description', message: '描述需要 1 到 400 个字符。' })
-  if (!(definition.basePreset in BASE_PRESETS)) problems.push({ field: 'basePreset', message: '基础模式不受支持。' })
-  if (definition.instructions !== undefined && definition.instructions.length > AGENT_INSTRUCTION_LIMIT) problems.push({ field: 'instructions', message: '模式指令过长。' })
+  if (definition.schemaVersion !== AGENT_DEFINITION_SCHEMA_VERSION) problems.push({ field: 'schemaVersion', message: '不支持的 Agent 定义版本。', messageKey: 'assembly.invalid.schemaVersion' })
+  if (!AGENT_ID_PATTERN.test(definition.agentId)) problems.push({ field: 'agentId', message: '标识需以小写字母开头，只含小写字母、数字和连字符。', messageKey: 'assembly.invalid.agentId' })
+  if (!definition.name.trim() || definition.name.length > 80) problems.push({ field: 'name', message: '名称需要 1 到 80 个字符。', messageKey: 'assembly.invalid.name' })
+  if (!definition.description.trim() || definition.description.length > 400) problems.push({ field: 'description', message: '描述需要 1 到 400 个字符。', messageKey: 'assembly.invalid.description' })
+  if (!(definition.basePreset in BASE_PRESETS)) problems.push({ field: 'basePreset', message: '基础模式不受支持。', messageKey: 'assembly.invalid.basePreset' })
+  if (definition.instructions !== undefined && definition.instructions.length > AGENT_INSTRUCTION_LIMIT) problems.push({ field: 'instructions', message: '模式指令过长。', messageKey: 'assembly.invalid.instructions' })
   const allowed = new Set(blocksForBase(definition.basePreset).map(block => block.id))
-  for (const block of definition.blocks) if (!allowed.has(block)) problems.push({ field: 'blocks', message: `积木 ${block} 不属于 ${definition.basePreset} 基础模式。` })
-  for (const toolId of definition.tools) if (!knownToolIds.has(toolId)) problems.push({ field: 'tools', message: `工具 ${toolId} 不在当前工作台目录中。` })
-  if (definition.skills.length > 0 && !definition.blocks.includes('skill')) problems.push({ field: 'skills', message: '选了 Skill 就需要同时启用 Skill 积木。' })
-  for (const skillId of definition.skills) if (!definition.tools.includes(skillId)) problems.push({ field: 'skills', message: `Skill ${skillId} 必须同时列在工具中。` })
-  if (!['none', 'read-only', 'approved'].includes(definition.guestAccess)) problems.push({ field: 'guestAccess', message: '访客权限无效。' })
-  if (!Number.isInteger(definition.revision) || definition.revision < 1) problems.push({ field: 'revision', message: '修订号无效。' })
+  for (const block of definition.blocks) if (!allowed.has(block)) problems.push({ field: 'blocks', message: `积木 ${block} 不属于 ${definition.basePreset} 基础模式。`, messageKey: 'assembly.invalid.blocks', params: { block, preset: definition.basePreset } })
+  for (const toolId of definition.tools) if (!knownToolIds.has(toolId)) problems.push({ field: 'tools', message: `工具 ${toolId} 不在当前工作台目录中。`, messageKey: 'assembly.invalid.tools', params: { tool: toolId } })
+  if (definition.skills.length > 0 && !definition.blocks.includes('skill')) problems.push({ field: 'skills', message: '选了 Skill 就需要同时启用 Skill 积木。', messageKey: 'assembly.invalid.skillBlock' })
+  for (const skillId of definition.skills) if (!definition.tools.includes(skillId)) problems.push({ field: 'skills', message: `Skill ${skillId} 必须同时列在工具中。`, messageKey: 'assembly.invalid.skillTool', params: { skill: skillId } })
+  if (!['none', 'read-only', 'approved'].includes(definition.guestAccess)) problems.push({ field: 'guestAccess', message: '访客权限无效。', messageKey: 'assembly.invalid.guestAccess' })
+  if (!Number.isInteger(definition.revision) || definition.revision < 1) problems.push({ field: 'revision', message: '修订号无效。', messageKey: 'assembly.invalid.revision' })
   return problems
 }
 

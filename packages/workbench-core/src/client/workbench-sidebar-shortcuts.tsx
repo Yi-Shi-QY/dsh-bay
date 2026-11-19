@@ -1,3 +1,4 @@
+import { useWorkbenchLocale, workbenchErrorNotice, workbenchNoticeText, type WorkbenchNotice } from '../foundation/workbench-locale.ts'
 import { useEffect, useState } from 'react'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
@@ -34,12 +35,13 @@ export function installWorkbenchSidebarShortcuts(ctx: Context, directory: Workbe
       if (registrations.has(row.workbenchId)) continue
       const key = workbenchPanelId(row.workbenchId) as MainPanelId
       function Bridge() {
-        const [error, setError] = useState<string>()
-        const run = () => { setError(undefined); void navigate(row.workbenchId).catch(cause => setError(cause instanceof Error ? cause.message : '无法打开工作台')) }
+        const { t } = useWorkbenchLocale(ctx.locale)
+        const [error, setError] = useState<WorkbenchNotice>()
+        const run = () => { setError(undefined); void navigate(row.workbenchId).catch(cause => setError(workbenchErrorNotice(cause, 'sidebar.workbenchOpenFailed'))) }
         useEffect(run, [])
         return <section style={{ padding: 32 }} aria-live="polite"><h2>{row.name}</h2>{error
-          ? <><p role="alert">{error}</p><button onClick={run}>重试打开</button><button onClick={() => ctx.layout.selectPanel(null)}>返回对话</button></>
-          : <p>正在打开工作台…</p>}</section>
+          ? <><p role="alert">{workbenchNoticeText(t, error)}</p><button onClick={run}>{t('sidebar.retryOpen')}</button><button onClick={() => ctx.layout.selectPanel(null)}>{t('sidebar.backToConversation')}</button></>
+          : <p>{t('sidebar.openingWorkbench')}</p>}</section>
       }
       const removeMain = ctx.slots.inject('main', () => {
         const disposeMain = ctx.slots.register({ name: 'main', key }, Bridge)

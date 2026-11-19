@@ -1,3 +1,4 @@
+import { defaultWorkbenchTranslate, type WorkbenchTranslate } from './workbench-locale.ts'
 import { useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react'
 import type { WorkbenchCollaborationClientV1 } from '../client/workbench-collaboration-client.ts'
 import type { SharedCanvasViewportV1 } from '../workbench-collaboration-contract.ts'
@@ -92,9 +93,9 @@ export function WorkbenchSharedCanvasViewport({ client, enabled, children }: {
 }
 
 /** Text for the collaboration connection state, or undefined when connected. */
-export function collaborationStatusLabel(state: ReturnType<WorkbenchCollaborationClientV1['getState']> | undefined): string | undefined {
-  if (state === 'recovering') return '正在恢复与 Host 的连接，工作台暂时只读'
-  if (state === 'connecting') return '正在连接协作会话…'
-  if (state === 'closed') return '协作已结束，此页面不再同步'
+export function collaborationStatusLabel(state: ReturnType<WorkbenchCollaborationClientV1['getState']> | undefined, t: WorkbenchTranslate = defaultWorkbenchTranslate): string | undefined {
+  if (state === 'recovering') return t('presence.recoveringHost')
+  if (state === 'connecting') return t('presence.connecting')
+  if (state === 'closed') return t('presence.closed')
   return undefined
 }

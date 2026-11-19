@@ -1,3 +1,4 @@
+import { useWorkbenchLocale } from './workbench-locale.ts'
 import { useCallback, useEffect, useId, useRef, useSyncExternalStore } from 'react'
 import type { HostObservable } from '@deepseek-ai/dsh-client-ui-slots'
 import type { SettingsScopeSnapshot } from '../client/workbench-settings-contracts.ts'
@@ -13,6 +14,7 @@ export function WorkbenchCoreSettingsDialog({ workbenchSettings, onClose, ...pag
   workbenchSettings: HostObservable<SettingsScopeSnapshot<WorkbenchSettingsV4>>
   onClose: () => void
 }) {
+  const { t } = useWorkbenchLocale()
   const dialog = useRef<HTMLDialogElement>(null)
   const closeButton = useRef<HTMLButtonElement>(null)
   const titleId = useId()
@@ -50,8 +52,8 @@ export function WorkbenchCoreSettingsDialog({ workbenchSettings, onClose, ...pag
     }}
   >
     <header className={css.header}>
-      <h2 id={titleId}>工作台设置</h2>
-      <button ref={closeButton} className={css.close} type="button" aria-label="关闭工作台设置" title="关闭工作台设置" onClick={requestClose}>
+      <h2 id={titleId}>{t('home.workbenchSettings')}</h2>
+      <button ref={closeButton} className={css.close} type="button" aria-label={t('home.closeWorkbenchSettings')} title={t('home.closeWorkbenchSettings')} onClick={requestClose}>
         <IconCloseOutlineMedium size={16} />
       </button>
     </header>

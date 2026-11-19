@@ -1,10 +1,13 @@
 // @vitest-environment jsdom
 import React from 'react'
-import { cleanup, fireEvent, render, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { WorkbenchHome } from '../src/foundation/WorkbenchHome.tsx'
 import { migrateDocumentV2ToV3 } from '../src/foundation/document-v3.ts'
 import { defaultLayout } from '../src/foundation/model.ts'
+
+import { WorkbenchLocaleContext } from '../src/foundation/workbench-locale.ts'
+import { createTestWorkbenchLocale } from './workbench-locale-fixture.ts'
 
 afterEach(() => cleanup())
 
@@ -40,6 +43,29 @@ function expectDirectoryCreateInput(input: { name?: unknown; folderName?: unknow
 }
 
 describe('Workbench Home', () => {
+  it('keeps a creation draft and rejected result when the host changes language', async () => {
+    const locale = createTestWorkbenchLocale()
+    const d = directory({ create: vi.fn(async () => ({ status: 'rejected', reason: 'duplicate-name' })) })
+    const view = render(<WorkbenchLocaleContext.Provider value={locale}>
+      <WorkbenchHome directory={d as never} onOpenWorkbench={vi.fn()} onCreated={vi.fn()} />
+    </WorkbenchLocaleContext.Provider>)
+    fireEvent.click(view.getByRole('button', { name: '创建工作台', exact: true }))
+    fireEvent.click(view.getByRole('menuitem', { name: /左右双栏/ }))
+    const name = view.getByLabelText('名称') as HTMLInputElement
+    fireEvent.change(name, { target: { value: '研发 Workbench' } })
+    fireEvent.click(view.getByRole('button', { name: '创建并打开' }))
+    const alert = await view.findByRole('alert')
+    expect(alert.textContent).toContain('已经有同名工作台')
+    act(() => locale.setLocale('en'))
+    expect(view.getByLabelText('Name')).toBe(name)
+    expect(name.value).toBe('研发 Workbench')
+    expect(alert.textContent).toContain('A workbench with this name already exists')
+    expect(view.getByText('Two columns · Areas: 2')).toBeTruthy()
+    act(() => locale.setLocale('zh'))
+    expect(view.getByLabelText('名称')).toBe(name)
+    expect(alert.textContent).toContain('已经有同名工作台')
+    expect(d.create).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ name: '研发 Workbench', layoutPresetId: 'columns' }))
+  })
   it('keeps location editable after preflight failure and separates draft generation from creation', async () => {
     let finish!: (value: string) => void
     const generateDraft = vi.fn(() => new Promise<string>(resolve => { finish = resolve }))

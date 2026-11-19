@@ -1,5 +1,6 @@
 import { createFloatingWorkspaceRuntime } from '../client/floating-workspace-runtime.ts'
 import { FloatingWorkspaceContext, FloatingInstanceHost } from './FloatingWorkspaceContext.tsx'
+import { useWorkbenchLocale, WorkbenchLocaleContext, type WorkbenchLocaleSource } from './workbench-locale.ts'
 import type { WorkbenchSettingsOpenOptionsV1 } from './settings-context.ts'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
@@ -93,6 +94,7 @@ export type WorkbenchCoreInnerPageInjection =
      | 'connectWorkspace' | 'createWorkspaceSession' | 'createWorkspace' | 'pickDirectory' | 'openOfficialSession' | 'windowController' | 'surfaceContext' | 'collaborationClient' | 'requestBrowserReclaim' | 'toolGateway' | 'shareController' | 'bayAgent' | 'generateContextDraft' | 'conversationStatus'>
   & {
     modeController: WorkbenchModeControllerV1
+    locale?: WorkbenchLocaleSource | undefined
     extensionRegistry?: import('../client/workbench-extension-registry.ts').WorkbenchExtensionRegistryV1
     nativePluginsPanelVisible?: HostObservable<boolean>
     workbenchSettings: HostObservable<SettingsScopeSnapshot<WorkbenchSettingsV4>>
@@ -118,9 +120,12 @@ import { WorkbenchSharedCanvasViewport } from './WorkbenchSharedCanvasViewport.t
 export function WorkbenchCoreInnerPage(props: WorkbenchCoreInnerPageProps): ReactNode {
   const fallbackRuntime = useMemo(() => createFloatingWorkspaceRuntime(), [])
   const runtime = props.floatingRuntime ?? fallbackRuntime
-  return <FloatingWorkspaceContext.Provider value={runtime}><WorkbenchCoreInnerPageView {...props} floatingRuntime={runtime} /><FloatingInstanceHost runtime={runtime} /></FloatingWorkspaceContext.Provider>
+  return <WorkbenchLocaleContext.Provider value={props.locale}>
+    <FloatingWorkspaceContext.Provider value={runtime}><WorkbenchCoreInnerPageView {...props} floatingRuntime={runtime} /><FloatingInstanceHost runtime={runtime} /></FloatingWorkspaceContext.Provider>
+  </WorkbenchLocaleContext.Provider>
 }
 function WorkbenchCoreInnerPageView(props: WorkbenchCoreInnerPageProps): ReactNode {
+  const { t } = useWorkbenchLocale()
   const surfaceContext = props.surfaceContext ?? DESKTOP_WORKBENCH_SURFACE_V1
   const browserSurface = surfaceContext.kind !== 'desktop'
   const browserWorkbenchId = surfaceContext.kind === 'desktop' ? undefined : surfaceContext.workbenchId
@@ -166,9 +171,9 @@ function WorkbenchCoreInnerPageView(props: WorkbenchCoreInnerPageProps): ReactNo
   useEffect(() => {
     if (!directory || browserSurface) return
     const open = async (workbenchId: string) => {
-      if (!await beforeHomeLeave()) throw new Error('\u8bf7\u5148\u5904\u7406\u603b\u89c8\u4e2d\u5c1a\u672a\u4fdd\u5b58\u7684\u4fee\u6539\u3002')
+      if (!await beforeHomeLeave()) throw new Error(t('shell.overviewDirty'))
       const result = await directory.openAndSelect(workbenchId)
-      if (result.status !== 'committed') throw new Error('\u65e0\u6cd5\u6253\u5f00\u5de5\u4f5c\u53f0\uff0c\u8bf7\u68c0\u67e5\u76ee\u5f55\u548c\u4fdd\u5b58\u72b6\u6001\u3002')
+      if (result.status !== 'committed') throw new Error(t('shell.openFailedCheckDirectory'))
       await props.modeController.enter({ workbenchId })
       setSurfaceView('workbench')
     }
@@ -238,9 +243,9 @@ function WorkbenchCoreInnerPageView(props: WorkbenchCoreInnerPageProps): ReactNo
       {...(props.renderFooterActions === undefined ? {} : { renderFooterActions: props.renderFooterActions })}
       openSettings={openSettings} settingsOpen={settingsOpen} exit={() => {
       setExitError(undefined)
-      void props.modeController.exit().catch(() => setExitError('\u5e03\u5c40\u672a\u80fd\u4fdd\u5b58\uff0c\u8bf7\u6062\u590d\u8fde\u63a5\u6216\u89e3\u51b3\u5e03\u5c40\u51b2\u7a81\u540e\u91cd\u8bd5\u9000\u51fa\u3002'))
+      void props.modeController.exit().catch(() => setExitError(t('shell.exitSaveFailed')))
     }} />
-  ), [props.modeController, props.renderFooterActions, openSettings, settingsOpen])
+  ), [props.modeController, props.renderFooterActions, openSettings, settingsOpen, t])
 
   if (mode.mode === 'official') return null
   if (mode.mode === 'entering') {
@@ -253,8 +258,8 @@ function WorkbenchCoreInnerPageView(props: WorkbenchCoreInnerPageProps): ReactNo
     }}>
       <section style={{ width: 'min(440px, calc(100% - 48px))', padding: 24, border: '1px solid var(--dsw-alias-border-l2, #d9dcdf)', borderRadius: 8, background: 'var(--dsw-alias-bg-layer-1, Canvas)', textAlign: 'center' }}>
         <span aria-hidden="true" style={{ display: 'inline-block', width: 24, height: 24, border: '2px solid var(--dsw-alias-border-l2, #d9dcdf)', borderTopColor: 'var(--dsw-alias-label-link, #1769d2)', borderRadius: '50%', animation: 'dsh-workbench-enter-spin 800ms linear infinite' }} />
-        <h1 style={{ margin: '12px 0 0', fontSize: 18, fontWeight: 600 }}>{'\u6b63\u5728\u8f7d\u5165\u5de5\u4f5c\u53f0'}</h1>
-        <p style={{ margin: '8px 0 0', color: 'var(--dsw-alias-label-secondary, #62676d)' }}>{'\u6b63\u5728\u8bfb\u53d6\u5e03\u5c40\u5e76\u6062\u590d\u533a\u57df\u5185\u5bb9\u2026'}</p>
+        <h1 style={{ margin: '12px 0 0', fontSize: 18, fontWeight: 600 }}>{t('shell.loadingWorkbench')}</h1>
+        <p style={{ margin: '8px 0 0', color: 'var(--dsw-alias-label-secondary, #62676d)' }}>{t('shell.loadingLayout')}</p>
       </section>
       <style>{'@keyframes dsh-workbench-enter-spin { to { transform: rotate(360deg); } } @media (prefers-reduced-motion: reduce) { [data-workbench-mode="entering"] span { animation: none !important; } }'}</style>
     </div>, document.body)
@@ -300,7 +305,7 @@ function WorkbenchCoreInnerPageView(props: WorkbenchCoreInnerPageProps): ReactNo
       registerBeforeLeave={registerHomeLeave}
       onOpenWorkbench={async workbenchId => {
         const result = await directory.openAndSelect(workbenchId)
-        if (result.status !== 'committed') throw new Error('\u65e0\u6cd5\u6253\u5f00\u5de5\u4f5c\u53f0')
+        if (result.status !== 'committed') throw new Error(t('shell.openFailed'))
         setSurfaceView('workbench')
       }}
       onCreated={() => {
@@ -329,21 +334,21 @@ function WorkbenchCoreInnerPageView(props: WorkbenchCoreInnerPageProps): ReactNo
       position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', pointerEvents: 'none',
     }}>
       <div style={{ width: 'min(540px, calc(100% - 48px))', padding: 28, border: '1px solid currentColor', borderRadius: 8, background: 'var(--dsw-alias-bg-layer-1, Canvas)', pointerEvents: 'auto' }}>
-        <strong>还没有可用的容器内页</strong>
-        <p>{'\u5f53\u524d Core \u6ca1\u6709\u6ce8\u518c\u53ef\u7528\u7684\u5185\u9875\u3002\u8bf7\u6253\u5f00\u201c\u5de5\u4f5c\u53f0\u8bbe\u7f6e\u201d\u68c0\u67e5 Core \u7248\u672c\uff1b\u529f\u80fd\u6269\u5c55\u9700\u4ece\u53d7\u4fe1\u4efb\u76ee\u5f55\u5bfc\u5165\u3002'}</p>
-        {sharedControlPage ? null : <button type="button" onClick={() => openSettings()}><IconSettingsOutlineMedium size={16} /> {'\u5de5\u4f5c\u53f0\u8bbe\u7f6e'}</button>}
+        <strong>{t('shell.noPagesAvailable')}</strong>
+        <p>{t('shell.noPagesRegistered')}</p>
+        {sharedControlPage ? null : <button type="button" onClick={() => openSettings()}><IconSettingsOutlineMedium size={16} /> {t('home.workbenchSettings')}</button>}
       </div>
     </section> : null}
     {settingsOpen && mode.mode === 'workbench' ? <WorkbenchCoreSettingsDialog
       {...props.settingsPage} {...(settingsOptions ? { openOptions: settingsOptions } : {})} workbenchSettings={props.workbenchSettings} onClose={closeSettings}
       onOpenWorkbench={async id => {
         const result=await directory?.openAndSelect(id)
-        if(result?.status!=='committed')throw new Error('\u65e0\u6cd5\u6253\u5f00\u5de5\u4f5c\u53f0\uff0c\u8bf7\u68c0\u67e5\u4fdd\u5b58\u72b6\u6001\u3002')
+        if(result?.status!=='committed')throw new Error(t('shell.openFailedCheckSave'))
         setSurfaceView('workbench');closeSettings()
       }}
       useSessions={props.useSessions} useWorkspaces={props.useWorkspaces}
     /> : null}
-    {mode.mode === 'exiting' ? <div role="status" style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center' }}>{'\u6b63\u5728\u4fdd\u5b58\u5e76\u9000\u51fa\u5de5\u4f5c\u53f0\u6a21\u5f0f\u2026'}</div> : null}
+    {mode.mode === 'exiting' ? <div role="status" style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center' }}>{t('shell.savingAndExiting')}</div> : null}
     {exitError === undefined ? null : <div role="alert" style={{ position: 'absolute', bottom: 16, left: 16, right: 16, padding: 12, background: 'var(--dsw-alias-bg-layer-1, Canvas)' }}>{exitError}</div>}
   </div>, document.body)
 }

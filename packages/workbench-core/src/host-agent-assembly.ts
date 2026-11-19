@@ -15,7 +15,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import type { AgentPresetRegistry } from '@deepseek-ai/dsh-agent-preset-registry'
 import type { HostWorkbenchDirectory } from './host-workbench-directory.ts'
-import { agentDefinitionProblems, parseAgentDefinition, parseRevisionFileName, presetIdFor, validatePortableAgents, type AgentAssemblyRegistrationV1, type AgentImportSourceV1, type PortableAgentAssemblyV1, type WorkbenchAgentDefinitionV1 } from './agent-assembly-model.ts'
+import { AgentAssemblyError, agentDefinitionProblems, parseAgentDefinition, parseRevisionFileName, presetIdFor, validatePortableAgents, type AgentAssemblyRegistrationV1, type AgentImportSourceV1, type PortableAgentAssemblyV1, type WorkbenchAgentDefinitionV1 } from './agent-assembly-model.ts'
 import { composeAgentPreset } from './host-agent-preset.ts'
 import type { HostAgentKit } from './host-agent-kit.ts'
 
@@ -200,7 +200,8 @@ export class HostAgentAssemblyStore {
     }
     // A revision may be saved before its extensions are installed; registering it may not.
     const problems = agentDefinitionProblems(definition, new Set(definition.tools))
-    if (problems.length > 0) throw new Error(problems[0]!.message)
+    const problem = problems[0]
+    if (problem) throw new AgentAssemblyError(problem.message, problem.messageKey, problem.params)
     await this.directory.writeAgentDefinition(input.workbenchId, definition.agentId, definition.revision, definition)
     return this.remember(input.workbenchId, definition, 'saved')
   }
@@ -210,7 +211,7 @@ export class HostAgentAssemblyStore {
     return this.serial(workbenchId, async () => {
       const definition = this.definition(workbenchId, agentId, revision)
       const missing = this.missing(definition)
-      if (missing.length > 0) throw new Error(`这个修订缺少扩展提供的工具或 Skill，不能注册：${missing.join('、')}`)
+      if (missing.length > 0) throw new AgentAssemblyError(`这个修订缺少扩展提供的工具或 Skill，不能注册：${missing.join('、')}`, 'assembly.missingExecutors', { tools: missing.join(', ') })
       const row = await this.register(workbenchId, definition)
       await this.writeSelection(workbenchId)
       return row
@@ -236,7 +237,7 @@ export class HostAgentAssemblyStore {
 
   private definition(workbenchId: string, agentId: string, revision: number): WorkbenchAgentDefinitionV1 {
     const found = this.readAll(workbenchId).find(row => row.agentId === agentId && row.revision === revision)
-    if (!found) throw new Error('这个修订不存在。')
+    if (!found) throw new AgentAssemblyError('这个修订不存在。', 'assembly.revisionMissing')
     return found
   }
 

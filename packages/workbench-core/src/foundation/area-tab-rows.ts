@@ -3,6 +3,7 @@ import type { GroupNode, SessionBindingV1, TabDocument } from './model.ts'
 import { UNKNOWN_CONVERSATION_STATUS, type ConversationTabPhase, type ConversationTabStatus } from '../client/conversation-tab-status.ts'
 import { resolveSessionTarget, type SessionTargetResolverSnapshot } from './session-target-resolver.ts'
 import { buildWorkbenchTabInformation, type WorkbenchTabInformation, type WorkbenchTabInformationFacts } from './tab-information.ts'
+import { defaultWorkbenchTranslate, workbenchPageTitle, type WorkbenchTranslate } from './workbench-locale.ts'
 
 export type WorkbenchAreaTabStatus = 'ready' | 'unbound' | 'missing' | 'paused' | ConversationTabPhase
 
@@ -12,10 +13,10 @@ export function conversationTabBinding(tab: TabDocument, areaBinding?: SessionBi
   return tab.binding ?? (tab.sessionId ? { sessionId: tab.sessionId } : undefined)
 }
 
-export function conversationTabUnavailable(binding: SessionBindingV1, facts: Omit<SessionTargetResolverSnapshot, 'markersByWorkspace'>): string | undefined {
+export function conversationTabUnavailable(binding: SessionBindingV1, facts: Omit<SessionTargetResolverSnapshot, 'markersByWorkspace'>, t: WorkbenchTranslate = defaultWorkbenchTranslate): string | undefined {
   const workspaceId = binding.workspaceId ?? facts.workspaces.find(row => row.sessionIds.includes(binding.sessionId))?.workspaceId
   const { status } = resolveSessionTarget({ sessionId: binding.sessionId, ...(workspaceId ? { workspaceId } : {}) }, { ...facts, markersByWorkspace: {} })
-  return status === 'available' ? undefined : status === 'archived' ? '此对话已归档' : status === 'moved' ? '对话已移出绑定项目' : '此对话暂时不可用'
+  return status === 'available' ? undefined : status === 'archived' ? t('tab.conversationArchived') : status === 'moved' ? t('tab.conversationMoved') : t('tab.conversationUnavailable')
 }
 
 export interface WorkbenchAreaTabSummary {
@@ -88,6 +89,7 @@ export function buildWorkbenchAreaTabRows(input: {
   conversations?: ReadonlyMap<string, ConversationTabStatus>
   sessionAvailability?: (binding: SessionBindingV1) => string | undefined
   information?: WorkbenchTabInformationFacts
+  t?: WorkbenchTranslate
 }): WorkbenchAreaTabRows {
   const rows: WorkbenchAreaTabRow[] = []
   const summaries: WorkbenchAreaTabSummary[] = []
@@ -99,22 +101,24 @@ export function buildWorkbenchAreaTabRows(input: {
     const binding = conversationTabBinding(tab, input.areaBinding)
     const unavailable = binding ? input.sessionAvailability?.(binding) : undefined
     const conversation = binding && baseStatus !== 'missing' && baseStatus !== 'unbound'
-      ? unavailable ? { status: 'failed' as const, label: unavailable }
-        : input.conversations?.get(binding.sessionId) ?? UNKNOWN_CONVERSATION_STATUS
+      ? input.conversations?.get(binding.sessionId) ?? UNKNOWN_CONVERSATION_STATUS
       : undefined
-    const status = conversation?.status ?? baseStatus
+    const status = conversation && unavailable ? 'failed' : conversation?.status ?? baseStatus
     const presentation = resolveWorkbenchEditorPresentation(editor)
+    const title = input.t ? workbenchPageTitle(input.t, tab.editorId, tab.lastKnownTitle) : tab.lastKnownTitle
+    const label = conversation ? unavailable ?? (conversation.labelKey === undefined ? conversation.label : (input.t ?? defaultWorkbenchTranslate)(conversation.labelKey)) : statusLabel(status, input.t)
     const summary: WorkbenchAreaTabSummary = {
       id: tab.id,
-      title: tab.lastKnownTitle,
+      title,
       icon: presentation.icon,
       ...(presentation.iconSvg ? { iconSvg: presentation.iconSvg } : {}),
       status,
-      statusLabel: conversation?.label ?? statusLabel(status),
+      statusLabel: label,
       selected,
       ...(tab.editorId === 'workbench.conversation' ? { conversation: true } : {}),
-      information: buildWorkbenchTabInformation({ tab, editor, areaBinding: input.areaBinding,
-        statusLabel: conversation?.label ?? statusLabel(status), ordinal: rows.length + 1,
+      information: buildWorkbenchTabInformation({ tab, title, editor, areaBinding: input.areaBinding,
+        statusLabel: label, ordinal: rows.length + 1,
+        ...(input.t ? { t: input.t } : {}),
         ...(input.information ? { facts: input.information } : {}),
       }),
     }
@@ -152,11 +156,11 @@ function statusFor(
   return 'ready'
 }
 
-function statusLabel(status: WorkbenchAreaTabStatus): string {
+function statusLabel(status: WorkbenchAreaTabStatus, t?: WorkbenchTranslate): string {
   switch (status) {
-    case 'unbound': return '待绑定'
-    case 'missing': return '不可用'
-    case 'paused': return '已暂停'
-    default: return '就绪'
+    case 'unbound': return t?.('tab.unbound') ?? '待绑定'
+    case 'missing': return t?.('tab.unavailable') ?? '不可用'
+    case 'paused': return t?.('tab.paused') ?? '已暂停'
+    default: return t?.('tab.ready') ?? '就绪'
   }
 }

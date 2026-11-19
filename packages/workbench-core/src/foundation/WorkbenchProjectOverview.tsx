@@ -15,9 +15,11 @@ import type { BayAgentControllerV1, BayAgentControllerSnapshotV1 } from './workb
 import type { WorkbenchMemoryEntry } from '../workbench-memory-contract.ts'
 import { WorkbenchMemoryDialog } from './WorkbenchMemoryDialog.tsx'
 import { renderAreaContextMarkdown } from './workbench-context.ts'
+import { useWorkbenchLocale } from './workbench-locale.ts'
+import type { WorkbenchMessageKey } from './workbench-messages.ts'
 import css from './WorkbenchProjectOverview.module.css'
 
-const statusLabels: Record<string, string> = { proposed: '待开始', queued: '排队中', running: '执行中', waiting: '等待继续', needs_input: '等待答复', ready: '待验收', blocked: '受阻', failed: '失败', completed: '已完成', stopped: '已停止' }
+const statusKeys: Partial<Record<string, WorkbenchMessageKey>> = { proposed: 'task.proposed', queued: 'task.queued', running: 'task.running', waiting: 'task.waiting', needs_input: 'task.needs_input', ready: 'task.ready', blocked: 'task.blocked', failed: 'task.failed', completed: 'task.completed', stopped: 'task.stopped' }
 
 /** Project data is independent of this Area; opening the overview never starts a conversation. */
 export function WorkbenchProjectOverview({ project, directory, workbenchId, tasks, controller, onOpenSession, onAddPage, onEditBackground, writable = true }: {
@@ -26,18 +28,19 @@ export function WorkbenchProjectOverview({ project, directory, workbenchId, task
   onOpenSession(session: WorkbenchSessionEntryV1): void; onAddPage(): void
   onEditBackground?: (() => void) | undefined; writable?: boolean
 }) {
+  const { t } = useWorkbenchLocale()
   const [memory, setMemory] = useState(false), [memoryCount, setMemoryCount] = useState<number>(), [memoryError, setMemoryError] = useState(false)
   const [error, setError] = useState(''), [busy, setBusy] = useState<string>()
   const sessions = directory.getProjectSessions?.(workbenchId, project.projectId) ?? []
   const items = tasks?.workItems.filter(item => item.projectId === project.projectId) ?? []
   const backgroundFacts = [
-    { label: '约束', values: project.context?.human.constraints ?? [] },
-    { label: '输入与依赖', values: project.context?.human.inputs ?? [] },
-    { label: '成功标准', values: project.context?.human.successCriteria ?? [] },
+    { key: 'project.constraints' as const, values: project.context?.human.constraints ?? [] },
+    { key: 'project.inputs' as const, values: project.context?.human.inputs ?? [] },
+    { key: 'project.successCriteria' as const, values: project.context?.human.successCriteria ?? [] },
   ].filter(fact => fact.values.length > 0)
   const objective = project.context?.human.objective ?? ''
   const hasBackground = Boolean(project.context?.human.objective || project.context?.agent.summary || backgroundFacts.length)
-  const memoryCountLabel = memoryCount === undefined ? (memoryError ? '暂不可用' : '读取中') : memoryCount >= 100 ? '100+ 条' : `${memoryCount} 条`
+  const memoryCountLabel = memoryCount === undefined ? t(memoryError ? 'project.unavailable' : 'project.reading') : t('project.memoryCount', { count: memoryCount >= 100 ? '100+' : memoryCount })
   useEffect(() => {
     if (!directory.memoryRequest) return
     let live = true
@@ -48,60 +51,60 @@ export function WorkbenchProjectOverview({ project, directory, workbenchId, task
     return () => { live = false }
   }, [directory, workbenchId, project.projectId])
   const resume = async (id: string) => { setBusy(id); setError(''); try { await controller?.recoverWorkItem(id) } catch (reason) { setError(String(reason)) } finally { setBusy(undefined) } }
-  return <section className={css.overview} aria-label="项目概览">
+  return <section className={css.overview} aria-label={t('project.overview')}>
     <header className={css.header}>
       <div className={css.headerIdentity}>
         <span className={css.icon}><IconFolderOpenOutlineMedium size={25} /></span>
         <div className={css.headerCopy}>
-          <span className={css.eyebrow}>项目概览</span>
+          <span className={css.eyebrow}>{t('project.overview')}</span>
           <h2>{project.name}</h2>
           <p className={css.path}><IconFolderOpenOutlineMedium size={13} />{project.relativePath}</p>
         </div>
       </div>
-      <Button variant="primary" disabled={!writable} icon={<IconNewChatOutlineMedium size={16} />} onClick={onAddPage}>打开内页</Button>
+      <Button variant="primary" disabled={!writable} icon={<IconNewChatOutlineMedium size={16} />} onClick={onAddPage}>{t('project.openPage')}</Button>
     </header>
-    <p className={css.hint}>项目文件夹承载背景、记忆、对话和任务。关闭区域不会删除项目，之后可以从其他区域继续使用。</p>
-    <div className={css.summary} aria-label="项目摘要">
-      <div><span>已有对话</span><strong>{sessions.length}</strong></div>
-      <div><span>项目任务</span><strong>{items.length}</strong></div>
-      <div><span>项目背景</span><strong>{hasBackground ? '已设置' : '未设置'}</strong></div>
-      <div><span>项目记忆</span><strong>{memoryCountLabel}</strong></div>
+    <p className={css.hint}>{t('project.overviewHint')}</p>
+    <div className={css.summary} aria-label={t('project.summary')}>
+      <div><span>{t('project.conversations')}</span><strong>{sessions.length}</strong></div>
+      <div><span>{t('project.tasks')}</span><strong>{items.length}</strong></div>
+      <div><span>{t('project.background')}</span><strong>{t(hasBackground ? 'project.configured' : 'project.notConfigured')}</strong></div>
+      <div><span>{t('project.memory')}</span><strong>{memoryCountLabel}</strong></div>
     </div>
 
     <div className={css.sectionGrid}>
       <section className={css.section}>
         <div className={css.sectionHeader}>
-          <div className={css.sectionTitle}><span className={css.sectionIcon}><IconListPenOutlineMedium size={17} /></span><div><h3>项目背景</h3><p>目标和协作约束</p></div></div>
-          <Button size="sm" variant="outline" disabled={!writable || !onEditBackground} icon={<IconEditOutlineMedium size={14} />} onClick={onEditBackground}>编辑</Button>
+          <div className={css.sectionTitle}><span className={css.sectionIcon}><IconListPenOutlineMedium size={17} /></span><div><h3>{t('project.background')}</h3><p>{t('project.backgroundHint')}</p></div></div>
+          <Button size="sm" variant="outline" disabled={!writable || !onEditBackground} icon={<IconEditOutlineMedium size={14} />} onClick={onEditBackground}>{t('action.edit')}</Button>
         </div>
-        <p className={objective ? css.background : css.emptyState}>{objective || (backgroundFacts.length ? '项目目标尚未设置。' : '还没有填写项目背景。添加目标后，Bay Agent 和项目会话都能在正确的上下文中工作。')}</p>
-        {backgroundFacts.length ? <dl className={css.contextFacts}>{backgroundFacts.map(fact => <div key={fact.label}><dt>{fact.label}</dt><dd>{fact.values.join(' · ')}</dd></div>)}</dl> : null}
-        {project.context?.agent.summary ? <div className={css.agentNote}><span>Bay Agent 摘要</span><p>{project.context.agent.summary}</p></div> : null}
-        {project.contextCandidates?.length ? <details className={css.legacyContext}><summary>{project.contextCandidates.length} 份旧背景待整理</summary>{project.contextCandidates.map(row => <article key={row.areaId}><small>来源区域：{row.areaId}</small><pre>{renderAreaContextMarkdown(row.context)}</pre></article>)}</details> : null}
+        <p className={objective ? css.background : css.emptyState}>{objective || t(backgroundFacts.length ? 'project.noObjective' : 'project.noBackground')}</p>
+        {backgroundFacts.length ? <dl className={css.contextFacts}>{backgroundFacts.map(fact => <div key={fact.key}><dt>{t(fact.key)}</dt><dd>{fact.values.join(' · ')}</dd></div>)}</dl> : null}
+        {project.context?.agent.summary ? <div className={css.agentNote}><span>{t('project.agentSummary')}</span><p>{project.context.agent.summary}</p></div> : null}
+        {project.contextCandidates?.length ? <details className={css.legacyContext}><summary>{t('project.legacyContext', { count: project.contextCandidates.length })}</summary>{project.contextCandidates.map(row => <article key={row.areaId}><small>{t('project.sourceArea', { id: row.areaId })}</small><pre>{renderAreaContextMarkdown(row.context)}</pre></article>)}</details> : null}
       </section>
 
       <section className={css.section}>
         <div className={css.sectionHeader}>
-          <div className={css.sectionTitle}><span className={css.sectionIcon}><IconDatabaseOutlineMedium size={17} /></span><div><h3>项目记忆</h3><p>事实、决策与阶段进展</p></div></div>
-          <Button size="sm" variant="outline" disabled={!writable || !directory.memoryRequest} icon={<IconDatabaseOutlineMedium size={14} />} onClick={() => setMemory(true)}>管理</Button>
+          <div className={css.sectionTitle}><span className={css.sectionIcon}><IconDatabaseOutlineMedium size={17} /></span><div><h3>{t('project.memory')}</h3><p>{t('project.memoryHint')}</p></div></div>
+          <Button size="sm" variant="outline" disabled={!writable || !directory.memoryRequest} icon={<IconDatabaseOutlineMedium size={14} />} onClick={() => setMemory(true)}>{t('action.manage')}</Button>
         </div>
-        <p className={css.memoryDescription}>记忆保存在项目文件夹中，与展示这个项目的区域无关。每次修改都会保留来源和修订记录，并随完整工作台包导出。</p>
-        <div className={css.sectionMeta}>{memoryCount === undefined ? (memoryError ? '当前无法读取记忆列表' : '正在读取记忆列表…') : memoryCount >= 100 ? '当前项目有 100 条以上记忆' : `当前项目有 ${memoryCount} 条记忆`}</div>
+        <p className={css.memoryDescription}>{t('project.memoryDescription')}</p>
+        <div className={css.sectionMeta}>{memoryCount === undefined ? t(memoryError ? 'project.memoryFailed' : 'project.memoryReading') : memoryCount >= 100 ? t('project.memoryMany') : t('project.memoryTotal', { count: memoryCount })}</div>
       </section>
     </div>
 
     <section className={css.section}>
       <div className={css.sectionHeader}>
-        <div className={css.sectionTitle}><span className={css.sectionIcon}><IconNewChatOutlineMedium size={17} /></span><div><h3>已有对话 <span className={css.count}>{sessions.length}</span></h3><p>手动打开历史会话，不会自动恢复全部内页</p></div></div>
-        <Button size="sm" disabled={!writable} icon={<IconNewChatOutlineMedium size={14} />} onClick={onAddPage}>新建对话</Button>
+        <div className={css.sectionTitle}><span className={css.sectionIcon}><IconNewChatOutlineMedium size={17} /></span><div><h3>{t('project.conversations')} <span className={css.count}>{sessions.length}</span></h3><p>{t('project.conversationsHint')}</p></div></div>
+        <Button size="sm" disabled={!writable} icon={<IconNewChatOutlineMedium size={14} />} onClick={onAddPage}>{t('editor.workbench.conversation.start')}</Button>
       </div>
-      {sessions.length ? <ul className={css.list}>{sessions.map(session => <li key={session.sessionKey}><div className={css.listCopy}><strong>{session.title || '对话'}</strong><small>{session.agentPreset}{session.role === 'worker' ? ' · 任务对话' : ''}</small></div><Button size="sm" variant="outline" disabled={!writable || !session.sessionId} onClick={() => onOpenSession(session)}>打开</Button></li>)}</ul> : <p className={css.emptyState}>还没有对话，从“新建对话”开始。</p>}
+      {sessions.length ? <ul className={css.list}>{sessions.map(session => <li key={session.sessionKey}><div className={css.listCopy}><strong>{session.title || t('editor.workbench.conversation')}</strong><small>{session.agentPreset}{session.role === 'worker' ? ` · ${t('project.worker')}` : ''}</small></div><Button size="sm" variant="outline" disabled={!writable || !session.sessionId} onClick={() => onOpenSession(session)}>{t('action.open')}</Button></li>)}</ul> : <p className={css.emptyState}>{t('project.noConversations')}</p>}
     </section>
     <section className={css.section}>
       <div className={css.sectionHeader}>
-        <div className={css.sectionTitle}><span className={css.sectionIcon}><IconChecklistOutlineMedium size={17} /></span><div><h3>项目任务 <span className={css.count}>{items.length}</span></h3><p>持续任务和最近一次执行</p></div></div>
+        <div className={css.sectionTitle}><span className={css.sectionIcon}><IconChecklistOutlineMedium size={17} /></span><div><h3>{t('project.tasks')} <span className={css.count}>{items.length}</span></h3><p>{t('project.tasksHint')}</p></div></div>
       </div>
-      {items.length ? <ul className={css.list}>{items.map(item => <li key={item.workItemId}><div className={css.listCopy}><strong>{item.objective}</strong><small className={css.status}>{statusLabels[item.status] ?? item.status}</small></div>{!['running', 'queued', 'completed', 'ready'].includes(item.status) && controller ? <Button size="sm" variant="outline" disabled={!writable || !!busy} icon={<IconPlayOutlineMedium size={14} />} onClick={() => { void resume(item.workItemId) }}>{busy === item.workItemId ? '继续中…' : '继续任务'}</Button> : null}</li>)}</ul> : <p className={css.emptyState}>{tasks ? '还没有项目任务。' : '任务服务尚未连接，已有记录不会被删除。'}</p>}
+      {items.length ? <ul className={css.list}>{items.map(item => { const status = statusKeys[item.status]; return <li key={item.workItemId}><div className={css.listCopy}><strong>{item.objective}</strong><small className={css.status}>{status ? t(status) : item.status}</small></div>{!['running', 'queued', 'completed', 'ready'].includes(item.status) && controller ? <Button size="sm" variant="outline" disabled={!writable || !!busy} icon={<IconPlayOutlineMedium size={14} />} onClick={() => { void resume(item.workItemId) }}>{t(busy === item.workItemId ? 'project.resumingTask' : 'project.resumeTask')}</Button> : null}</li> })}</ul> : <p className={css.emptyState}>{t(tasks ? 'project.noTasks' : 'project.tasksOffline')}</p>}
     </section>
     {error ? <p className={css.error} role="alert">{error}</p> : null}
     {memory ? <WorkbenchMemoryDialog directory={directory} workbenchId={workbenchId} projectId={project.projectId} onClose={() => setMemory(false)} /> : null}

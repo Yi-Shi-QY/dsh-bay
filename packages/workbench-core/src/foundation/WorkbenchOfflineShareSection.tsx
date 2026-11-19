@@ -1,3 +1,4 @@
+import { useWorkbenchLocale } from './workbench-locale.ts'
 import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore } from 'react'
 import { IconDownloadOutlineMedium, IconFolderOpenOutlineMedium, IconRefreshOutlineMedium, IconCheckOutlineMedium,
   IconArchiveOutlineMedium, IconChevronLeftOutlineMedium, IconWarningOutlineMedium } from '@deepseek-ai/dsh-client-ui-primitives'
@@ -27,6 +28,7 @@ export function WorkbenchOfflineShareSection({ workbenchDirectory, offlinePackag
   mode?: WorkbenchOfflineShareMode
   onModeChange?: (mode: WorkbenchOfflineShareMode) => void
 }) {
+  const { t } = useWorkbenchLocale()
   const subscribe = useCallback((listener: () => void) => workbenchDirectory?.subscribe(listener) ?? (() => {}), [workbenchDirectory])
   const getSnapshot = useCallback(() => workbenchDirectory?.getSnapshot() ?? EMPTY_DIRECTORY, [workbenchDirectory])
   const directory = useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
@@ -230,10 +232,10 @@ export function WorkbenchOfflineShareSection({ workbenchDirectory, offlinePackag
     })
   }
   const importStep = current?.state === 'completed' ? 3 : current !== undefined ? 2 : incoming !== undefined ? 1 : 0
-  return <section className={css.center} data-workbench-offline-share aria-label="离线分享" aria-busy={busy}>
-    <header className={css.header}><div><h2>离线分享</h2><span className={css.subtle}>{nativeAvailable ? '使用 DSH Manager 原生 Portable Bundle 导出或导入实例' : '分享脱敏工作台布局，接收端再由 DSH 原生管理模块'}</span></div>
+  return <section className={css.center} data-workbench-offline-share aria-label={t('tools.offlineSharing')} aria-busy={busy}>
+    <header className={css.header}><div><h2>{t('tools.offlineSharing')}</h2><span className={css.subtle}>{nativeAvailable ? '使用 DSH Manager 原生 Portable Bundle 导出或导入实例' : '分享脱敏工作台布局，接收端再由 DSH 原生管理模块'}</span></div>
       <span className={css.badge}>{nativeAvailable ? 'DSH 原生 Bundle' : 'Core-only 布局包'}</span></header>
-    <div className={css.modeTabs} role="tablist" aria-label="离线分享方式">
+    <div className={css.modeTabs} role="tablist" aria-label={t('tools.offlineSharingMethod')}>
       {modes.map(value => <button key={value} type="button" role="tab" id={id + '-' + value} aria-controls={id + '-' + value + '-panel'}
         aria-selected={mode === value} tabIndex={mode === value ? 0 : -1} disabled={busy}
         onKeyDown={event => {
@@ -242,36 +244,36 @@ export function WorkbenchOfflineShareSection({ workbenchDirectory, offlinePackag
           const next = event.key === 'Home' ? modes[0] : event.key === 'End' ? modes[2] : modes[(modes.indexOf(mode) + (event.key === 'ArrowLeft' ? 2 : 1)) % modes.length]!
           changeMode(next); event.currentTarget.parentElement?.querySelector<HTMLButtonElement>('[id="' + id + '-' + next + '"]')?.focus()
         }} onClick={() => changeMode(value)}>
-        {value === 'import' ? '导入离线包' : value === 'export' ? '导出离线包' : '导入记录'}{value === 'history' && pendingCount > 0 ? <span className={css.count}>{pendingCount}</span> : null}
+        {value === 'import' ? '导入离线包' : value === 'export' ? '导出离线包' : t('home.importHistory')}{value === 'history' && pendingCount > 0 ? <span className={css.count}>{pendingCount}</span> : null}
       </button>)}
     </div>
-    {offlinePackage === undefined ? <div className={css.notice} data-tone="warning" role="status">当前 DSH 未提供离线包服务。</div>
-      : !nativeAvailable ? <div className={css.notice} data-tone="neutral" role="status">当前 DSH 未提供 Portable Bundle bridge，下面使用工作台布局分享（Core-only）格式。</div> : null}
+    {offlinePackage === undefined ? <div className={css.notice} data-tone="warning" role="status">{t('tools.thisDshHostDoesNotProvideOffline')}</div>
+      : !nativeAvailable ? <div className={css.notice} data-tone="neutral" role="status">{t('tools.thisHostDoesNotProvidePortableBundles')}</div> : null}
     {message === undefined || message.scope !== mode ? null : <div className={css.notice} data-tone={message.error ? 'error' : 'neutral'} role={message.error ? 'alert' : 'status'}>{message.text}</div>}
     <div id={id + '-import-panel'} role="tabpanel" aria-labelledby={id + '-import'} hidden={mode !== 'import'} data-workbench-offline-import>
-      {nativeAvailable ? <div className={css.modeTabs} role="tablist" aria-label="离线包类型">
-        <button type="button" role="tab" aria-selected={importKind === 'native'} onClick={() => { setImportKind('native'); setNativeIncoming(undefined); setFocusedId(undefined) }} disabled={busy}>DSH 原生离线包</button>
-        <button type="button" role="tab" aria-selected={importKind === 'core'} onClick={() => { setImportKind('core'); setNativeIncoming(undefined) }} disabled={busy}>工作台布局分享（Core-only）</button>
+      {nativeAvailable ? <div className={css.modeTabs} role="tablist" aria-label={t('tools.offlinePackageType')}>
+        <button type="button" role="tab" aria-selected={importKind === 'native'} onClick={() => { setImportKind('native'); setNativeIncoming(undefined); setFocusedId(undefined) }} disabled={busy}>{t('tools.nativeDshOfflinePackage')}</button>
+        <button type="button" role="tab" aria-selected={importKind === 'core'} onClick={() => { setImportKind('core'); setNativeIncoming(undefined) }} disabled={busy}>{t('tools.workbenchLayoutCoreOnly')}</button>
       </div> : null}
       {nativeAvailable && importKind === 'native' ? <>
-        <input ref={nativeFileInput} className={css.fileInput} type="file" aria-label="选择 DSH 原生离线包" accept=".dshbundle" disabled={busy}
+        <input ref={nativeFileInput} className={css.fileInput} type="file" aria-label={t('tools.chooseNativeDshOfflinePackage')} accept=".dshbundle" disabled={busy}
           onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; receiveNative(file) }} />
         {nativeIncoming === undefined && nativeOperation === undefined ? <div className={css.fileDrop} data-dragging={dragging}
           onDragOver={event => { event.preventDefault(); if (!busy) setDragging(true) }} onDragLeave={() => setDragging(false)}
           onDrop={event => { event.preventDefault(); setDragging(false); if (!busy) receiveNative(event.dataTransfer.files[0]) }}>
           <span className={css.emptyIcon}><IconArchiveOutlineMedium size={32} /></span>
-          <h3>{busy ? '正在检查 DSH 原生离线包' : '导入 DSH 原生离线包'}</h3><p>.dshbundle · 由 DSH Manager 创建和恢复实例</p>
-          <button className={css.command + ' ' + css.primary} type="button" disabled={busy} onClick={() => nativeFileInput.current?.click()}><IconFolderOpenOutlineMedium />选择原生离线包</button>
+          <h3>{busy ? '正在检查 DSH 原生离线包' : '导入 DSH 原生离线包'}</h3><p>{t('tools.dshbundleDshManagerCreatesOrRestoresAn')}</p>
+          <button className={css.command + ' ' + css.primary} type="button" disabled={busy} onClick={() => nativeFileInput.current?.click()}><IconFolderOpenOutlineMedium />{t('tools.chooseNativeOfflinePackage')}</button>
         </div> : null}
         {nativeIncoming !== undefined ? <>
-          <div className={css.fileBar}><span>{nativeIncoming.filename}</span><button className={css.command} type="button" disabled={busy} onClick={() => nativeFileInput.current?.click()}><IconFolderOpenOutlineMedium />更换文件</button></div>
+          <div className={css.fileBar}><span>{nativeIncoming.filename}</span><button className={css.command} type="button" disabled={busy} onClick={() => nativeFileInput.current?.click()}><IconFolderOpenOutlineMedium />{t('tools.changeFile')}</button></div>
           <div className={css.trustPanel}><h3>{nativeIncoming.preview.name}</h3><p>DSH 原生 Portable Bundle · {nativeIncoming.preview.version}</p>
-            <dl><div><dt>Bundle ID</dt><dd><code>{nativeIncoming.preview.bundleId}</code></dd></div><div><dt>发布者</dt><dd>{nativeIncoming.preview.publisherName ?? '未提供'}</dd></div>
-              <div><dt>运行时分发</dt><dd>{nativeIncoming.preview.runtimeDistribution ?? '由 Manager 决定'}</dd></div><div><dt>扩展数量</dt><dd>{nativeIncoming.preview.extensionCount ?? 0}</dd></div>
+            <dl><div><dt>Bundle ID</dt><dd><code>{nativeIncoming.preview.bundleId}</code></dd></div><div><dt>{t('tools.publisher')}</dt><dd>{nativeIncoming.preview.publisherName ?? '未提供'}</dd></div>
+              <div><dt>{t('tools.runtimeDistribution')}</dt><dd>{nativeIncoming.preview.runtimeDistribution ?? '由 Manager 决定'}</dd></div><div><dt>{t('tools.extensionCount')}</dt><dd>{nativeIncoming.preview.extensionCount ?? 0}</dd></div>
               <div><dt>SHA-256</dt><dd><code>{nativeIncoming.preview.archiveSha256}</code></dd></div></dl>
-            <p className={css.subtle}>导入后由 DSH Manager 验证签名并创建或恢复新的 DSH 实例，当前工作台不会直接写入此归档。</p>
+            <p className={css.subtle}>{t('tools.dshManagerVerifiesSignaturesAndCreatesOr')}</p>
           </div>
-          <footer className={css.sectionFooter}><button className={css.command} type="button" disabled={busy} onClick={() => setNativeIncoming(undefined)}><IconChevronLeftOutlineMedium />重新选择</button>
+          <footer className={css.sectionFooter}><button className={css.command} type="button" disabled={busy} onClick={() => setNativeIncoming(undefined)}><IconChevronLeftOutlineMedium />{t('tools.chooseAgain')}</button>
             <button className={css.command + ' ' + css.primary} type="button" disabled={busy} onClick={commitNativeImport}><IconDownloadOutlineMedium />{busy ? '正在交给 DSH Manager' : '确认导入原生离线包'}</button></footer>
         </> : null}
         {nativeOperation !== undefined ? <div className={css.transferResult} data-offline-import-state={nativeOperation.phase}>
@@ -281,28 +283,28 @@ export function WorkbenchOfflineShareSection({ workbenchDirectory, offlinePackag
               <p>{nativeOperation.phase === 'ready' ? '新的 DSH 实例已由 Manager 创建或恢复，请切换到该实例继续使用。' : nativeOperation.message ?? '正在验证签名、准备运行时和恢复扩展。'}</p></div>
           </div>
           <div className={css.resultIdentity}><span>{nativeOperation.bundleId ?? 'DSH Portable Bundle'}</span><code title={nativeOperation.operationId}>{nativeOperation.operationId.slice(0, 12)}</code></div>
-          {nativeOperation.phase !== 'ready' && nativeOperation.phase !== 'failed' && nativeOperation.phase !== 'cancelled' ? <button className={css.command} type="button" disabled={busy} onClick={() => void run('import', async () => { await pollNativeOperation(nativeOperation.operationId) })}><IconRefreshOutlineMedium />刷新导入状态</button> : null}
+          {nativeOperation.phase !== 'ready' && nativeOperation.phase !== 'failed' && nativeOperation.phase !== 'cancelled' ? <button className={css.command} type="button" disabled={busy} onClick={() => void run('import', async () => { await pollNativeOperation(nativeOperation.operationId) })}><IconRefreshOutlineMedium />{t('tools.refreshImportStatus')}</button> : null}
         </div> : null}
       </> : null}
       {!nativeAvailable || importKind === 'core' ? <>
       <WorkbenchTransferSteps labels={['选择文件', '核对内容', '安装与验证', '导入完成']} current={importStep} complete={current?.state === 'completed'} />
-      <input ref={fileInput} className={css.fileInput} type="file" aria-label="选择工作台离线包" accept=".zip" disabled={busy || offlinePackage === undefined}
+      <input ref={fileInput} className={css.fileInput} type="file" aria-label={t('tools.chooseOfflineWorkbenchPackage')} accept=".zip" disabled={busy || offlinePackage === undefined}
         onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; receive(file) }} />
       {current === undefined && incoming === undefined ? <div className={css.fileDrop} data-dragging={dragging}
         onDragOver={event => { event.preventDefault(); if (!busy) setDragging(true) }} onDragLeave={() => setDragging(false)}
         onDrop={event => { event.preventDefault(); setDragging(false); if (!busy) receive(event.dataTransfer.files[0]) }}>
         <span className={css.emptyIcon}><IconArchiveOutlineMedium size={32} /></span>
-        <h3>{busy ? '正在检查离线包' : '接收工作台离线包'}</h3><p>ZIP 文件 · 最大 72 MiB</p>
-        <button className={css.command + ' ' + css.primary} type="button" disabled={busy || offlinePackage === undefined} onClick={() => fileInput.current?.click()}><IconFolderOpenOutlineMedium />选择离线包</button>
+        <h3>{busy ? '正在检查离线包' : '接收工作台离线包'}</h3><p>{t('tools.zipFileUpTo72Mib')}</p>
+        <button className={css.command + ' ' + css.primary} type="button" disabled={busy || offlinePackage === undefined} onClick={() => fileInput.current?.click()}><IconFolderOpenOutlineMedium />{t('tools.chooseOfflinePackage')}</button>
       </div> : null}
       {incoming !== undefined && current === undefined ? <>
-        <div className={css.fileBar}><span>{incoming.filename}</span><button className={css.command} type="button" disabled={busy} onClick={() => fileInput.current?.click()}><IconFolderOpenOutlineMedium />更换文件</button></div>
+        <div className={css.fileBar}><span>{incoming.filename}</span><button className={css.command} type="button" disabled={busy} onClick={() => fileInput.current?.click()}><IconFolderOpenOutlineMedium />{t('tools.changeFile')}</button></div>
         <WorkbenchTransferPreview pkg={incoming.pkg} />
         <div className={css.notice} data-tone={incoming.preflight.action === 'install-and-restart' ? 'warning' : 'neutral'}>
           <div><strong>{{ 'install-and-restart': '需要安装模块并重启', reuse: '复用已验证模块', resume: '继续已有导入', 'already-imported': '此包已导入' }[incoming.preflight.action]}</strong>
             <p>{incoming.preflight.action === 'already-imported' ? '保留接收方已有编辑。' : '导入后新增一个未使用工作台，当前工作台保持不变。'}</p></div>
         </div>
-        <footer className={css.sectionFooter}><button className={css.command} type="button" disabled={busy} onClick={resetImport}><IconChevronLeftOutlineMedium />重新选择</button>
+        <footer className={css.sectionFooter}><button className={css.command} type="button" disabled={busy} onClick={resetImport}><IconChevronLeftOutlineMedium />{t('tools.chooseAgain')}</button>
           <button className={css.command + ' ' + css.primary} type="button" disabled={busy} onClick={commitImport}>{busy ? <IconRefreshOutlineMedium /> : <IconDownloadOutlineMedium />}{busy ? '正在导入' : '确认导入工作台'}</button></footer>
       </> : null}
       {current === undefined ? null : <div className={css.transferResult} data-offline-import-state={current.state}>
@@ -319,7 +321,7 @@ export function WorkbenchOfflineShareSection({ workbenchDirectory, offlinePackag
           <button className={css.command} type="button" disabled={busy} onClick={resetImport}><IconFolderOpenOutlineMedium />{current.state === 'failed' ? '重新选择离线包' : '导入另一个离线包'}</button>
           <div className={css.actions}>{current.state === 'completed' ? <>
             <button className={css.command + ' ' + css.primary} type="button" disabled={busy || workbenchDirectory === undefined || importedWorkbench === undefined || importedWorkbench.archivedAt !== undefined}
-              onClick={() => openWorkbench(current)}><IconFolderOpenOutlineMedium />打开工作台</button>
+              onClick={() => openWorkbench(current)}><IconFolderOpenOutlineMedium />{t('home.openWorkbench')}</button>
           </> : current.state !== 'failed' ? <button className={css.command + ' ' + css.primary} type="button" disabled={busy || offlinePackage === undefined}
             onClick={() => refreshImports(current.packageId)}><IconRefreshOutlineMedium />{current.state === 'restart-required' ? '检查重启状态' : '继续验证并保存'}</button> : null}</div>
         </footer>
@@ -328,30 +330,30 @@ export function WorkbenchOfflineShareSection({ workbenchDirectory, offlinePackag
     </div>
     <div id={id + '-export-panel'} role="tabpanel" aria-labelledby={id + '-export'} hidden={mode !== 'export'}>
       {nativeAvailable ? <div className={css.exportContents}>
-        <h3>导出 DSH 原生离线包</h3>
-        <ul><li><IconCheckOutlineMedium />由 DSH Manager 保存运行时、实例模板和扩展</li><li><IconCheckOutlineMedium />接收方通过原生 Manager 验证并创建新实例</li><li><IconCheckOutlineMedium />不包含 Session、凭据和本机绝对路径</li></ul>
-        <p className={css.subtle}>这是 DSH Manager Portable Bundle（.dshbundle），与下方的工作台布局分享格式不同。</p>
+        <h3>{t('tools.exportNativeDshOfflinePackage')}</h3>
+        <ul><li><IconCheckOutlineMedium />{t('tools.dshManagerSavesTheRuntimeInstanceTemplate')}</li><li><IconCheckOutlineMedium />{t('tools.recipientsVerifyThePackageAndCreateAn')}</li><li><IconCheckOutlineMedium />{t('tools.excludesConversationsCredentialsAndLocalAbsolutePaths')}</li></ul>
+        <p className={css.subtle}>{t('tools.thisDshManagerPortableBundleDshbundleDiffers')}</p>
         <button className={css.command + ' ' + css.primary} type="button" disabled={busy || offlinePackage?.exportNativeBundle === undefined} onClick={exportNative}><IconDownloadOutlineMedium />{busy ? '正在导出' : '导出原生离线包'}</button>
       </div> : null}
-      {nativeAvailable ? <div className={css.notice} data-tone="neutral"><div><strong>工作台布局分享（Core-only）</strong><p>仅包含 Workbench 布局和模块身份，不创建 DSH 实例。适用于没有 Portable Bundle bridge 的接收端。</p></div></div> : null}
-      <WorkbenchTransferSteps labels={['选择工作台', '检查离线包', '下载分享']} current={preview === undefined ? 0 : downloaded === preview.packageId ? 2 : 1} complete={preview !== undefined && downloaded === preview.packageId} />
-      <div className={css.scopeBar}><label>选择要导出的工作台（仅选择布局来源）<select aria-label="离线导出工作台，仅选择布局来源" value={selectedId ?? ''} disabled={busy || directory.rows.length === 0}
+      {nativeAvailable ? <div className={css.notice} data-tone="neutral"><div><strong>{t('tools.workbenchLayoutCoreOnly')}</strong><p>{t('tools.containsOnlyLayoutsAndModuleIdentitiesSuitable')}</p></div></div> : null}
+      <WorkbenchTransferSteps labels={[t('home.selectAWorkbench'), '检查离线包', '下载分享']} current={preview === undefined ? 0 : downloaded === preview.packageId ? 2 : 1} complete={preview !== undefined && downloaded === preview.packageId} />
+      <div className={css.scopeBar}><label>{t('tools.chooseTheSourceWorkbenchLayoutToExport')}<select aria-label={t('tools.chooseSourceLayoutForOfflineExport')} value={selectedId ?? ''} disabled={busy || directory.rows.length === 0}
         onChange={event => { setSelected(event.target.value); onSelectWorkbench?.(event.target.value); setPrepared(undefined); setDownloaded(undefined); setMessage(undefined) }}>
         {directory.rows.map(row => <option key={row.workbenchId} value={row.workbenchId}>{row.name}</option>)}
       </select></label></div>
       {preview === undefined ? <div className={css.exportContents}><h3>{nativeAvailable ? '导出工作台布局分享（Core-only）' : '导出工作台布局分享（Core-only）'}</h3>
-        <ul><li><IconCheckOutlineMedium />区域布局、工作台名称和标签</li><li><IconCheckOutlineMedium />布局中使用的内页扩展和原始制品</li><li><IconCheckOutlineMedium />内页入口状态和接收方需要重新绑定的资源</li></ul>
-        <p className={css.subtle}>聊天记录、凭据和本机文件不会写入包内。接收方需要兼容的 DSH 与 Workbench Core，并在导入后完成重启验证。</p>
+        <ul><li><IconCheckOutlineMedium />{t('tools.areaLayoutWorkbenchNameAndTags')}</li><li><IconCheckOutlineMedium />{t('tools.pageExtensionsUsedByTheLayoutAnd')}</li><li><IconCheckOutlineMedium />{t('tools.pageVisibilityAndResourcesTheRecipientNeeds')}</li></ul>
+        <p className={css.subtle}>{t('tools.conversationHistoryCredentialsAndLocalFilesAre')}</p>
         <button className={css.command + ' ' + css.primary} type="button" disabled={busy || offlinePackage === undefined || selectedId === undefined}
           onClick={() => prepare()}><IconCheckOutlineMedium />{busy ? '正在检查' : '检查布局分享包'}</button>
       </div> : <>
         <WorkbenchTransferPreview pkg={preview} />
-        <footer className={css.sectionFooter}><button className={css.command} type="button" disabled={busy} onClick={() => prepare()}><IconRefreshOutlineMedium />重新检查</button>
+        <footer className={css.sectionFooter}><button className={css.command} type="button" disabled={busy} onClick={() => prepare()}><IconRefreshOutlineMedium />{t('transfer.checkAgain')}</button>
           <button className={css.command + ' ' + css.primary} type="button" disabled={busy} onClick={() => prepare(true)}><IconDownloadOutlineMedium />{downloaded === preview.packageId ? '再次下载布局分享包' : '下载布局分享包'}</button></footer>
       </>}
     </div>
     <div id={id + '-history-panel'} role="tabpanel" aria-labelledby={id + '-history'} hidden={mode !== 'history'}>
-      <div className={css.pageHeading}><h3>导入记录 <span className={css.subtle}>{receipts.length}</span></h3><button className={css.iconButton} type="button" title="刷新导入记录" aria-label="刷新导入记录"
+      <div className={css.pageHeading}><h3>{t('home.importHistory')} <span className={css.subtle}>{receipts.length}</span></h3><button className={css.iconButton} type="button" title={t('tools.refreshImportHistory')} aria-label={t('tools.refreshImportHistory')}
         disabled={busy || offlinePackage === undefined || loadingReceipts} onClick={() => refreshImports()}><IconRefreshOutlineMedium /></button></div>
       {receipts.length === 0 ? <div className={css.empty}><IconArchiveOutlineMedium size={28} /><p>{loadingReceipts ? '正在读取导入记录' : '暂无导入记录'}</p></div>
         : <div className={css.receiptList}>{[...receipts].reverse().map(row => <button className={css.receiptRow} type="button" key={row.packageId} disabled={busy}

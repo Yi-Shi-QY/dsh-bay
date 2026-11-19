@@ -1,8 +1,8 @@
 /** Names created by Bay remain portable between supported desktop platforms. */
-export function workbenchFolderNameError(name: string): string | undefined {
-  if (!name.trim()) return '请输入文件夹名称。'
-  if (name === '.' || name === '..' || /[<>:"/\\|?*\u0000-\u001f]/u.test(name)) return '文件夹名称不能包含路径或 <> : " / \\ | ? * 等字符。'
-  if (/[. ]$/u.test(name) || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/iu.test(name)) return '此文件夹名称不可用，请换一个名称。'
+export function workbenchFolderNameError(name: string, t?: (key: 'folders.required' | 'folders.invalidCharacters' | 'folders.reserved') => string): string | undefined {
+  if (!name.trim()) return t?.('folders.required') ?? '请输入文件夹名称。'
+  if (name === '.' || name === '..' || /[<>:"/\\|?*\u0000-\u001f]/u.test(name)) return t?.('folders.invalidCharacters') ?? '文件夹名称不能包含路径或 <> : " / \\ | ? * 等字符。'
+  if (/[. ]$/u.test(name) || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/iu.test(name)) return t?.('folders.reserved') ?? '此文件夹名称不可用，请换一个名称。'
   return undefined
 }
 

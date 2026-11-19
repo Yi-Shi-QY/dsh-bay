@@ -1,3 +1,4 @@
+import { useWorkbenchLocale, workbenchErrorNotice, workbenchNoticeText, WorkbenchMessageError, type WorkbenchNotice } from './workbench-locale.ts'
 import { browserSafeUuid } from '../browser-safe-id.ts'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createWorkbenchCompleteClient } from '../client/workbench-complete.ts'
@@ -19,7 +20,7 @@ function savedTransfer(id: string): WorkbenchImportTransfer {
   try { return JSON.parse(sessionStorage.getItem(storageKey(id)) ?? 'null') as WorkbenchImportTransfer ?? { folderName: '' } }
   catch { return { folderName: '' } }
 }
-const errorText = (error: unknown) => error instanceof Error ? error.message : String(error)
+const errorNotice = (error: unknown) => workbenchErrorNotice(error, 'transfer.operationFailed')
 interface CompletePanelProps {
   workbenchId: string
   mode?: 'export' | 'import' | 'history'
@@ -39,11 +40,12 @@ export function WorkbenchCompletePackagePanel(props: CompletePanelProps) {
   return <CompletePackagePanel key={props.browser ? props.workbenchId : 'desktop'} {...props} />
 }
 function CompletePackagePanel({ workbenchId, mode = 'import', sourceControl, summary, browser = false, disabled = false, editors, pickParentDirectory, onOpenWorkbench, onImport, importSelection, unifiedPicker, onImportBusyChange }: CompletePanelProps) {
+  const { t } = useWorkbenchLocale()
   const scope = browser ? workbenchId : ''
   const client = useMemo(() => createWorkbenchCompleteClient(), [])
   const [transfer, setTransfer] = useState<WorkbenchImportTransfer>(() => savedTransfer(scope))
   const [jobs, setJobs] = useState<CompletePackageJobView[]>([])
-  const [error, setError] = useState<string>()
+  const [error, setError] = useState<WorkbenchNotice>()
   const [busy, setBusy] = useState(false)
   const [targetPlatform, setTargetPlatform] = useState<CompletePlatform>('win32')
   const pending = useRef(false)
@@ -62,7 +64,7 @@ function CompletePackagePanel({ workbenchId, mode = 'import', sourceControl, sum
       try {
         const values = await client.request<CompletePackageJobView[]>({ action: 'jobs', workbenchId: mode === 'export' ? workbenchId : scope, ...(!browser && mode !== 'export' ? { allImports: true } : {}) }, controller.signal)
         if (!controller.signal.aborted) setJobs(values.sort((a, b) => b.updatedAt - a.updatedAt))
-      } catch (reason) { if (!controller.signal.aborted) setError(errorText(reason)) }
+      } catch (reason) { if (!controller.signal.aborted) setError(errorNotice(reason)) }
       finally { loading = false }
     }
     void refresh(); const timer = setInterval(() => { void refresh() }, 1500)
@@ -78,7 +80,7 @@ function CompletePackagePanel({ workbenchId, mode = 'import', sourceControl, sum
       try {
         const selection = await client.request<CompletePackageDirectoryRequest>({ action: 'directory-status', id: selectionId }, controller.signal)
         if (!controller.signal.aborted) setTransfer(current => ({ ...current, selection }))
-      } catch (reason) { if (!controller.signal.aborted) setError(errorText(reason)) }
+      } catch (reason) { if (!controller.signal.aborted) setError(errorNotice(reason)) }
       finally { loading = false }
     }
     void refresh(); const timer = setInterval(() => { void refresh() }, 1500)
@@ -87,7 +89,7 @@ function CompletePackagePanel({ workbenchId, mode = 'import', sourceControl, sum
   const run = async (operation: () => Promise<void>) => {
     if (pending.current) return
     pending.current = true; setBusy(true); setError(undefined)
-    try { await operation() } catch (reason) { if (mounted.current) setError(errorText(reason)) }
+    try { await operation() } catch (reason) { if (mounted.current) setError(errorNotice(reason)) }
     finally { pending.current = false; if (mounted.current) setBusy(false) }
   }
   const rememberJob = (job: CompletePackageJobView) => setJobs(current => [job, ...current.filter(row => row.id !== job.id)])
@@ -109,7 +111,7 @@ function CompletePackagePanel({ workbenchId, mode = 'import', sourceControl, sum
     const selection = await client.request<CompletePackageDirectoryRequest>({ action: 'directory-request', uploadId: transfer.upload!.id, requestId: 'directory-' + browserSafeUuid() })
     setTransfer(current => ({ ...current, selection }))
     if (!browser) {
-      if (!pickParentDirectory) throw new Error('请在 DSH 客户端处理目录选择请求。')
+      if (!pickParentDirectory) throw new WorkbenchMessageError('transfer.selectInClient')
       const parentPath = await pickParentDirectory()
       const result = await client.request<CompletePackageDirectoryRequest>({ action: 'directory-complete', id: selection.id, ...(parentPath ? { parentPath } : { cancelled: true }) })
       setTransfer(current => ({ ...current, selection: result }))
@@ -136,7 +138,7 @@ function CompletePackagePanel({ workbenchId, mode = 'import', sourceControl, sum
     onConfirmExtensions: (job: CompletePackageJobView) => { void run(async () => { rememberJob(await client.request<CompletePackageJobView>({ action: 'confirm-extensions', id: job.id, digest: job.extensionPlanDigest, confirmed: true })) }) },
     onRestart: (job: CompletePackageJobView) => { void run(async () => {
       const bridge = createWorkbenchManagerRestartBridge()
-      if (!bridge || !job.restartTransactionId) throw new Error('当前启动方式不支持一键重启。请保存其他工作，手动重启 DSH 后继续原作业。')
+      if (!bridge || !job.restartTransactionId) throw new WorkbenchMessageError('transfer.manualRestartRequired')
       const operation = await bridge.requestRestart(job.restartTransactionId)
       await bridge.waitForRestart({ ...operation, transactionId: job.restartTransactionId })
       rememberJob(await client.request<CompletePackageJobView>({ action: 'resume', id: job.id }))
@@ -155,29 +157,30 @@ function CompletePackagePanel({ workbenchId, mode = 'import', sourceControl, sum
   }
   const activeJob = jobs.find(job => job.id === transfer.jobId || job.id === transfer.selection?.jobId || selectionId && job.requestId === 'import-' + selectionId)
   const shownJobs = mode === 'history' ? jobs.filter(job => job.kind === 'import') : jobs.filter(job => job.kind === 'export')
-  return <section className={sharing.complete} aria-label="完整工作台包">
+  return <section className={sharing.complete} aria-label={t('transfer.fullWorkbenchPackage')}>
     {mode === 'export' ? <div className={summary ? sharing.workspace : undefined}><section className={sharing.formPanel}>
-      <div className={sharing.formIntro}><h3>导出完整工作台</h3><p>把项目与工作进展一起打包，便于备份或在另一台机器继续。</p></div>
+      <div className={sharing.formIntro}><h3>{t('transfer.exportFullWorkbench')}</h3><p>{t('transfer.includeProjectsAndProgressToBackUp')}</p></div>
       <fieldset className={sharing.sourceControl} disabled={disabled || busy}>{sourceControl}</fieldset>
-      <label className={sharing.field}>目标系统<select value={targetPlatform} disabled={disabled || busy} onChange={event => { setTargetPlatform(event.target.value as CompletePlatform); exportRequestId.current = 'export-' + browserSafeUuid() }}><option value="win32">Windows</option><option value="darwin">macOS</option><option value="linux">Linux</option></select></label>
-      <p className={sharing.hint}>按目标系统检查文件名、链接与扩展兼容性。接收端仍按实际系统重新检查，完整包可用于其他兼容系统。</p>
-      <ul className={sharing.coverage} aria-label="完整包包含内容"><li><IconFolderOpenOutlineMedium size={16} />项目文件与目录</li><li><IconNewChatOutlineMedium size={16} />对话历史与附件</li><li><IconDatabaseOutlineMedium size={16} />工作背景与记忆</li><li><IconBranchOutlineMedium size={16} />任务关系与进度</li></ul>
+      <label className={sharing.field}>{t('transfer.targetSystem')}<select value={targetPlatform} disabled={disabled || busy} onChange={event => { setTargetPlatform(event.target.value as CompletePlatform); exportRequestId.current = 'export-' + browserSafeUuid() }}><option value="win32">Windows</option><option value="darwin">macOS</option><option value="linux">Linux</option></select></label>
+      <p className={sharing.hint}>{t('transfer.checkNamesLinksAndExtensionsForThe')}</p>
+      <ul className={sharing.coverage} aria-label={t('transfer.whatTheFullPackageIncludes')}><li><IconFolderOpenOutlineMedium size={16} />{t('transfer.projectFilesAndFolders')}</li><li><IconNewChatOutlineMedium size={16} />{t('transfer.conversationHistoryAndAttachments')}</li><li><IconDatabaseOutlineMedium size={16} />{t('transfer.workContextAndMemory')}</li><li><IconBranchOutlineMedium size={16} />{t('transfer.taskRelationshipsAndProgress')}</li></ul>
       <div className={sharing.actionBar}><button type="button" className={css.primaryButton} disabled={disabled || busy || !workbenchId} onClick={() => { void run(async () => {
         const input = await client.request<{ revision: number; pages: ModuleInstanceDocument[] }>({ action: 'export-page-input', workbenchId })
         const pageStates = migrateCompletePageStates(input.pages ?? [], editors ?? [], 'export')
         const job = await client.request<CompletePackageJobView>({ action: 'start-export', workbenchId, targetPlatform, definitionRevision: input.revision, pageStates, requestId: exportRequestId.current })
         exportRequestId.current = 'export-' + browserSafeUuid(); rememberJob(job)
-      }) }}><IconArchiveOutlineMedium size={16} />生成完整包</button><span>完成后在下方下载</span></div>
+      }) }}><IconArchiveOutlineMedium size={16} />{t('transfer.generateFullPackage')}</button><span>{t('transfer.downloadBelowWhenReady')}</span></div>
     </section>{summary}</div> : null}
-    {mode === 'import' ? <WorkbenchImportFlow transfer={transfer} job={activeJob} busy={busy} browser={browser} disabled={disabled || browser && !workbenchId} unifiedPicker={unifiedPicker === true} {...(editors ? { editors } : {})} onFile={chooseFile} onChange={patch => setTransfer(current => ({ ...current, ...patch }))} onSelectParent={selectParent} onStart={startImport} onPause={() => uploadAbort.current?.abort(new Error('已暂停，可重新选择同一文件继续。'))} onNew={() => { setTransfer({ folderName: '' }); setError(undefined) }} jobActions={jobActions} /> : null}
-    {error ? <p className={sharing.error} role="alert"><IconWarningOutlineMedium size={16} />{error}</p> : null}
-    {mode !== 'import' ? <section className={sharing.jobs} aria-label="完整包作业"><div className={sharing.sectionHeading}><h3><IconClockOutlineMedium size={17} />{mode === 'history' ? '完整包导入记录' : '导出记录'}</h3><span>{shownJobs.length} 项 · 状态自动更新</span></div><div className={sharing.jobList}>{shownJobs.map(job => <WorkbenchCompleteJob key={job.id} job={job} busy={busy} disabled={disabled} {...jobActions} />)}</div>{!shownJobs.length ? <div className={sharing.empty}><IconClockOutlineMedium size={24} /><p>{mode === 'history' ? '还没有完整包导入记录' : '生成完整包后，在这里查看进度与下载'}</p></div> : null}</section> : null}
+    {mode === 'import' ? <WorkbenchImportFlow transfer={transfer} job={activeJob} busy={busy} browser={browser} disabled={disabled || browser && !workbenchId} unifiedPicker={unifiedPicker === true} {...(editors ? { editors } : {})} onFile={chooseFile} onChange={patch => setTransfer(current => ({ ...current, ...patch }))} onSelectParent={selectParent} onStart={startImport} onPause={() => uploadAbort.current?.abort(new WorkbenchMessageError('transfer.uploadPaused'))} onNew={() => { setTransfer({ folderName: '' }); setError(undefined) }} jobActions={jobActions} /> : null}
+    {error ? <p className={sharing.error} role="alert"><IconWarningOutlineMedium size={16} />{workbenchNoticeText(t, error)}</p> : null}
+    {mode !== 'import' ? <section className={sharing.jobs} aria-label={t('transfer.fullPackageJobs')}><div className={sharing.sectionHeading}><h3><IconClockOutlineMedium size={17} />{mode === 'history' ? t('transfer.importHistory') : t('transfer.exportHistory')}</h3><span>{shownJobs.length} {t('transfer.jobsStatusUpdatesAutomatically')}</span></div><div className={sharing.jobList}>{shownJobs.map(job => <WorkbenchCompleteJob key={job.id} job={job} busy={busy} disabled={disabled} {...jobActions} />)}</div>{!shownJobs.length ? <div className={sharing.empty}><IconClockOutlineMedium size={24} /><p>{mode === 'history' ? t('transfer.emptyImportHistory') : t('transfer.emptyExportHistory')}</p></div> : null}</section> : null}
   </section>
 }
 /** Mount in the DSH desktop shell, including while a browser owns the workbench. */
 export function WorkbenchImportDirectoryRequests({ pickParentDirectory }: { pickParentDirectory: () => Promise<string | undefined> }) {
+  const { t } = useWorkbenchLocale()
   const client = useMemo(() => createWorkbenchCompleteClient(), [])
-  const [requests, setRequests] = useState<CompletePackageDirectoryRequest[]>([]), [error, setError] = useState<string>(), [busy, setBusy] = useState(false)
+  const [requests, setRequests] = useState<CompletePackageDirectoryRequest[]>([]), [error, setError] = useState<WorkbenchNotice>(), [busy, setBusy] = useState(false)
   useEffect(() => {
     const abort = new AbortController(); let pending = false
     const refresh = async () => { if (pending) return; pending = true
@@ -195,10 +198,10 @@ export function WorkbenchImportDirectoryRequests({ pickParentDirectory }: { pick
       const parentPath = cancel ? undefined : await pickParentDirectory()
       await client.request({ action: 'directory-complete', id: request.id, ...(parentPath ? { parentPath } : { cancelled: true }) })
       setRequests(current => current.filter(row => row.id !== request.id))
-    } catch (reason) { setError(errorText(reason)) } finally { setBusy(false) }
+    } catch (reason) { setError(errorNotice(reason)) } finally { setBusy(false) }
   }
-  return <section className={css.notice} aria-label="浏览器导入目录请求"><strong>浏览器正在等待导入目录</strong>
-    {requests.map(request => <div className={css.noticeActions} key={request.id}><span>{request.workbenchId ? '工作台 ' + request.workbenchId : '新工作台'}</span><button className={css.primaryButton} disabled={busy} onClick={() => { void complete(request) }}>选择目标目录</button><button className={css.secondaryButton} disabled={busy} onClick={() => { void complete(request, true) }}>取消请求</button></div>)}
-    {error ? <p role="alert">{error}</p> : null}
+  return <section className={css.notice} aria-label={t('transfer.browserImportFolderRequests')}><strong>{t('transfer.theBrowserIsWaitingForAnImport')}</strong>
+    {requests.map(request => <div className={css.noticeActions} key={request.id}><span>{request.workbenchId ? t('transfer.workbenchRequest', { id: request.workbenchId }) : t('transfer.newWorkbench')}</span><button className={css.primaryButton} disabled={busy} onClick={() => { void complete(request) }}>{t('transfer.chooseDestinationFolder')}</button><button className={css.secondaryButton} disabled={busy} onClick={() => { void complete(request, true) }}>{t('transfer.cancelRequest')}</button></div>)}
+    {error ? <p role="alert">{workbenchNoticeText(t, error)}</p> : null}
   </section>
 }

@@ -3,6 +3,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createElement, StrictMode, useState, type ComponentType } from 'react'
 import { createWorkbenchOfficialAreaEditors } from '../src/client/official-area-editors.tsx'
+import { WorkbenchLocaleContext } from '../src/foundation/workbench-locale.ts'
+import { createTestWorkbenchLocale } from './workbench-locale-fixture.ts'
 
 function nativeConversationContext(options: {
   readonly onOfficialWorkspaceOpen: () => void
@@ -237,8 +239,9 @@ describe('Core native Conversation editors', () => {
     }))
     const placeConversation = vi.fn(async () => { throw new Error('host unavailable') })
     const Start = editors.start as unknown as ComponentType<Record<string, unknown>>
+    const locale = createTestWorkbenchLocale()
 
-    render(<Start
+    render(<WorkbenchLocaleContext.Provider value={locale}><Start
       instanceId="start-area-project-failure"
       areaId="area-project-failure"
       presentation="area"
@@ -248,9 +251,13 @@ describe('Core native Conversation editors', () => {
       close={vi.fn()}
       focus={vi.fn()}
       placeConversation={placeConversation}
-    />)
+    /></WorkbenchLocaleContext.Provider>)
 
     await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('\u65e0\u6cd5\u51c6\u5907\u6b64\u5de5\u4f5c\u533a\u5bf9\u8bdd'))
+    act(() => locale.setLocale('en'))
+    expect(screen.getByRole('alert').textContent).toContain('Could not prepare a conversation in this workspace.')
+    expect(screen.getByRole('button', { name: 'Start a conversation in this project' })).toBeTruthy()
+    act(() => locale.setLocale('zh'))
     expect(placeConversation).toHaveBeenCalledOnce()
     fireEvent.click(screen.getByRole('button', { name: /区域项目.*新建对话/ }))
     await waitFor(() => expect(placeConversation).toHaveBeenCalledTimes(2))

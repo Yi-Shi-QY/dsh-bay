@@ -1,14 +1,9 @@
+import { useWorkbenchLocale, workbenchPageTitle } from './workbench-locale.ts'
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { groupsOf, type DropEdge, type LayoutNode, type WorkbenchLayoutDocument } from './model.ts'
 import css from './WorkbenchPlacementPicker.module.css'
 
-const positions = [
-  { edge: 'center', label: '加入标签' },
-  { edge: 'left', label: '左侧分屏' },
-  { edge: 'right', label: '右侧分屏' },
-  { edge: 'top', label: '上方分屏' },
-  { edge: 'bottom', label: '下方分屏' },
-] as const
+const positions = ['center', 'left', 'right', 'top', 'bottom'] as const satisfies readonly DropEdge[]
 
 interface Props {
   layout: WorkbenchLayoutDocument
@@ -31,6 +26,7 @@ function PlacementIcon({ edge }: { edge: DropEdge }) {
 
 /** Preview is local state only; all placement validation and writes stay with the caller. */
 export function WorkbenchPlacementPicker({ layout, title, busy, reason, projectPath, onConfirm, onCancel }: Props) {
+  const { t } = useWorkbenchLocale()
   const groups = groupsOf(layout.root)
   const [areaId, setAreaId] = useState(() => groups.some(group => group.id === layout.activeGroupId) ? layout.activeGroupId : groups[0]?.id ?? '')
   const [edge, setEdge] = useState<DropEdge>('center')
@@ -38,10 +34,9 @@ export function WorkbenchPlacementPicker({ layout, title, busy, reason, projectP
   useEffect(() => { surface.current?.focus({ preventScroll: true }) }, [])
   const descriptionId = useId()
   const selected = groups.find(group => group.id === areaId)
-  const areaName = (id: string) => '区域 ' + (groups.findIndex(group => group.id === id) + 1)
-  const blocked = !selected ? '目标区域已关闭，请重新选择。' : busy ? '内页正在处理其他操作，请稍后再试。' : reason(areaId, edge)
+  const areaName = (id: string) => t('page.area', { index: groups.findIndex(group => group.id === id) + 1 })
+  const blocked = !selected ? t('layout.closedDestination') : busy ? t('layout.pageBusy') : reason(areaId, edge)
   const path = selected ? projectPath(areaId) : undefined
-  const label = positions.find(position => position.edge === edge)!.label
 
   const renderLayout = (node: LayoutNode): ReactNode => {
     if (node.kind === 'split') {
@@ -52,7 +47,7 @@ export function WorkbenchPlacementPicker({ layout, title, busy, reason, projectP
       </div>
     }
     const activePage = node.tabs.find(tab => tab.id === node.activeTabId) ?? node.tabs[0]
-    const current = activePage?.lastKnownTitle || '空区域'
+    const current = activePage ? workbenchPageTitle(t, activePage.editorId, activePage.lastKnownTitle) : t('placement.emptyArea')
     const name = areaName(node.id)
     return <button key={node.id} type="button" className={css.area} data-placement-area={node.id} aria-label={name + '：' + current}
       aria-pressed={node.id === areaId} title={name + ' · ' + current} onClick={() => setAreaId(node.id)}>
@@ -61,33 +56,33 @@ export function WorkbenchPlacementPicker({ layout, title, busy, reason, projectP
     </button>
   }
 
-  return <section ref={surface} tabIndex={-1} className={css.picker} aria-label="选择放置位置">
-    <div className={css.source}><PlacementIcon edge="center" /><span>移动内页<strong title={title}>{title}</strong></span></div>
+  return <section ref={surface} tabIndex={-1} className={css.picker} aria-label={t('workspace.chooseWhereToPlaceThePage')}>
+    <div className={css.source}><PlacementIcon edge="center" /><span>{t('workspace.movePage')}<strong title={title}>{title}</strong></span></div>
     <div className={css.scroll}>
-      <div className={css.sectionHeading}><span>选择目标区域</span><small>点击布局预览</small></div>
-      <div className={css.preview} role="group" aria-label="工作台布局预览">{renderLayout(layout.root)}</div>
+      <div className={css.sectionHeading}><span>{t('workspace.chooseDestinationArea')}</span><small>{t('workspace.selectAnAreaInTheLayoutPreview')}</small></div>
+      <div className={css.preview} role="group" aria-label={t('workspace.workbenchLayoutPreview')}>{renderLayout(layout.root)}</div>
       <div className={css.target}>
-        <select aria-label="目标区域" value={selected ? areaId : ''} onChange={event => setAreaId(event.target.value)}>
-          {!selected ? <option value="" disabled>重新选择区域</option> : null}
+        <select aria-label={t('workspace.destinationArea')} value={selected ? areaId : ''} onChange={event => setAreaId(event.target.value)}>
+          {!selected ? <option value="" disabled>{t('workspace.chooseAnotherArea')}</option> : null}
           {groups.map(group => <option key={group.id} value={group.id}>{areaName(group.id)}</option>)}
         </select>
-        <span title={path ?? '未设置项目目录'}>{path ?? '未设置项目目录'}</span>
+        <span title={path ?? t('layout.projectFolderNotSet')}>{path ?? t('layout.projectFolderNotSet')}</span>
       </div>
-      <div className={css.sectionHeading}><span>放置方式</span><small><i />高亮处为放置位置</small></div>
-      <div className={css.positions} role="group" aria-label="放置方式">
-        {positions.map(position => {
-          const unavailable = selected ? reason(areaId, position.edge) : '请先选择区域'
-          return <button key={position.edge} type="button" aria-pressed={edge === position.edge} data-unavailable={!!unavailable}
-            title={unavailable ?? position.label} onClick={() => setEdge(position.edge)}>
-            <PlacementIcon edge={position.edge} /><span>{position.label}</span>
+      <div className={css.sectionHeading}><span>{t('workspace.placement')}</span><small><i />{t('workspace.theHighlightShowsWhereThePageWill')}</small></div>
+      <div className={css.positions} role="group" aria-label={t('workspace.placement')}>
+        {positions.map(positionEdge => {
+          const unavailable = selected ? reason(areaId, positionEdge) : t('layout.chooseAreaFirst')
+          return <button key={positionEdge} type="button" aria-pressed={edge === positionEdge} data-unavailable={!!unavailable}
+            title={unavailable ?? t(`layout.place.${positionEdge}`)} onClick={() => setEdge(positionEdge)}>
+            <PlacementIcon edge={positionEdge} /><span>{t(`layout.place.${positionEdge}`)}</span>
           </button>
         })}
       </div>
       <p id={descriptionId} className={css.description} data-blocked={!!blocked} role="status">{blocked ?? (edge === 'center'
-        ? `将「${title}」加入${areaName(areaId)}的标签页，保留现有内页。`
-        : `在${areaName(areaId)}${label.slice(0, 2)}新建分屏，放入「${title}」。`)}</p>
+        ? t('layout.placeTabHint', { title, area: areaName(areaId) })
+        : t(`layout.placeHint.${edge}`, { title, area: areaName(areaId) }))}</p>
     </div>
-    <footer className={css.actions}><button type="button" onClick={onCancel}>取消</button><button type="button" className={css.confirm} disabled={!!blocked} aria-describedby={descriptionId}
-      onClick={() => { if (selected && !busy) onConfirm(areaId, edge) }}>确认放入</button></footer>
+    <footer className={css.actions}><button type="button" onClick={onCancel}>{t('action.cancel')}</button><button type="button" className={css.confirm} disabled={!!blocked} aria-describedby={descriptionId}
+      onClick={() => { if (selected && !busy) onConfirm(areaId, edge) }}>{t('workspace.movePageHere')}</button></footer>
   </section>
 }

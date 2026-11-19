@@ -1,3 +1,4 @@
+import { useWorkbenchLocale } from './workbench-locale.ts'
 import { browserSafeUuid } from '../browser-safe-id.ts'
 import { useEffect, useState } from 'react'
 import { Button, Input, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
@@ -6,6 +7,7 @@ import type { WorkbenchMemoryEntry, WorkbenchMemoryWrite } from '../workbench-me
 import css from './WorkbenchHome.module.css'
 
 export function WorkbenchMemoryDialog({ directory, workbenchId, projectId, onClose }: { directory: WorkbenchDirectory; workbenchId: string; projectId?: string; onClose(): void }) {
+  const { t } = useWorkbenchLocale()
   const [entries, setEntries] = useState<WorkbenchMemoryEntry[]>([])
   const [selected, setSelected] = useState<{ entry: WorkbenchMemoryEntry; body: string }>()
   const [title, setTitle] = useState(''), [summary, setSummary] = useState(''), [body, setBody] = useState('')
@@ -33,31 +35,31 @@ export function WorkbenchMemoryDialog({ directory, workbenchId, projectId, onClo
         ...((selected?.entry.projectId ?? projectId) ? { projectId: (selected?.entry.projectId ?? projectId)! } : {}),
         ...(selected?.entry.areaId ? { areaId: selected.entry.areaId } : {}) }
       const result = await directory.memoryRequest!<{ status: string; entry: WorkbenchMemoryEntry; body: string }>({ action: 'memory-write', workbenchId, entry })
-      if (result.status !== 'committed') throw new Error('记忆已更新，请重新选择当前版本后编辑。')
+      if (result.status !== 'committed') throw new Error(t('memory.stale'))
       setSelected(removed ? undefined : result); if (removed) { setTitle(''); setSummary(''); setBody('') }
       await refresh()
     } catch (reason) { setError(String(reason)) } finally { setBusy(false) }
   }
-  return <Modal open onClose={() => { if (!busy) onClose() }} title={projectId ? '项目记忆' : '工作台专属记忆'} closeLabel="关闭">
+  return <Modal open onClose={() => { if (!busy) onClose() }} title={projectId ? t('memory.project') : t('memory.workbench')} closeLabel={t('action.close')}>
     <div className={css.wizard}>
       <div className={css.wizardBody}>
-        <p>{projectId ? '项目记忆保存在项目文件夹中，与展示区域无关。' : '这里集中查看工作台与各项目的记忆。'}每次修改保留来源和修订记录，并随完整工作台包导出。</p>
-        <Input aria-label="搜索记忆" placeholder="搜索标题或摘要" value={query} onChange={event => setQuery(event.target.value)} />
-        <div aria-label="记忆列表">{entries.map(entry => <Button key={entry.id} disabled={busy} onClick={() => { void load(entry.id) }}>{entry.title} · {entry.verification === 'verified' ? '已核验' : entry.verification === 'candidate' ? '待核验' : '需重新核验'}</Button>)}</div>
-        <Button disabled={busy} onClick={() => { setSelected(undefined); setTitle(''); setSummary(''); setBody('') }}>新增记忆</Button>
-        {selected ? <p>修订 {selected.entry.revision} · 来源：{selected.entry.source.description}（{selected.entry.source.reference}）
-          {selected.entry.revision > 1 ? <Button disabled={busy} onClick={() => { void load(selected.entry.id, selected.entry.revision - 1) }}>上一修订</Button> : null}
-          <Button disabled={busy} onClick={() => { void load(selected.entry.id) }}>当前修订</Button>
+        <p>{projectId ? t('memory.projectLocation') : t('memory.overview')}{t('workspace.sourceAndRevisionHistoryAreRetainedAnd')}</p>
+        <Input aria-label={t('workspace.searchMemory')} placeholder={t('workspace.searchTitlesOrSummaries')} value={query} onChange={event => setQuery(event.target.value)} />
+        <div aria-label={t('workspace.memoryList')}>{entries.map(entry => <Button key={entry.id} disabled={busy} onClick={() => { void load(entry.id) }}>{entry.title} · {entry.verification === 'verified' ? t('memory.verified') : entry.verification === 'candidate' ? t('memory.pendingVerification') : t('memory.needsVerification')}</Button>)}</div>
+        <Button disabled={busy} onClick={() => { setSelected(undefined); setTitle(''); setSummary(''); setBody('') }}>{t('workspace.addMemory')}</Button>
+        {selected ? <p>{t('workspace.revision')} {selected.entry.revision} {t('workspace.source')}{selected.entry.source.description}（{selected.entry.source.reference}）
+          {selected.entry.revision > 1 ? <Button disabled={busy} onClick={() => { void load(selected.entry.id, selected.entry.revision - 1) }}>{t('workspace.previousRevision')}</Button> : null}
+          <Button disabled={busy} onClick={() => { void load(selected.entry.id) }}>{t('workspace.currentRevision')}</Button>
         </p> : null}
-        <label>标题<Input value={title} maxLength={160} disabled={busy} onChange={event => setTitle(event.target.value)} /></label>
-        <label>简短摘要<textarea value={summary} maxLength={1200} disabled={busy} onChange={event => setSummary(event.target.value)} rows={3} /></label>
-        <label>正文<textarea value={body} maxLength={100000} disabled={busy} onChange={event => setBody(event.target.value)} rows={12} /></label>
+        <label>{t('workspace.title')}<Input value={title} maxLength={160} disabled={busy} onChange={event => setTitle(event.target.value)} /></label>
+        <label>{t('workspace.shortSummary')}<textarea value={summary} maxLength={1200} disabled={busy} onChange={event => setSummary(event.target.value)} rows={3} /></label>
+        <label>{t('workspace.content')}<textarea value={body} maxLength={100000} disabled={busy} onChange={event => setBody(event.target.value)} rows={12} /></label>
         {error ? <p role="alert">{error}</p> : null}
       </div>
       <footer className={css.wizardActions}>
-        {selected ? <Button disabled={busy} onClick={() => { void save(true) }}>移除记忆</Button> : null}
-        <Button disabled={busy} onClick={onClose}>关闭</Button>
-        <Button variant="primary" disabled={busy || !title.trim()} onClick={() => { void save() }}>{busy ? '正在保存…' : '确认并保存'}</Button>
+        {selected ? <Button disabled={busy} onClick={() => { void save(true) }}>{t('workspace.removeMemory')}</Button> : null}
+        <Button disabled={busy} onClick={onClose}>{t('action.close')}</Button>
+        <Button variant="primary" disabled={busy || !title.trim()} onClick={() => { void save() }}>{busy ? t('project.saving') : t('memory.confirmSave')}</Button>
       </footer>
     </div>
   </Modal>

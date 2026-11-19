@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from 'react'
-import { cleanup, fireEvent, render, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { mkdtemp, mkdir, readFile, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -8,6 +8,8 @@ import { join } from 'node:path'
 import { AreaProjectDialog } from '../src/foundation/AreaProjectDialog.tsx'
 import { HostWorkbenchDirectory } from '../src/host-workbench-directory.ts'
 import type { WorkbenchDirectory } from '../src/foundation/frame-settings-adapter.ts'
+import { WorkbenchLocaleContext } from '../src/foundation/workbench-locale.ts'
+import { createTestWorkbenchLocale } from './workbench-locale-fixture.ts'
 
 const roots: string[] = []
 afterEach(async () => {
@@ -48,6 +50,25 @@ it('creates a named folder inside the workbench and persists the area binding wi
   const saved = JSON.parse(await readFile(join(f.root, '.dshbay', 'workbench.json'), 'utf8'))
   expect(saved.record.areaProjects.area.relativePath).toBe('社媒运营')
   expect(saved.record.sessionCatalog).toEqual({})
+})
+
+it('updates the open project dialog in place without losing the folder name', async () => {
+  const f = await fixture()
+  const locale = createTestWorkbenchLocale()
+  const view = render(<WorkbenchLocaleContext.Provider value={locale}>
+    <AreaProjectDialog directory={f.directory} workbenchId="bench" areaId="area" onClose={f.onClose} />
+  </WorkbenchLocaleContext.Provider>)
+  fireEvent.click(view.getByRole('button', { name: '新建文件夹', exact: true }))
+  const input = view.getByLabelText<HTMLInputElement>('文件夹名称')
+  fireEvent.change(input, { target: { value: '社媒运营' } })
+  act(() => locale.setLocale('en'))
+  expect(view.getByLabelText('Folder name')).toBe(input)
+  expect(view.getByRole('button', { name: 'Create and use' })).toBeTruthy()
+  expect(input.value).toBe('社媒运营')
+  act(() => locale.setLocale('zh'))
+  expect(view.getByLabelText('文件夹名称')).toBe(input)
+  expect(input.value).toBe('社媒运营')
+  expect(f.bindAreaProject).not.toHaveBeenCalled()
 })
 
 it('browses and selects an existing nested folder without enabling creation', async () => {

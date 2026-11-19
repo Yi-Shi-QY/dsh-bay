@@ -1,3 +1,4 @@
+import { useWorkbenchLocale, workbenchErrorNotice, workbenchNoticeText, type WorkbenchNotice } from './workbench-locale.ts'
 import { useState, type ReactNode } from 'react'
 import type { ContextMenus } from '@deepseek-ai/dsh-client-ui-context-menu/client'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
@@ -11,7 +12,7 @@ import {
   type WorkbenchShellSidebarRoutingV1,
   type WorkbenchSidebarHostActionsV1,
 } from './workbench-sidebar-browser.tsx'
-import { zh as sidebarZh } from './workbench-sidebar/generated/upstream/ui-sidebar/locales.ts'
+import { en as sidebarEn, zh as sidebarZh } from './workbench-sidebar/generated/upstream/ui-sidebar/locales.ts'
 
 const fallbackUsePanelInfo = ((selector: (value: { readonly activePanelId: null }) => unknown) => selector({ activePanelId: null })) as PropsRuntime<'shell.overlay'>['usePanelInfo']
 const fallbackUseRemoteAccess = (() => true) as PropsRuntime<'shell.overlay'>['useRemoteAccess']
@@ -59,7 +60,8 @@ export function WorkbenchCoreSidebar({
   useContextMenu = fallbackUseContextMenu, useResource = fallbackUseResource,
   exit, openSettings, settingsOpen, renderFooterActions,
 }: WorkbenchCoreSidebarProps): ReactNode {
-  const [navigationError, setNavigationError] = useState<string>()
+  const { t, language } = useWorkbenchLocale()
+  const [navigationError, setNavigationError] = useState<WorkbenchNotice>()
   const renderSlot = (
     name: string,
     owner: { wide?: boolean; expandSidebar?: () => void; size?: number },
@@ -91,29 +93,29 @@ export function WorkbenchCoreSidebar({
         type="button"
         className={owner.wide ? css.action : `${css.action} ${css.rail}`}
         data-workbench-settings-entry
-        aria-label="设置"
-        title="设置"
+        aria-label={t('shell.settings')}
+        title={t('shell.settings')}
         aria-haspopup="dialog"
         aria-expanded={settingsOpen}
         onClick={openSettings}
-      >{owner.wide ? <IconSettingsOutlineMedium size={16} /> : <IconSettingsOutlineMedium size={18} />}{owner.wide ? <span className={css.label}>设置</span> : null}</button>
+      >{owner.wide ? <IconSettingsOutlineMedium size={16} /> : <IconSettingsOutlineMedium size={18} />}{owner.wide ? <span className={css.label}>{t('shell.settings')}</span> : null}</button>
     }
     if (name === 'sidebar.footer.action') {
       return <>{renderFooterActions?.({ wide: owner.wide ?? !collapsed })}<button
         type="button"
         className={owner.wide ? css.action : `${css.action} ${css.rail}`}
         data-workbench-exit-action
-        aria-label="退出工作台模式"
-        title="退出工作台模式"
+        aria-label={t('home.exitWorkbenchMode')}
+        title={t('home.exitWorkbenchMode')}
         onClick={exit}
-      ><span className={css.returnIcon} aria-hidden="true">↩</span>{owner.wide ? <span className={css.label}>退出工作台模式</span> : null}</button></>
+      ><span className={css.returnIcon} aria-hidden="true">↩</span>{owner.wide ? <span className={css.label}>{t('home.exitWorkbenchMode')}</span> : null}</button></>
     }
     if (name === 'sidebar.brand.mark') return <WorkbenchBrandMark size={owner.size ?? 24} />
     if (name === 'sidebar.brand.name') return <WorkbenchBrandName />
     return null
   }
-  const dictionary = new Map<string, string>(Object.entries(sidebarZh))
-  const translate = (key: string): string => dictionary.get(key) ?? key
+  const dictionary: Readonly<Record<string, string>> = language === undefined || language === 'zh' ? sidebarZh : sidebarEn
+  const translate = (key: string): string => dictionary[key] ?? key
   return <><WorkbenchSidebar {...{
     collapsed,
     width,
@@ -140,11 +142,11 @@ export function WorkbenchCoreSidebar({
       const areaId = routing.getSnapshot().focusedAreaId
       setNavigationError(undefined)
       if (areaId === undefined) {
-        setNavigationError('请先选择一个工作台区域。')
+        setNavigationError({ key: 'sidebar.chooseArea' })
         return
       }
       void routing.startSession({ ...(workspaceId === undefined ? {} : { workspaceId }), areaId })
-        .catch(error => setNavigationError(error instanceof Error ? error.message : '新建对话内页打开失败'))
+        .catch(error => setNavigationError(workbenchErrorNotice(error, 'sidebar.startPageFailed')))
     },
     toggleSidebar,
     renderSlot,
@@ -152,5 +154,5 @@ export function WorkbenchCoreSidebar({
   }} />{navigationError === undefined ? null : <div role="alert" style={{
     position: 'absolute', left: 8, bottom: 56, width: Math.max(200, width - 16), maxWidth: 'calc(100% - 16px)',
     padding: 12, background: 'var(--dsw-alias-bg-layer-1, Canvas)', overflowWrap: 'anywhere', zIndex: 1,
-  }}>{navigationError}</div>}</>
+  }}>{workbenchNoticeText(t, navigationError)}</div>}</>
 }

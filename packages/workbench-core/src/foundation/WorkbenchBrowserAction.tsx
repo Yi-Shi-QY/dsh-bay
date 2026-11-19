@@ -1,3 +1,4 @@
+import { useWorkbenchLocale } from './workbench-locale.ts'
 import { useState } from 'react'
 import { IconBrowseOutlineMedium } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { WorkbenchWindowSnapshotV1 } from '../client/workbench-window-controller.ts'
@@ -19,6 +20,7 @@ export function WorkbenchBrowserAction({
   className?: string | undefined
   showLabel?: boolean
 }) {
+  const { t } = useWorkbenchLocale()
   const [preparing, setPreparing] = useState(false)
   const [prepareFailed, setPrepareFailed] = useState(false)
   const [opening, setOpening] = useState(false)
@@ -31,13 +33,13 @@ export function WorkbenchBrowserAction({
   const browserViewReady = lifecycle.phase === 'ready' || lifecycle.phase === 'failed' && lifecycle.canReclaim
   const isBusy = lifecycle.busy
   const label = browserViewReady
-    ? `收回“${workbenchName}”到 DSH 客户端`
-    : lifecycle.phase === 'reclaiming' ? `正在收回“${workbenchName}”…`
-      : lifecycle.phase === 'opening' || lifecycle.phase === 'initializing' ? `正在浏览器中打开“${workbenchName}”…`
-        : lifecycle.phase === 'preparing' ? `正在准备“${workbenchName}”…`
-          : !windowSnapshot.supported ? `DSH 浏览器窗口服务不可用：${workbenchName}`
-            : prepareFailed ? `重试在浏览器打开“${workbenchName}”`
-              : `在浏览器打开工作台“${workbenchName}”`
+    ? t('window.reclaimNamed', { name: workbenchName })
+    : lifecycle.phase === 'reclaiming' ? t('window.reclaimingNamed', { name: workbenchName })
+      : lifecycle.phase === 'opening' || lifecycle.phase === 'initializing' ? t('window.openingNamed', { name: workbenchName })
+        : lifecycle.phase === 'preparing' ? t('window.preparingNamed', { name: workbenchName })
+          : !windowSnapshot.supported ? t('window.unavailableNamed', { name: workbenchName })
+            : prepareFailed ? t('window.retryOpeningNamed', { name: workbenchName })
+              : t('window.openNamed', { name: workbenchName })
   const state = browserViewReady ? 'ready'
     : lifecycle.phase === 'reclaiming' ? 'reclaiming'
       : lifecycle.phase === 'initializing' ? 'initializing'
@@ -89,5 +91,5 @@ export function WorkbenchBrowserAction({
     title={label}
     disabled={isBusy || (lifecycle.canReclaim && onReclaim === undefined)}
     onClick={handleClick}
-  ><IconBrowseOutlineMedium size={16} />{showLabel ? <span>{browserViewReady ? '收回到 DSH 客户端' : lifecycle.phase === 'reclaiming' ? '正在收回' : '在浏览器打开'}</span> : null}</button>
+  ><IconBrowseOutlineMedium size={16} />{showLabel ? <span>{browserViewReady ? t('browserControl.reclaim') : lifecycle.phase === 'reclaiming' ? t('browserControl.reclaiming') : t('home.openInBrowser')}</span> : null}</button>
 }

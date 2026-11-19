@@ -1,3 +1,4 @@
+import { useWorkbenchLocale } from './workbench-locale.ts'
 import { useCallback, useState, useSyncExternalStore } from 'react'
 import type { WorkbenchExtensionRegistryV1 } from '../client/workbench-extension-registry.ts'
 import type { WorkbenchDirectory } from './frame-settings-adapter.ts'
@@ -28,6 +29,7 @@ export function WorkbenchExtensionAccessSection({ registry, directory }: {
   registry?: WorkbenchExtensionRegistryV1
   directory?: WorkbenchDirectory
 }) {
+  const { t } = useWorkbenchLocale()
   const subscribeRegistry = useCallback((listener: () => void) => registry?.subscribe(listener) ?? (() => {}), [registry])
   const getRegistry = useCallback(() => registry?.getSnapshot() ?? EMPTY_SNAPSHOT, [registry])
   const snapshot = useSyncExternalStore(subscribeRegistry, getRegistry, getRegistry)
@@ -66,19 +68,19 @@ export function WorkbenchExtensionAccessSection({ registry, directory }: {
   return <section className={css.extensionAccess} aria-labelledby="workbench-extension-access-title" data-workbench-extension-access>
     <header className={css.settingsSectionHeader}>
       <div>
-        <h3 id="workbench-extension-access-title">已发现的 DSH 扩展</h3>
-        <p>扩展本身仍由 DSH 插件管理器安装、启用、更新和卸载。这里的允许只控制它能否向 Workbench 提供内页。</p>
+        <h3 id="workbench-extension-access-title">{t('editor.discoveredDshExtensions')}</h3>
+        <p>{t('editor.manageExtensionInstallationAndUpdatesInDsh')}</p>
       </div>
-      <button className={css.command} type="button" onClick={refresh} disabled={registry === undefined}>刷新清单</button>
+      <button className={css.command} type="button" onClick={refresh} disabled={registry === undefined}>{t('editor.refreshInventory')}</button>
     </header>
     {snapshot.status === 'unavailable' ? <p className={css.extensionAccessNotice} role="status">
-      目前无法核对 DSH 插件包和运行清单。为避免误加载，扩展内页保持不可用；连接恢复后可以刷新。撤销已有 Workbench 许可仍可操作。
+      {t('editor.dshPluginPackagesAndRuntimeStatusCannot')}
       {snapshot.inventoryFailures?.map((failure, index) => <span key={`${failure.operation}:${index}`}>
         <br />{failure.operation}{failure.code === undefined ? '' : ` (${failure.code})`}: {failure.message}
       </span>)}
     </p> : null}
-    {directory?.setExtensionAllowed === undefined ? <p className={css.extensionAccessNotice} role="status">当前设置存储不可写，无法更改扩展许可。</p> : null}
-    {snapshot.status === 'ready' && snapshot.extensions.length === 0 ? <p className={css.extensionAccessEmpty}>尚未发现声明 Workbench 内页的外部 DSH 插件。</p> : null}
+    {directory?.setExtensionAllowed === undefined ? <p className={css.extensionAccessNotice} role="status">{t('editor.settingsAreReadOnlyExtensionAccessCannot')}</p> : null}
+    {snapshot.status === 'ready' && snapshot.extensions.length === 0 ? <p className={css.extensionAccessEmpty}>{t('editor.noExternalDshPluginsDeclaringWorkbenchPages')}</p> : null}
     <div className={css.extensionAccessRows}>
       {snapshot.extensions.map(row => {
         const consent = directorySnapshot?.extensionConsents?.[row.key]
@@ -94,9 +96,9 @@ export function WorkbenchExtensionAccessSection({ registry, directory }: {
           </div>
           <p className={css.extensionAccessDetail}>{row.detail}</p>
           {row.providerDiagnostic === undefined ? null : <details className={css.extensionAccessEditors}>
-            <summary>身份核验诊断</summary>
+            <summary>{t('editor.identityVerificationDiagnostics')}</summary>
             <dl>
-              <div><dt>失败原因</dt><dd><code>{row.providerDiagnostic.code}</code></dd></div>
+              <div><dt>{t('editor.failureReason')}</dt><dd><code>{row.providerDiagnostic.code}</code></dd></div>
               <div><dt>Slot registrant</dt><dd><code>{row.providerDiagnostic.registrant ?? '未提供'}</code></dd></div>
               <div><dt>runtime entryId</dt><dd><code>{row.providerDiagnostic.runtimeEntryIds.join(', ') || '无'}</code></dd></div>
               <div><dt>runtime moduleName</dt><dd><code>{row.providerDiagnostic.runtimeModuleNames.join(', ') || '无'}</code></dd></div>
@@ -105,20 +107,20 @@ export function WorkbenchExtensionAccessSection({ registry, directory }: {
             <p>{row.providerDiagnostic.detail}</p>
           </details>}
           {row.editorIds.length === 0 ? null : <details className={css.extensionAccessEditors}>
-            <summary>声明的内页（{row.editorIds.length}）</summary>
+            <summary>{t('editor.declaredPages')}{row.editorIds.length}）</summary>
             <ul>{row.editorIds.map(id => <li key={id}><code>{id}</code></li>)}</ul>
           </details>}
           <div className={css.extensionAccessActions}>
             {canAllow ? <button className={css.command + ' ' + css.primary} type="button" disabled={busyKey !== undefined || directory?.setExtensionAllowed === undefined}
               onClick={() => { void changeConsent(row, true) }}>{row.availability === 'confirmation-required' ? '重新确认' : hasConsent ? '更新许可' : '允许使用'}</button> : null}
             {canRevoke ? <button className={css.command} type="button" disabled={busyKey !== undefined}
-              onClick={() => { void changeConsent(row, false) }}>撤销许可</button> : null}
+              onClick={() => { void changeConsent(row, false) }}>{t('editor.revokeAccess')}</button> : null}
             {message?.key === row.key ? <span role={message.error ? 'alert' : 'status'} data-tone={message.error ? 'error' : 'success'}>{message.text}</span> : null}
           </div>
         </article>
       })}
     </div>
     {message?.key === undefined && message !== undefined ? <p className={css.extensionAccessNotice} role={message.error ? 'alert' : 'status'}>{message.text}</p> : null}
-    <p className={css.extensionAccessFootnote}>Workbench 许可不是安全沙箱，也不会替 DSH 启用插件；它只控制内页是否进入 Workbench 的可用目录。扩展停止或移除后，已有布局引用会保留并显示不可用状态。</p>
+    <p className={css.extensionAccessFootnote}>{t('editor.workbenchPermissionDoesNotSandboxOrEnable')}</p>
   </section>
 }

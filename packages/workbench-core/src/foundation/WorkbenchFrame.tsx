@@ -82,6 +82,7 @@ import {
   allocateSessionMarker, ensureSessionMarkers, SESSION_ACCENT_TOKENS, SESSION_MARKER_EMOJIS, validateSessionLabel,
 } from './session-markers.ts'
 import { sessionBindingCopy } from './binding-copy.ts'
+import { useWorkbenchLocale, workbenchPageTitle } from './workbench-locale.ts'
 import { placementReason, sameEditorSource, areaOperationCopy } from './area-identity.ts'
 import type { WorkbenchDirectory } from './frame-settings-adapter.ts'
 import {
@@ -468,6 +469,7 @@ function WorkbenchFloatingInfo({
   onPointerEnter?: () => void
   onPointerLeave?: () => void
 }) {
+  const { t } = useWorkbenchLocale()
   const surfaceRef = useRef<HTMLDivElement>(null)
   const [position, setPosition] = useState<{ left: number, top: number }>()
 
@@ -546,7 +548,7 @@ function WorkbenchFloatingInfo({
         <small>{detail}</small>
       </span>
       {tabs === undefined ? null : <>
-        <div className={css.areaCollapseInfoTabs} role="list" aria-label="收起区域内页">
+        <div className={css.areaCollapseInfoTabs} role="list" aria-label={t('layout.collapsedAreaPages')}>
           {tabs.map(tab => <WorkbenchTabTooltip key={tab.id} summary={tab}><button
             type="button"
             className={css.areaCollapseInfoTab}
@@ -562,7 +564,7 @@ function WorkbenchFloatingInfo({
             <small>{tab.statusLabel}</small>
           </button></WorkbenchTabTooltip>)}
         </div>
-        <button type="button" className={css.areaCollapseInfoExpand} onClick={() => onExpand?.()}>展开区域</button>
+        <button type="button" className={css.areaCollapseInfoExpand} onClick={() => onExpand?.()}>{t('layout.expandArea')}</button>
       </>}
     </div>,
     document.body,
@@ -811,17 +813,18 @@ function CollaborationParticipantNotice({ snapshot, currentParticipantId, classN
   readonly currentParticipantId?: string | undefined
   readonly className: string | undefined
 }) {
+  const { t } = useWorkbenchLocale()
   const participants = snapshot?.participants.filter(row => row.participantId !== currentParticipantId) ?? []
   if (participants.length === 0) return null
-  const intentLabel = (intent: string) => intent === 'editing' ? '正在编辑' : intent === 'sending' ? '正在发送' : intent === 'running' ? '正在执行任务' : intent === 'recovering' ? '正在恢复' : '正在查看'
-  const nameOf = (participant: typeof participants[number]) => participant.displayName || (participant.role === 'owner' ? '房主' : '参与者')
-  const names = (rows: typeof participants) => rows.length <= 2 ? rows.map(nameOf).join('、') : `${rows.slice(0, 2).map(nameOf).join('、')} 等 ${String(rows.length)} 人`
+  const intentLabel = (intent: string) => intent === 'editing' ? t('collab.editing') : intent === 'sending' ? t('collab.sending') : intent === 'running' ? t('collab.running') : intent === 'recovering' ? t('collab.recovering') : t('collab.viewing')
+  const nameOf = (participant: typeof participants[number]) => participant.displayName || (participant.role === 'owner' ? t('collab.owner') : t('collab.participant'))
+  const names = (rows: typeof participants) => rows.length <= 2 ? rows.map(nameOf).join(t('list.separator')) : t('collab.summary', { names: rows.slice(0, 2).map(nameOf).join(t('list.separator')), count: rows.length })
   const stale = participants.filter(row => row.connectionState === 'stale')
   const live = participants.filter(row => row.connectionState !== 'stale')
   const label = stale.length > 0
-    ? `${names(stale)} 已失联`
-    : live.length === 1 ? `${nameOf(live[0]!)} · ${intentLabel(live[0]!.intent)}` : `${String(live.length)} 位参与者在线`
-  const detail = participants.map(participant => `${nameOf(participant)} · ${participant.connectionState === 'stale' ? '已失联' : intentLabel(participant.intent)}`).join('\n')
+    ? t('collab.disconnectedNamed', { names: names(stale) })
+    : live.length === 1 ? `${nameOf(live[0]!)} · ${intentLabel(live[0]!.intent)}` : t('collab.online', { count: live.length })
+  const detail = participants.map(participant => `${nameOf(participant)} · ${participant.connectionState === 'stale' ? t('collab.disconnected') : intentLabel(participant.intent)}`).join('\n')
   return <span
     className={className}
     role="status"
@@ -968,6 +971,7 @@ function withoutRecordKey<T>(
 }
 
 export function WorkbenchFrame(props: WorkbenchFrameProps) {
+  const { t } = useWorkbenchLocale()
   const surfaceContext = props.surfaceContext ?? DESKTOP_WORKBENCH_SURFACE_V1
   const isBrowserSurface = surfaceContext.kind !== 'desktop'
   const surfaceWorkbenchId = surfaceContext.kind === 'browser-owner' || surfaceContext.kind === 'lan-participant' ? surfaceContext.workbenchId : undefined
@@ -1021,7 +1025,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
   const collaborationState = useSyncExternalStore(subscribeCollaboration, getCollaborationState, getCollaborationState)
   // While the Host is unreachable or the collaboration is over, the last
   // snapshot stays visible and shared writes are refused.
-  const collaborationStatus = collaborationControlled ? collaborationStatusLabel(collaborationState) : undefined
+  const collaborationStatus = collaborationControlled ? collaborationStatusLabel(collaborationState, t) : undefined
   const subscribeWorkbenchDirectory = useCallback(
     (listener: () => void) => workbenchDirectory.subscribe(listener), [workbenchDirectory],
   )
@@ -1221,11 +1225,11 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
     void workbenchDirectory.setLayoutLocked(selectedWorkbenchId, next).then(result => {
       if (result.status !== 'committed') {
         setLayoutLockOverride(current => current?.workbenchId === selectedWorkbenchId ? undefined : current)
-        setStateDiagnostic(next ? '无法锁定区域尺寸，请检查工作台保存状态后重试。' : '无法解锁区域尺寸，请检查工作台保存状态后重试。')
+        setStateDiagnostic(next ? t('shell.couldNotLockAreaSizesCheckThat') : t('shell.couldNotUnlockAreaSizesCheckThat'))
       }
     }).catch(() => {
       setLayoutLockOverride(current => current?.workbenchId === selectedWorkbenchId ? undefined : current)
-      setStateDiagnostic(next ? '锁定区域尺寸失败，请重试。' : '解锁区域尺寸失败，请重试。')
+      setStateDiagnostic(next ? t('shell.couldNotLockAreaSizesTryAgain') : t('shell.couldNotUnlockAreaSizesTryAgain'))
     })
   }, [isBrowserOwnedWorkbench, layoutLocked, selectedWorkbenchId, workbenchDirectory])
   const [reclaimingBrowserWorkbench, setReclaimingBrowserWorkbench] = useState(false)
@@ -1770,7 +1774,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
       operation: 'unset', path: ['layouts', accountRef.current],
     }).then((result) => {
       if (result.status !== 'committed') {
-        setStateDiagnostic('无法重置布局；请重新连接或重新载入远端设置。')
+        setStateDiagnostic(t('shell.couldNotResetTheLayoutReconnectOr'))
         return
       }
       const next = defaultLayout(projectNeutral ? undefined : current, account)
@@ -1808,7 +1812,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
           if (splitId !== undefined) {
             const lease = await client.command({ kind: 'layout.acquire-lease', targetId: `split:${splitId}` })
             const value = lease.ok && lease.value && typeof lease.value === 'object' ? lease.value as { leaseId?: unknown; ok?: unknown } : undefined
-            if (value?.ok !== true || typeof value.leaseId !== 'string') { failure = '另一位参与者正在调整这条分隔线。'; break }
+            if (value?.ok !== true || typeof value.leaseId !== 'string') { failure = t('shell.anotherParticipantIsMovingThisDivider'); break }
             leaseId = value.leaseId
           }
           const result = await client.command({ kind: 'canvas.set-layout', layout: submitted, ...(leaseId === undefined ? {} : { leaseId }) })
@@ -1817,7 +1821,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
           if (documentRef.current === submitted) break
         }
       } catch {
-        failure = collaborationStatusLabel(client.getState()) ?? '协作连接中断。'
+        failure = collaborationStatusLabel(client.getState(), t) ?? t('shell.collaborationDisconnected')
       } finally {
         sharedLayoutFlightRef.current = false
       }
@@ -1833,7 +1837,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
         }
       }
       setSaveState('saved')
-      if (failure !== undefined) setStateDiagnostic(`布局修改没有保存，已恢复到 Host 上的布局：${failure}`)
+      if (failure !== undefined) setStateDiagnostic(t('shell.layoutChangesWereNotSavedRestoredThe', { value1: failure }))
     })()
   }, [props.collaborationClient])
 
@@ -1847,34 +1851,34 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
   }, [collaborationControlled, pending, submitSharedLayout])
 
   const commit = useCallback<Commit>((command) => {
-    if (!canEditLayout) { setStateDiagnostic('当前分享未授权修改布局。'); return false }
+    if (!canEditLayout) { setStateDiagnostic(t('shell.thisShareDoesNotAllowLayoutChanges')); return false }
     if (floatingPinPending.current) return false
     const currentWorkbenchId = props.floatingRuntime?.visibleWorkbenchId
     if (currentWorkbenchId && props.floatingRuntime?.hasControl?.(currentWorkbenchId) === false) return false
     if (browserOwnedWorkbench) {
-      setStateDiagnostic('当前工作台正在浏览器中打开，先收回到 DSH 客户端后再编辑。')
+      setStateDiagnostic(t('shell.takeBackControlFromTheBrowserBefore'))
       return false
     }
     if (invalidLayoutRef.current !== undefined) {
-      setStateDiagnostic('此工作区的布局版本暂不受支持。请先导出原始数据或明确重置布局。')
+      setStateDiagnostic(t('shell.thisLayoutVersionIsUnsupportedExportThe'))
       return false
     }
     if ((layoutLocked || layoutLockPending) && command.type === 'set-ratio') {
-      setStateDiagnostic('工作台布局已锁定，解锁后才能调整区域尺寸。')
+      setStateDiagnostic(t('shell.unlockTheLayoutToResizeAreas'))
       return false
     }
     const before = documentRef.current
     const candidate = applyLayoutCommand(before, command)
     if (candidate === before) return false
     if (!validateWorkbenchDocumentV3(migrateDocumentV2ToV3(candidate))) {
-      setStateDiagnostic('此操作无法生成有效布局，已保留原工作台和内页。请检查目标区域项目和此内页来源后重试。')
+      setStateDiagnostic(t('shell.thisActionWouldCreateAnInvalidLayout'))
       return false
     }
     if (collaborationControlled) {
       const client = props.collaborationClient
       if (client === undefined) return false
       if (client.getState() !== 'connected') {
-        setStateDiagnostic(collaborationStatusLabel(client.getState()) ?? '协作会话尚未连接，暂时不能修改工作台。')
+        setStateDiagnostic(collaborationStatusLabel(client.getState(), t) ?? t('shell.connectToTheCollaborationSessionBeforeEditing'))
         return false
       }
     }
@@ -2025,8 +2029,8 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
     if (holder === undefined) throw new Error('Workbench placement owner is unavailable')
     if (workbenchDirectory.getAreaProjects) {
       const project = workbenchDirectory.getAreaProjects(holder.workbenchId)[areaId]
-      if (!project?.workspaceId) throw new Error('请先在区域顶栏设置项目文件夹。')
-      if (input.workspaceId !== project.workspaceId) throw new Error('新对话必须使用当前区域的项目文件夹。')
+      if (!project?.workspaceId) throw new Error(t('shell.setAProjectFolderInTheArea'))
+      if (input.workspaceId !== project.workspaceId) throw new Error(t('shell.newConversationsMustUseThisAreaS'))
     }
     holder.repository.replaceDocument(holder.workbenchId, migrateDocumentV2ToV3(documentRef.current))
     const requestId = nextId('area-conversation')
@@ -2071,12 +2075,12 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
   }): Promise<void> => {
     const editorId = 'workbench.conversation.start'
     if (!editorCatalog.getSnapshot().some(editor => editor.id === editorId && editor.scope === 'root')) {
-      throw new Error('DSH 原生会话内页尚未就绪，请重新加载当前实例。')
+      throw new Error(t('shell.theNativeConversationPageIsNotReady'))
     }
     const document = documentRef.current
     const ownerWorkbenchId = props.floatingRuntime?.visibleWorkbenchId
     const group = groupsOf(document.root).find(candidate => candidate.id === input.areaId)
-    if (group === undefined) throw new Error(`Workbench Area ${input.areaId} 不存在`)
+    if (group === undefined) throw new Error(t('shell.workbenchAreaValue1WasNotFound', { value1: input.areaId }))
     const tab: TabDocument = {
       id: nextId('tab'), editorId, editorScope: 'root', lastKnownTitle: '新建对话', state: {},
     }
@@ -2144,7 +2148,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
       return
     }
     const commands = openSessionCommands(documentRef.current, target, command.disposition)
-    if (!commands.length) { setStateDiagnostic('此对话属于另一个项目，请先显示对应项目区域，或新建区域并设置该项目文件夹。'); return }
+    if (!commands.length) { setStateDiagnostic(t('shell.thisConversationBelongsToAnotherProjectOpen')); return }
     for (const layoutCommand of commands) commit(layoutCommand)
   }, [commit, projectNeutral, selectSession, workspaces])
 
@@ -2366,7 +2370,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
     // well; a page-local marker would differ from every other surface.
     const snapshot = settings.getSnapshot()
     if (snapshot.status !== 'ready' || ! snapshot.writable || snapshot.revision === undefined) {
-      setStateDiagnostic('对话标记尚未保存；请重新连接后重试。')
+      setStateDiagnostic(t('shell.reconnectToSaveTheConversationMarker'))
       return
     }
     const discard = (message: string) => {
@@ -2387,12 +2391,12 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
         if (isBrowserSurface) setMarkerOverrides((current) => ({ ...current, [workspaceId]: withoutRecordKey(current[workspaceId] ?? {}, sessionId) }))
         return
       }
-      discard('对话标记保存冲突；已重新载入远端标记。')
+      discard(t('shell.theMarkerChangedElsewhereTheRemoteMarker'))
     }, (error: unknown) => {
-      discard(error instanceof Error && error.message ? `对话标记没有保存：${error.message}` : '对话标记没有保存；请重新连接后重试。')
+      discard(error instanceof Error && error.message ? t('shell.couldNotSaveMarkerValue1', { value1: error.message }) : t('shell.couldNotSaveMarkerReconnectAndTry'))
     })
   }, [markerWorkspaceId, settings, isBrowserSurface])
-  const workspaceTitle = activeWorkspace?.title ?? '未分组'
+  const workspaceTitle = activeWorkspace?.title ?? t('shell.ungrouped')
   const sessionTitle = current === undefined ? undefined : sessionRows[current]?.displayTitle
   const flushCurrentWorkbench = useCallback((): Promise<boolean> => {
     if (floatingPinPending.current) return Promise.resolve(false)
@@ -2416,7 +2420,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
       await saveInFlightRef.current
       if (accountRef.current !== flushAccount) return false
       if (conflictRef.current !== undefined) {
-        setStateDiagnostic('当前工作台仍有未解决的布局冲突；请先选择保留本地或远端布局。')
+        setStateDiagnostic(t('shell.chooseTheLocalOrRemoteLayoutTo'))
         return false
       }
       while (pendingRef.current.length !== 0) {
@@ -2442,7 +2446,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
             scheduleAutosaveRetry()
           }
           setSaveState(result.status === 'conflict' ? 'conflict' : 'offline')
-          setStateDiagnostic('无法先保存当前工作台。请恢复连接或解决布局冲突后重试。')
+          setStateDiagnostic(t('shell.couldNotSaveTheCurrentWorkbenchReconnect'))
           return false
         }
         savePausedRef.current = false
@@ -2493,7 +2497,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
       const element = [...(resizeCanvasRef.current?.querySelectorAll<HTMLElement>('[data-workbench-group]') ?? [])].find(item => item.dataset.workbenchGroup === areaId)
       const rect = element?.getBoundingClientRect()
       const horizontal = edge === 'left' || edge === 'right'
-      if (rect && !splitCanFit(horizontal ? rect.width : rect.height, horizontal ? EXPANDED_AREA_MIN_WIDTH : EXPANDED_AREA_MIN_HEIGHT)) throw new Error('目标区域空间不足，无法分屏。')
+      if (rect && !splitCanFit(horizontal ? rect.width : rect.height, horizontal ? EXPANDED_AREA_MIN_WIDTH : EXPANDED_AREA_MIN_HEIGHT)) throw new Error(t('shell.theDestinationAreaIsTooSmallTo'))
     }
     const placed = prepareFloatingTabForArea(tab, edge === 'center' ? target : { kind: 'group', id: 'new-area', tabs: [] }, tabsOf(before.root))
     let next = applyLayoutCommand(before, { type: 'add-tab', groupId: areaId, tab: placed })
@@ -2509,7 +2513,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
       }
       next = { ...next, root: projectSplit(next.root) }
     }
-    if (!validateWorkbenchDocumentV3(migrateDocumentV2ToV3(next))) throw new Error('此内页暂时无法安全写入布局，临时内容仍保留。请先检查来源绑定。')
+    if (!validateWorkbenchDocumentV3(migrateDocumentV2ToV3(next))) throw new Error(t('shell.thePageCouldNotBeSavedTo'))
     if (ownerCollaborationWritable) {
       const client = props.collaborationClient
       if (client === undefined || next === before) return false
@@ -2554,13 +2558,13 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
   }
   const saveCurrentWorkbench = useCallback(async () => {
     if (!settingsWritable) {
-      setStateDiagnostic('当前工作台无法保存；请恢复连接后重试。')
+      setStateDiagnostic(t('shell.couldNotSaveTheWorkbenchReconnectAnd'))
       return
     }
     const committed = await flushCurrentWorkbench()
     if (committed) {
       setSaveState('saved')
-      setStateDiagnostic('工作台已保存。')
+      setStateDiagnostic(t('shell.workbenchSaved'))
     }
   }, [flushCurrentWorkbench, settingsWritable])
   useEffect(() => workbenchDirectory.setBeforeLifecycleTransition?.(flushForLifecycleTransition), [flushForLifecycleTransition, workbenchDirectory])
@@ -2593,7 +2597,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
     if (result.status !== 'committed') {
       selectionTraceRef.current = undefined
       setFrameTransition(current => current?.workbenchId === workbenchId ? undefined : current)
-      setStateDiagnostic('无法切换工作台；设置已在其他页面改变或当前连接不可用。')
+      setStateDiagnostic(t('shell.couldNotSwitchWorkbenchesSettingsChangedElsewhere'))
       return
     }
     props.onShowWorkbench?.()
@@ -2606,7 +2610,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
     try {
       const result = await workbenchDirectory.reorder(workbenchId, targetIndex)
       if (result.status !== 'committed') {
-        setStateDiagnostic('无法调整工作台顺序；设置已在其他页面改变或当前连接不可用。')
+        setStateDiagnostic(t('shell.couldNotReorderWorkbenchesSettingsChangedElsewhere'))
       } else {
         setStateDiagnostic(undefined)
       }
@@ -2620,7 +2624,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
     const target = snapshot.rows.find(row => row.workbenchId === workbenchId)
     templateReturnFocusRef.current = returnFocus
     setTemplateTargetWorkbenchId(workbenchId)
-    setTemplateName(target === undefined ? '' : `${target.name} 布局`)
+    setTemplateName(target === undefined ? '' : t('layout.templateName', { name: target.name }))
     setTemplateError(undefined)
     setTemplateDialogOpen(true)
   }, [workbenchDirectory])
@@ -2638,25 +2642,25 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
     if (templateSaving) return
     const name = templateName.trim()
     if (name.length === 0) {
-      setTemplateError('请输入布局名称。')
+      setTemplateError(t('shell.enterALayoutName'))
       return
     }
     const snapshot = workbenchDirectory.getSnapshot()
     const targetWorkbenchId = templateTargetWorkbenchId ?? snapshot.activeWorkbenchId
     const target = snapshot.rows.find(row => row.workbenchId === targetWorkbenchId)
     if (targetWorkbenchId === undefined || target === undefined) {
-      setTemplateError('目标工作台不可用，请重新打开菜单后重试。')
+      setTemplateError(t('shell.theDestinationWorkbenchIsUnavailableReopenThe'))
       return
     }
     if (isBrowserOwnedWorkbench(targetWorkbenchId)) {
-      setTemplateError('该工作台正在浏览器中使用，请先收回到 DSH 客户端。')
+      setTemplateError(t('shell.takeBackControlInDshFirst'))
       return
     }
     const duplicate = snapshot.templates.some(
       template => comparableWorkbenchName(template.name) === comparableWorkbenchName(name),
     )
     if (duplicate) {
-      setTemplateError(`已存在名为“${name}”的布局，请使用其他名称。`)
+      setTemplateError(t('shell.aLayoutNamedValue1AlreadyExistsChoose', { value1: name }))
       return
     }
     setTemplateSaving(true)
@@ -2671,7 +2675,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
         } else {
           const persisted = workbenchDirectory.getDocument?.(targetWorkbenchId)
           if (persisted === undefined) {
-            setTemplateError('目标工作台布局暂不可用，请重新打开菜单后重试。')
+            setTemplateError(t('shell.theDestinationLayoutIsTemporarilyUnavailableReopen'))
             return
           }
           document = projectDocumentV3ToLayoutV2(persisted, workbenchDirectory.getAreaProjects?.(targetWorkbenchId))
@@ -2679,30 +2683,30 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
       } else {
         const persisted = workbenchDirectory.getDocument?.(targetWorkbenchId)
         if (persisted === undefined) {
-          setTemplateError('目标工作台布局不可用，请重新打开菜单后重试。')
+          setTemplateError(t('shell.theDestinationLayoutIsUnavailableReopenThe'))
           return
         }
         document = projectDocumentV3ToLayoutV2(persisted, workbenchDirectory.getAreaProjects?.(targetWorkbenchId))
       }
       const latest = workbenchDirectory.getSnapshot()
       if (!latest.rows.some(row => row.workbenchId === targetWorkbenchId)) {
-        setTemplateError('目标工作台已不可用，请重新打开菜单后重试。')
+        setTemplateError(t('shell.theDestinationWorkbenchIsNoLongerAvailable'))
         return
       }
       if (isBrowserOwnedWorkbench(targetWorkbenchId)) {
-        setTemplateError('该工作台正在浏览器中使用，请先收回到 DSH 客户端。')
+        setTemplateError(t('shell.takeBackControlInDshFirst'))
         return
       }
       const result = await workbenchDirectory.saveTemplate(name, document)
       if (result.status !== 'committed') {
         setTemplateError(result.status === 'rejected' && result.reason === 'duplicate-name'
-          ? `已存在名为“${name}”的布局，请使用其他名称。`
-          : '无法保存布局；设置已在其他页面改变或当前连接不可用。')
+          ? t('shell.aLayoutNamedValue1AlreadyExistsChoose', { value1: name })
+          : t('shell.couldNotSaveTheLayoutSettingsChanged'))
         return
       }
       setTemplateDialogOpen(false)
       setTemplateTargetWorkbenchId(undefined)
-      setStateDiagnostic(`已将工作台“${target.name}”另存为布局“${name}”。`)
+      setStateDiagnostic(t('shell.savedValue1AsTheLayoutValue2', { value1: target.name, value2: name }))
       requestAnimationFrame(() => {
         templateReturnFocusRef.current?.focus()
         templateReturnFocusRef.current = undefined
@@ -2725,15 +2729,15 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
     if (workbenchId === undefined || workbenchRenaming) return
     const name = workbenchNameDraft.trim()
     if (name.length === 0) {
-      setWorkbenchNameError('工作台名称不能为空。')
-      setStateDiagnostic('工作台名称不能为空。')
+      setWorkbenchNameError(t('shell.enterAWorkbenchName'))
+      setStateDiagnostic(t('shell.enterAWorkbenchName'))
       return
     }
     const duplicate = workbenchDirectory.getSnapshot().rows.some(row => row.workbenchId !== workbenchId
       && comparableWorkbenchName(row.name) === comparableWorkbenchName(name))
     if (duplicate) {
-      setWorkbenchNameError(`已存在名为“${name}”的工作台。`)
-      setStateDiagnostic(`已存在名为“${name}”的工作台。`)
+      setWorkbenchNameError(t('shell.aWorkbenchNamedValue1AlreadyExists', { value1: name }))
+      setStateDiagnostic(t('shell.aWorkbenchNamedValue1AlreadyExists', { value1: name }))
       return
     }
     setWorkbenchRenaming(true)
@@ -2758,10 +2762,10 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
         const result = await workbenchDirectory.rename(workbenchId, name)
         if (result.status !== 'committed') {
           const message = result.status === 'rejected' && result.reason === 'duplicate-name'
-            ? `已存在名为“${name}”的工作台。`
+            ? t('shell.aWorkbenchNamedValue1AlreadyExists', { value1: name })
             : result.status === 'conflict'
-              ? '工作台刚被其他操作更新，重命名未保存，请重试。'
-              : '重命名未保存：工作台目录当前不可写，请稍后重试。'
+              ? t('shell.anotherOperationUpdatedTheWorkbenchRenameIt')
+              : t('shell.couldNotRenameTheWorkbenchFolderIs')
           setWorkbenchNameError(message)
           setStateDiagnostic(message)
           return
@@ -2770,7 +2774,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
       setRenamingWorkbenchId(undefined)
       setStateDiagnostic(undefined)
     } catch (error) {
-      const message = `重命名失败：${error instanceof Error ? error.message : String(error)}`
+      const message = t('shell.couldNotRenameValue1', { value1: error instanceof Error ? error.message : String(error) })
       setWorkbenchNameError(message)
       setStateDiagnostic(message)
     } finally {
@@ -2787,7 +2791,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
     try {
       const result = await (workbenchDirectory.unload?.(workbenchId) ?? workbenchDirectory.close(workbenchId))
       if (result.status !== 'committed') {
-        setStateDiagnostic(`无法卸载工作台“${target.name}”；设置已在其他页面改变或当前连接不可用。`)
+        setStateDiagnostic(t('shell.couldNotUnloadValue1SettingsChangedElsewhere', { value1: target.name }))
         return
       }
       if (snapshot.activeWorkbenchId === workbenchId) navigationReservationsRef.current.clear()
@@ -2799,11 +2803,11 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
   const prepareWorkbenchWindow = useCallback(async (targetWorkbenchId?: string) => {
     const workbenchId = targetWorkbenchId ?? workbenchDirectory.getSnapshot().activeWorkbenchId
     if (!workbenchWindowSnapshot.supported) {
-      setStateDiagnostic('当前无法连接 DSH 浏览器窗口服务。')
+      setStateDiagnostic(t('shell.theDshBrowserWindowServiceIsUnavailable'))
       return false
     }
     if (workbenchId === undefined) {
-      setStateDiagnostic('当前没有可打开的工作台。')
+      setStateDiagnostic(t('shell.noWorkbenchAvailableToOpen'))
       return false
     }
     try {
@@ -2813,7 +2817,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
       setStateDiagnostic(undefined)
       return true
     } catch {
-      setStateDiagnostic('无法准备浏览器页面；当前工作台和对话未受影响。')
+      setStateDiagnostic(t('shell.couldNotPrepareTheBrowserPageThe'))
       return false
     }
   }, [flushCurrentWorkbench, windowController, workbenchDirectory, workbenchWindowSnapshot.supported])
@@ -2823,17 +2827,17 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
     try {
       const result = await windowController.open(workbenchId, reservedPopup)
       if (result.status === 'requested') setStateDiagnostic(undefined)
-      else if (result.status === 'unsupported') setStateDiagnostic('当前无法连接 DSH 浏览器窗口服务。')
-      else if (result.status === 'opened') setStateDiagnostic('工作台已在新窗口打开。')
-      else setStateDiagnostic(`打开工作台页面失败（${result.code}）。`)
+      else if (result.status === 'unsupported') setStateDiagnostic(t('shell.theDshBrowserWindowServiceIsUnavailable'))
+      else if (result.status === 'opened') setStateDiagnostic(t('shell.workbenchOpenedInANewWindow'))
+      else setStateDiagnostic(t('shell.couldNotOpenTheWorkbenchPageValue1', { value1: result.code }))
     } catch {
-      setStateDiagnostic('打开工作台页面失败；当前工作台和对话未受影响。')
+      setStateDiagnostic(t('shell.couldNotOpenTheWorkbenchPageThe'))
     }
   }, [windowController, workbenchDirectory])
   const reclaimWorkbenchWindow = useCallback(async (workbenchId: string, options?: { force?: boolean }) => {
     if (isBrowserSurface === true) {
       if (workbenchId !== surfaceWorkbenchId || props.requestBrowserReclaim === undefined) {
-        setStateDiagnostic('无法确认此浏览器工作台的收回身份；请返回 DSH 客户端处理。')
+        setStateDiagnostic(t('shell.couldNotConfirmControlOfThisBrowser'))
         return
       }
       setReclaimingBrowserWorkbench(true)
@@ -2843,10 +2847,10 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
           setBrowserHandoff({ workbenchId, status: 'reclaiming' })
           setStateDiagnostic(undefined)
         } else {
-          setStateDiagnostic('收回请求未能到达 DSH Host；此工作台仍由浏览器控制，请重试。')
+          setStateDiagnostic(t('shell.theRequestDidNotReachDshThe'))
         }
       } catch {
-        setStateDiagnostic('收回请求未能到达 DSH Host；此工作台仍由浏览器控制，请重试。')
+        setStateDiagnostic(t('shell.theRequestDidNotReachDshThe'))
       } finally {
         setReclaimingBrowserWorkbench(false)
       }
@@ -2859,11 +2863,11 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
     setReclaimingBrowserWorkbench(true)
     try {
       const result = await windowController.reclaim?.(workbenchId, options)
-      if (result?.status !== 'reclaimed') { setStateDiagnostic(`收回尚未完成（${result?.code ?? '连接不可用'}），请重试或检查浏览器。`); return false }
+      if (result?.status !== 'reclaimed') { setStateDiagnostic(t('shell.controlTransferIsIncompleteValue1CheckThe', { value1: result?.code ?? t('shell.connectionUnavailable') })); return false }
       setStateDiagnostic(undefined)
       return true
     } catch {
-      setStateDiagnostic('收回请求仍在确认中；浏览器页面保持锁定，请稍后重试。')
+      setStateDiagnostic(t('shell.theTransferIsStillPendingTheBrowser'))
       return false
     } finally { setReclaimingBrowserWorkbench(false) }
   }, [isBrowserSurface, surfaceWorkbenchId, props.requestBrowserReclaim, shareController, workbenchShareSnapshot.sessions, windowController])
@@ -2925,9 +2929,9 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
     const next = rows[nextIndex]
     if (next !== undefined) void selectWorkbench(next.workbenchId)
   }, [frameTransition, selectWorkbench, startWorkbenchRename, workbenchDirectory])
-  const saveLabel = saveState === 'saved' ? '布局已保存'
-    : saveState === 'saving' ? '正在保存布局…'
-      : saveState === 'offline' ? '布局尚未保存' : '布局存在冲突'
+  const saveLabel = saveState === 'saved' ? t('shell.layoutSaved')
+    : saveState === 'saving' ? t('shell.savingLayout')
+      : saveState === 'offline' ? t('shell.layoutNotSaved') : t('shell.layoutHasConflicts')
   const handoffWorkbenchId = surfaceWorkbenchId ?? displayedWorkbenchId
   const browserHandoffRequest = workbenchWindowSnapshot.requests?.find(
     row => row.workbenchId === handoffWorkbenchId,
@@ -2971,7 +2975,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
     const observer = new MutationObserver(inspect)
     if (resizeCanvasRef.current) observer.observe(resizeCanvasRef.current, { subtree: true, childList: true, attributes: true, attributeFilter: ['contenteditable', 'disabled', 'aria-disabled', 'data-workbench-session-id', 'data-workbench-conversation-ready', 'data-workbench-floating-visible', 'data-workbench-floating-session'] })
     const frame = requestAnimationFrame(inspect)
-    const timeout = setTimeout(() => finish('控制权已收回，部分对话尚未恢复输入，请在对应内页重新连接。'), 12_000)
+    const timeout = setTimeout(() => finish(t('shell.controlIsBackReconnectAnyConversationsThat')), 12_000)
     return () => { observer.disconnect(); cancelAnimationFrame(frame); clearTimeout(timeout) }
   }, [browserHandoffRequest?.status, reclaimWindowId, reclaimProgress?.phase, frameTransition, surfaceView, isBrowserSurface, windowController])
   const browserOpening = isBrowserSurface !== true
@@ -2993,21 +2997,21 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
     && !(isBrowserSurface === true && browserHandoffRequest?.status === 'reclaiming')
   const resizeEnabled = layoutActionsEnabled && !layoutLocked
   const browserHandoffLabel = browserHandoffRequest?.status === 'closed'
-    ? '浏览器已关闭。浏览器页面关闭后，工作台已恢复到 DSH 客户端。'
+    ? t('shell.theBrowserClosedAndControlReturnedTo')
     : browserHandoffRequest?.status === 'reclaimed'
-      ? '已收回。工作台控制权已交还给 DSH 客户端。'
+      ? t('shell.theDshClientIsBackInControl')
     : browserHandoffRequest?.status === 'ready'
-      ? '浏览器已连接。当前工作台正在浏览器中使用。'
+      ? t('shell.theWorkbenchIsConnectedAndOpenIn')
       : browserHandoffRequest?.status === 'reclaiming'
-        ? '正在收回工作台，请等待浏览器页面确认。'
+        ? t('shell.waitingForTheBrowserToConfirmThe')
       : browserHandoffRequest?.status === 'requested'
-        ? '正在浏览器中打开当前工作台…'
+        ? t('shell.openingThisWorkbenchInTheBrowser')
         : browserHandoffRequest?.status === 'failed'
           ? browserHandoffRequest.code === 'browser-view-heartbeat-timeout'
-            ? '浏览器暂时失去连接，请先收回控制权。未完成交接的临时内容会保留在此端。'
-            : '浏览器工作台未连接，可继续在 DSH 客户端使用。'
+            ? t('shell.theBrowserDisconnectedTakeBackControlTo')
+            : t('shell.theBrowserIsDisconnectedContinueInThe')
         : browserHandoffRequest?.status === 'expired'
-          ? '浏览器打开链接已过期，可在 DSH 客户端重新打开。'
+          ? t('shell.thisBrowserLinkExpiredOpenTheWorkbench')
           : undefined
   const embeddedShell = embeddedDesktop || isBrowserSurface === true
 
@@ -3053,8 +3057,8 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
         {isBrowserSurface === true ? (
           <header className={`${css.workspaceBar} ${css.browserWorkspaceBar}`} data-workbench-browser-toolbar>
             <div className={css.browserWorkspaceIdentity}>
-              <span className={css.browserWorkspaceKicker}>工作台</span>
-              <strong>{browserWorkbenchName ?? '当前工作台'}</strong>
+              <span className={css.browserWorkspaceKicker}>{t('shell.workbench')}</span>
+              <strong>{browserWorkbenchName ?? t('home.currentWorkbench')}</strong>
               {surfaceWorkbenchId !== undefined && workbenchDirectory.getRootPath?.(surfaceWorkbenchId) !== undefined
                 ? <WorkbenchBrowserFolderButton key={surfaceWorkbenchId} rootPath={workbenchDirectory.getRootPath(surfaceWorkbenchId)!} /> : null}
               {browserHandoffLabel === undefined ? null : <span className={css.browserWorkspaceStatus} role="status" aria-live="polite">{browserHandoffLabel}</span>}
@@ -3075,8 +3079,8 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
                 onClick={toggleLayoutLocked}
               disabled={surfaceView === 'home' || !(settingsWritable || ownerCollaborationWritable) || layoutLockPending || browserHandoffRequest?.status === 'reclaiming'
                 || frameTransition !== undefined}
-                aria-label={layoutLocked ? '解锁布局尺寸' : '锁定布局尺寸'}
-                title={layoutLocked ? '布局尺寸已锁定，点击解锁' : '锁定布局尺寸，防止拖动分隔线调整区域'}
+                aria-label={layoutLocked ? t('shell.unlockLayoutSizing') : t('shell.lockLayoutSizing')}
+                title={layoutLocked ? t('shell.layoutSizingIsLockedClickToUnlock') : t('shell.lockLayoutSizingToPreventDraggingDividers')}
                 aria-pressed={layoutLocked}
                 data-workbench-layout-lock={layoutLocked ? 'locked' : 'unlocked'}
               ><WorkbenchLayoutLockIcon locked={layoutLocked} /></button>}
@@ -3085,74 +3089,74 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
                 className={css.browserWorkspaceIconButton}
                 disabled={props.collaborationClient.participantId !== 'owner' || browserHandoffRequest?.status === 'reclaiming'}
                 onClick={() => { void props.collaborationClient?.command({ kind: 'canvas.set-focus-lock', locked: !collaborationSnapshot?.sharedCanvas.fixedByOwner }).catch(() => {}) }}
-                aria-label={collaborationSnapshot?.sharedCanvas.fixedByOwner ? '解锁共享焦点' : '固定共享焦点'}
-                title={collaborationSnapshot?.sharedCanvas.fixedByOwner ? '房主已固定共享焦点，点击解锁' : '固定当前共享焦点'}
+                aria-label={collaborationSnapshot?.sharedCanvas.fixedByOwner ? t('shell.unlockSharedFocus') : t('shell.lockSharedFocus')}
+                title={collaborationSnapshot?.sharedCanvas.fixedByOwner ? t('shell.theOwnerLockedSharedFocusClickTo') : t('shell.lockTheCurrentSharedFocus')}
                 aria-pressed={collaborationSnapshot?.sharedCanvas.fixedByOwner === true}
                 data-workbench-focus-lock={collaborationSnapshot?.sharedCanvas.fixedByOwner ? 'locked' : 'unlocked'}
               ><IconPinOutlineMedium size={17} /></button> : null}
-              <div className={css.browserWorkspaceActionGroup} role="group" aria-label="历史布局操作">
+              <div className={css.browserWorkspaceActionGroup} role="group" aria-label={t('shell.layoutHistoryActions')}>
                 <button
                   type="button"
                   className={css.browserWorkspaceIconButton}
                   onClick={undoLayout}
                   disabled={surfaceView === 'home' || past.length === 0}
-                  aria-label="撤回上一步"
-                  title="撤回上一步"
+                  aria-label={t('shell.undoLastChange')}
+                  title={t('shell.undoLastChange')}
                 ><UndoLayoutIcon /></button>
                 <button
                   type="button"
                   className={css.browserWorkspaceIconButton}
                   onClick={redoLayout}
                   disabled={surfaceView === 'home' || future.length === 0}
-                  aria-label="重做布局修改"
-                  title="重做布局修改"
+                  aria-label={t('shell.redoLayoutChange')}
+                  title={t('shell.redoLayoutChange')}
                 ><RedoLayoutIcon /></button>
               </div>
               <span className={css.browserWorkspaceActionDivider} role="separator" aria-orientation="vertical" />
-              <div className={css.browserWorkspaceActionGroup} role="group" aria-label="工作台操作">
+              <div className={css.browserWorkspaceActionGroup} role="group" aria-label={t('shell.workbenchActions')}>
                 <button
                   type="button"
                   className={css.browserWorkspaceIconButton}
                   onClick={() => { void saveCurrentWorkbench() }}
                   disabled={!settingsWritable || saveState === 'saving'}
-                  aria-label="保存工作台"
-                  title={saveState === 'saving' ? '正在保存工作台' : '保存工作台'}
+                  aria-label={t('shell.saveWorkbench')}
+                  title={saveState === 'saving' ? t('shell.savingWorkbench') : t('shell.saveWorkbench')}
                   data-state={saveState}
                 ><SaveLayoutIcon /></button>
                 {desktopControls === undefined ? null : <button
                   type="button"
                   className={css.browserWorkspaceIconButton}
                   onClick={() => desktopControls.openSettings()}
-                  aria-label="工作台设置"
-                  title="工作台设置"
+                  aria-label={t('home.workbenchSettings')}
+                  title={t('home.workbenchSettings')}
                 ><IconSettingsOutlineMedium size={17} /></button>}
               </div>
               <span className={css.browserWorkspaceActionDivider} role="separator" aria-orientation="vertical" />
               {props.shareController !== undefined && surfaceWorkbenchId !== undefined ? <>
-                <div className={css.browserWorkspaceActionGroup} role="group" aria-label="工作台局域网分享">
+                <div className={css.browserWorkspaceActionGroup} role="group" aria-label={t('shell.workbenchSharingOnLocalNetwork')}>
                   <button
                     type="button"
                     className={css.browserWorkspaceIconButton}
                     disabled={shareBusy}
-                    aria-label={browserShareActive ? '复制局域网分享链接' : '开始局域网分享'}
-                    title={shareNotice ?? (browserShareActive ? '复制局域网分享链接' : '开始局域网分享')}
+                    aria-label={browserShareActive ? t('shell.copyLocalNetworkShareLink') : t('shell.startLocalNetworkSharing')}
+                    title={shareNotice ?? (browserShareActive ? t('shell.copyLocalNetworkShareLink') : t('shell.startLocalNetworkSharing'))}
                     onClick={() => {
                       setShareBusy(true); setShareNotice(undefined)
                       void props.shareController!.start(surfaceWorkbenchId!).then(async result => {
                         await navigator.clipboard?.writeText(result.url)
-                        setShareNotice('分享链接已复制；访客按本次授权范围参与工作台')
-                      }).catch(error => setShareNotice(error instanceof Error ? error.message : '启动共享失败')).finally(() => setShareBusy(false))
+                        setShareNotice(t('shell.linkCopiedGuestsCanParticipateWithinThe'))
+                      }).catch(error => setShareNotice(error instanceof Error ? error.message : t('shell.couldNotStartSharing'))).finally(() => setShareBusy(false))
                     }}
                   >{browserShareActive ? <IconCopyOutlineMedium size={17} /> : <IconShareOutlineMedium size={17} />}</button>
                   {!browserShareActive ? null : <button
                     type="button"
                     className={css.browserWorkspaceIconButton}
                     disabled={shareBusy}
-                    aria-label="停止局域网共享"
-                    title="停止局域网共享"
+                    aria-label={t('shell.stopLocalNetworkSharing')}
+                    title={t('shell.stopLocalNetworkSharing')}
                     onClick={() => {
                       setShareBusy(true); setShareNotice(undefined)
-                      void props.shareController!.stop(surfaceWorkbenchId!).then(() => setShareNotice('已停止局域网共享')).catch(error => setShareNotice(error instanceof Error ? error.message : '停止共享失败')).finally(() => setShareBusy(false))
+                      void props.shareController!.stop(surfaceWorkbenchId!).then(() => setShareNotice(t('shell.localNetworkSharingStopped'))).catch(error => setShareNotice(error instanceof Error ? error.message : t('shell.couldNotStopSharing'))).finally(() => setShareBusy(false))
                     }}
                   ><IconCloseOutlineMedium size={17} /></button>}
                   {workbenchShareSnapshot.sessions.filter(session => session.workbenchId === surfaceWorkbenchId).map(session => <WorkbenchShareGrantControls key={session.workbenchId} controller={props.shareController!} session={session} presentation="toolbar" buttonClassName={css.browserWorkspaceIconButton} />)}
@@ -3166,8 +3170,8 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
                 disabled={handoffWorkbenchId === undefined || reclaimingBrowserWorkbench || (isBrowserSurface === true
                   ? props.requestBrowserReclaim === undefined || browserHandoff?.status === 'reclaiming' || browserHandoff?.status === 'reclaimed'
                   : browserHandoffRequest?.status !== 'ready' && browserHandoffRequest?.status !== 'reclaiming')}
-                aria-label="收回到 DSH 客户端"
-                title={reclaimingBrowserWorkbench ? '正在收回到 DSH 客户端' : '收回到 DSH 客户端'}
+                aria-label={t('shell.takeBackControlInDsh')}
+                title={reclaimingBrowserWorkbench ? t('shell.takingBackControlInDsh') : t('shell.takeBackControlInDsh')}
                 aria-busy={reclaimingBrowserWorkbench}
                 data-state={reclaimingBrowserWorkbench ? 'reclaiming' : undefined}
               ><ReturnToDesktopIcon /></button>
@@ -3176,7 +3180,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
         ) : <header className={css.workspaceBar}>
           {projectNeutral ? (
             <div className={css.workbenchRail}>
-              <div className={css.workbenchTabs} role="tablist" aria-label="工作台总览">
+              <div className={css.workbenchTabs} role="tablist" aria-label={t('shell.workbenchOverview')}>
                 <div className={css.workbenchTab} data-active={surfaceView === 'home' || undefined} role="presentation">
                 <button
                   type="button"
@@ -3192,10 +3196,10 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
                       void flushCurrentWorkbench().then(ok => { if (ok) props.onShowHome?.() })
                     }
                   }}
-                >工作台总览</button>
+                >{t('shell.workbenchOverview')}</button>
                 </div>
               </div>
-              <div className={css.workbenchTabs} role="tablist" aria-label="工作台" data-workbench-tabs>
+              <div className={css.workbenchTabs} role="tablist" aria-label={t('shell.workbench')} data-workbench-tabs>
                 {openWorkbenchRows.map((row) => {
                   const displayed = row.workbenchId === displayedWorkbenchId
                   const active = surfaceView === 'workbench' && displayed
@@ -3252,7 +3256,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
                       {renaming ? (
                         <input
                           className={css.workbenchNameInput}
-                          aria-label="工作台名称"
+                          aria-label={t('shell.workbenchName')}
                           aria-invalid={workbenchNameError === undefined ? undefined : true}
                           title={workbenchNameError}
                           value={workbenchNameDraft}
@@ -3294,13 +3298,13 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
                           <FloatingWorkspaceUnread workbenchId={row.workbenchId} />
                         </button>
                       )}
-                      <span className={css.workbenchTabActions} role="group" aria-label={`${row.name}操作`}>
+                      <span className={css.workbenchTabActions} role="group" aria-label={t('shell.actionsForValue1', { value1: row.name })}>
                         <button
                           type="button"
                           className={css.workbenchMenuTrigger}
                           data-workbench-menu-trigger
-                          aria-label={`打开“${row.name}”工作台菜单`}
-                          title={`打开“${row.name}”工作台菜单`}
+                          aria-label={t('shell.openWorkbenchMenuForValue1', { value1: row.name })}
+                          title={t('shell.openWorkbenchMenuForValue1', { value1: row.name })}
                           aria-haspopup="menu"
                           aria-expanded={workbenchMenuOpenId === row.workbenchId}
                           onKeyDown={(event) => {
@@ -3338,7 +3342,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
                               ? { visibility: 'hidden', left: 0, top: 0 }
                               : { top: workbenchMenuPosition.top, left: workbenchMenuPosition.left }}
                             role="menu"
-                            aria-label={`${row.name}工作台操作`}
+                            aria-label={t('shell.workbenchActionsForValue1', { value1: row.name })}
                             data-workbench-tab-menu={row.workbenchId}
                             onClick={event => { event.stopPropagation() }}
                             onKeyDown={event => {
@@ -3360,7 +3364,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
                                 workbenchMenuAnchorRef.current = undefined
                                 startWorkbenchRename(row.workbenchId, row.name)
                               }}
-                            ><IconEditOutlineMedium size={16} /><span>重命名</span></button>
+                            ><IconEditOutlineMedium size={16} /><span>{t('shell.rename')}</span></button>
                             <button
                               type="button"
                               role="menuitem"
@@ -3373,17 +3377,17 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
                                 setContextDialog({ workbenchId: row.workbenchId })
                                 void returnFocus
                               }}
-                            ><IconListPenOutlineMedium size={16} /><span>编辑工作台背景</span></button>
+                            ><IconListPenOutlineMedium size={16} /><span>{t('shell.editWorkbenchContext')}</span></button>
                             {workbenchDirectory.memoryRequest ? <button type="button" role="menuitem" disabled={browserOwned} onClick={() => {
                               setWorkbenchMenuOpenId(undefined); setWorkbenchMenuPosition(undefined); setMemoryWorkbenchId(row.workbenchId)
-                            }}><IconDatabaseOutlineMedium size={16} /><span>工作台专属记忆</span></button> : null}
+                            }}><IconDatabaseOutlineMedium size={16} /><span>{t('shell.workbenchMemory')}</span></button> : null}
                             <button
                               type="button"
                               role="menuitem"
                               disabled={!canReadTargetDocument || browserOwned || frameTransition !== undefined || templateSaving}
                               title={browserOwned
-                                ? '该工作台正在浏览器中使用，请先收回到 DSH 客户端'
-                                : canReadTargetDocument ? undefined : '该工作台布局暂不可用，请刷新后重试'}
+                                ? t('shell.takeBackControlInDshBeforeEditing')
+                                : canReadTargetDocument ? undefined : t('shell.thisLayoutIsUnavailableRefreshAndTry')}
                               onClick={() => {
                                 const returnFocus = workbenchMenuAnchorRef.current
                                 setWorkbenchMenuOpenId(undefined)
@@ -3391,24 +3395,24 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
                                 workbenchMenuAnchorRef.current = undefined
                                 if (canReadTargetDocument) openTemplateDialog(row.workbenchId, returnFocus)
                               }}
-                            ><IconCopyOutlineMedium size={16} /><span>另存为布局模板</span></button>
+                            ><IconCopyOutlineMedium size={16} /><span>{t('shell.saveAsLayoutTemplate')}</span></button>
                             {desktopControls ? <button type="button" role="menuitem" disabled={browserOwned} onClick={() => {
                               setWorkbenchMenuOpenId(undefined); setWorkbenchMenuPosition(undefined)
                               desktopControls.openSettings({ section: 'sharing', workbenchId: row.workbenchId, shareMode: 'export' })
-                            }}><IconCopyOutlineMedium size={16} /><span>分享工作台</span></button> : null}
+                            }}><IconCopyOutlineMedium size={16} /><span>{t('shell.shareWorkbench')}</span></button> : null}
                             {props.toolGateway === undefined ? null : <button type="button" role="menuitem" disabled={browserOwned} onClick={() => {
                               toolGatewayReturnFocusRef.current = workbenchMenuAnchorRef.current ?? null
                               setWorkbenchMenuOpenId(undefined); setWorkbenchMenuPosition(undefined)
                               workbenchMenuAnchorRef.current = undefined
                               setToolGatewayOpenId(row.workbenchId)
-                            }}><IconSettingsOutlineMedium size={16} /><span>Agent 组装</span></button>}
+                            }}><IconSettingsOutlineMedium size={16} /><span>{t('shell.agentAssembly')}</span></button>}
                             <WorkbenchBrowserAction
                               workbenchId={row.workbenchId}
                               workbenchName={row.name}
                               windowSnapshot={workbenchWindowSnapshot}
                               onPrepareOpen={prepareWorkbenchWindow}
                               onOpenWindow={openWorkbenchWindow}
-                              onReclaim={async id => { if (!await reclaimWorkbenchWindow(id)) throw new Error('收回未完成，请在管理页查看进度。') }}
+                              onReclaim={async id => { if (!await reclaimWorkbenchWindow(id)) throw new Error(t('shell.transferIsNotCompleteCheckProgressOn')) }}
                               onTransition={(workbenchId, phase) => {
                                 setWorkbenchMenuOpenId(undefined)
                                 setWorkbenchMenuPosition(undefined)
@@ -3423,14 +3427,14 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
                               role="menuitem"
                               data-action="close"
                               disabled={browserOwned || frameTransition !== undefined || workbenchClosing}
-                              title={browserOwned ? '该工作台正在浏览器中使用，请先收回到 DSH 客户端' : undefined}
+                              title={browserOwned ? t('shell.takeBackControlInDshBeforeEditing') : undefined}
                               onClick={() => {
                                 setWorkbenchMenuOpenId(undefined)
                                 setWorkbenchMenuPosition(undefined)
                                 workbenchMenuAnchorRef.current = undefined
                                 void unloadWorkbench(row.workbenchId)
                               }}
-                            ><IconCloseOutlineMedium size={16} /><span>从标签栏卸载</span></button>
+                            ><IconCloseOutlineMedium size={16} /><span>{t('shell.unloadFromTabBar')}</span></button>
                           </div>, document.body)
                         ) : null}
                       </span>
@@ -3442,12 +3446,12 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
                 <WorkbenchCreateMenu onImport={props.onImportWorkbench}
                   onSelect={presetId => { void flushCurrentWorkbench().then(ok => { if (ok) setCreatePreset(presetId) }) }}
                   anchor={menuProps => <button ref={createWorkbenchButtonRef} type="button" className={css.createWorkbenchButton}
-                    disabled={frameTransition !== undefined} aria-label="新建工作台" title="新建工作台" {...menuProps}>+</button>} />
+                    disabled={frameTransition !== undefined} aria-label={t('shell.newWorkbench')} title={t('shell.newWorkbench')} {...menuProps}>+</button>} />
               </div>
             </div>
           ) : (
             <div className={css.workspaceIdentity}>
-              <span>工作区</span>
+              <span>{t('shell.workspace')}</span>
               <strong>{workspaceTitle}</strong>
               {sessionTitle === undefined ? null : <small>{sessionTitle}</small>}
             </div>
@@ -3471,8 +3475,8 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
               onClick={toggleLayoutLocked}
               disabled={surfaceView === 'home' || !settingsWritable || layoutLockPending || activeBrowserOwned || browserOpening
                 || browserActionPhase !== undefined || frameTransition !== undefined}
-              aria-label={layoutLocked ? '解锁布局尺寸' : '锁定布局尺寸'}
-              title={layoutLocked ? '布局尺寸已锁定，点击解锁' : '锁定布局尺寸，防止拖动分隔线调整区域'}
+              aria-label={layoutLocked ? t('shell.unlockLayoutSizing') : t('shell.lockLayoutSizing')}
+              title={layoutLocked ? t('shell.layoutSizingIsLockedClickToUnlock') : t('shell.lockLayoutSizingToPreventDraggingDividers')}
               aria-pressed={layoutLocked}
               data-workbench-layout-lock={layoutLocked ? 'locked' : 'unlocked'}
             ><WorkbenchLayoutLockIcon locked={layoutLocked} /></button>}
@@ -3480,30 +3484,30 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
               type="button"
               onClick={undoLayout}
               disabled={surfaceView === 'home' || activeBrowserOwned || past.length === 0}
-              aria-label="撤销布局更改"
-              title="撤销布局更改"
+              aria-label={t('shell.undoLayoutChange')}
+              title={t('shell.undoLayoutChange')}
             ><UndoLayoutIcon /></button>
             <button
               type="button"
               onClick={redoLayout}
               disabled={surfaceView === 'home' || activeBrowserOwned || future.length === 0}
-              aria-label="重做布局更改"
-              title="重做布局更改"
+              aria-label={t('shell.redoLayoutChange2')}
+              title={t('shell.redoLayoutChange2')}
             ><RedoLayoutIcon /></button>
             {!projectNeutral && embeddedDesktop && desktopControls !== undefined ? <button
               type="button"
               className={css.desktopControl}
               onClick={() => desktopControls.openSettings()}
-              aria-label="工作台设置"
-              title="工作台设置"
-            >设置</button> : null}
+              aria-label={t('home.workbenchSettings')}
+              title={t('home.workbenchSettings')}
+            >{t('shell.settings')}</button> : null}
             {props.floatingRuntime && selectedWorkbenchId && surfaceView === 'workbench' ? <FloatingWorkspaceToolbarButton runtime={props.floatingRuntime} workbenchId={selectedWorkbenchId} canvasRef={resizeCanvasRef} className={css.workbenchSettingsButton} disabled={activeBrowserOwned} /> : null}
             {projectNeutral && desktopControls !== undefined ? <button
               type="button"
               className={css.workbenchSettingsButton}
               onClick={() => desktopControls.openSettings()}
-              aria-label="工作台设置"
-              title="工作台设置"
+              aria-label={t('home.workbenchSettings')}
+              title={t('home.workbenchSettings')}
             ><IconSettingsOutlineMedium size={16} /></button> : null}
           </div>
         </header>}
@@ -3513,17 +3517,17 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
             <section className={css.transitionWaitPanel}>
               <span className={css.transitionWaitSpinner} aria-hidden="true" />
               <h2>{frameTransition !== undefined
-                ? `正在载入${workbenchDirectorySnapshot.rows.find(row => row.workbenchId === frameTransition.workbenchId)?.name ?? '工作台'}`
-                : isBrowserSurface === true ? '正在收回到 DSH 客户端' : browserActionPhase === 'preparing' || browserHandoffRequest?.status === 'preparing' || browserHandoffRequest?.status === 'prepared' ? '正在准备浏览器窗口' : browserActionPhase === 'reclaiming' ? '正在收回工作台' : '正在打开工作台页面'}</h2>
+                ? t('shell.loadingValue1', { value1: workbenchDirectorySnapshot.rows.find(row => row.workbenchId === frameTransition.workbenchId)?.name ?? t('shell.workbench') })
+                : isBrowserSurface === true ? t('shell.takingBackControlInDsh') : browserActionPhase === 'preparing' || browserHandoffRequest?.status === 'preparing' || browserHandoffRequest?.status === 'prepared' ? t('shell.preparingBrowserWindow') : browserActionPhase === 'reclaiming' ? t('home.returningControlToTheDshClient') : t('shell.openingWorkbenchPage')}</h2>
               <p>{frameTransition !== undefined
-                ? '正在读取布局并恢复区域内容…'
+                ? t('shell.loadingLayoutAndRestoringAreaContents')
                 : isBrowserSurface === true
-                  ? '页面已暂停操作，正在保存布局并确认交接。'
+                  ? t('shell.thisPageIsPausedWhileTheLayout')
                   : browserActionPhase === 'preparing' || browserHandoffRequest?.status === 'preparing' || browserHandoffRequest?.status === 'prepared'
-                    ? '正在保存当前布局并申请一次性浏览器连接。'
+                    ? t('shell.savingTheLayoutAndRequestingAOne')
                     : browserActionPhase === 'reclaiming'
-                      ? '浏览器页面保持锁定，等待客户端确认收回。'
-                      : '浏览器正在连接 DSH 并恢复这个工作台。'}</p>
+                      ? t('shell.theBrowserStaysLockedUntilTheDsh')
+                      : t('shell.theBrowserIsConnectingToDshAnd')}</p>
             </section>
           </div>
         ) : null}
@@ -3560,7 +3564,7 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
               directory={workbenchDirectory}
               workbenchId={contextDialog.workbenchId}
               {...(areaId === undefined ? {} : { areaId })}
-              title={areaId === undefined ? '编辑工作台背景' : '编辑项目背景'}
+              title={areaId === undefined ? t('shell.editWorkbenchContext') : t('shell.editProjectContext')}
               initialValue={areaId === undefined
                 ? context !== undefined && 'goal' in context.human ? context.human.goal : ''
                 : context !== undefined && 'objective' in context.human ? context.human.objective : ''}
@@ -3695,30 +3699,30 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
               {sidebarDiagnostic === undefined ? null : <p>{sidebarDiagnostic}</p>}
               {stateDiagnostic === undefined && invalidLayout === undefined && saveState === 'saved' ? null : (
                 <p>{stateDiagnostic ?? (invalidLayout !== undefined
-                  ? '此工作区保存了暂不支持的布局版本；当前显示安全默认布局，原始数据尚未被覆盖。'
+                  ? t('layout.unsupportedLayout')
                   : saveState === 'saving'
-                    ? '正在保存布局…'
+                    ? t('layout.savingLayout')
                     : saveState === 'offline'
-                      ? '布局包含尚未保存的本地更改。'
-                      : '另一个页面修改了布局，请选择如何处理本地版本。')}</p>
+                      ? t('layout.unsavedLayout')
+                      : t('layout.layoutConflict'))}</p>
               )}
               {invalidLayout !== undefined && (
                 <div className={css.conflictActions}>
-                  <button onClick={exportInvalid}>导出原始布局</button>
-                  <button onClick={resetInvalid}>重置此布局</button>
+                  <button onClick={exportInvalid}>{t('area.exportOriginalLayout')}</button>
+                  <button onClick={resetInvalid}>{t('area.resetThisLayout')}</button>
                 </div>
               )}
               {saveState === 'offline' && conflict === undefined && invalidLayout === undefined ? (
                 <div className={css.conflictActions}>
-                  <button onClick={retrySave} disabled={!settingsWritable}>重试保存</button>
-                  <button onClick={exportLocal}>导出本地布局</button>
+                  <button onClick={retrySave} disabled={!settingsWritable}>{t('area.retrySave')}</button>
+                  <button onClick={exportLocal}>{t('area.exportLocalLayout')}</button>
                 </div>
               ) : null}
               {conflict !== undefined && (
                 <div className={css.conflictActions}>
-                  <button onClick={reloadRemote}>重新载入远端</button>
-                  <button onClick={overwriteRemote}>覆盖远端</button>
-                  <button onClick={exportLocal}>导出本地布局</button>
+                  <button onClick={reloadRemote}>{t('area.reloadRemoteLayout')}</button>
+                  <button onClick={overwriteRemote}>{t('area.overwriteRemoteLayout')}</button>
+                  <button onClick={exportLocal}>{t('area.exportLocalLayout')}</button>
                 </div>
               )}
             </div>
@@ -3748,26 +3752,26 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
               }}
             >
               <div className={css.templateDialogHeader}>
-                <h2 id={`${templateNameId}-title`}>另存为工作台布局</h2>
+                <h2 id={`${templateNameId}-title`}>{t('area.saveAsWorkbenchLayout')}</h2>
                 <button
                   type="button"
                   onClick={closeTemplateDialog}
                   disabled={templateSaving}
-                  aria-label="关闭"
-                  title="关闭"
+                  aria-label={t('action.close')}
+                  title={t('action.close')}
                 ><CloseWorkbenchIcon /></button>
               </div>
               <p id={`${templateNameId}-description`}>
-                保存“{workbenchDirectorySnapshot.rows.find(row => row.workbenchId === templateTargetWorkbenchId)?.name ?? '目标工作台'}”的区域和内页布局。以后可以从这个布局创建新的独立工作台。
+                {t('layout.saveNamedLayout', { name: workbenchDirectorySnapshot.rows.find(row => row.workbenchId === templateTargetWorkbenchId)?.name ?? t('layout.targetWorkbench') })}
               </p>
-              <label htmlFor={`${templateNameId}-input`}>布局名称</label>
+              <label htmlFor={`${templateNameId}-input`}>{t('area.layoutName')}</label>
               <input
                 id={`${templateNameId}-input`}
                 value={templateName}
                 autoFocus
                 aria-invalid={templateError === undefined ? undefined : true}
                 aria-describedby={templateError === undefined ? `${templateNameId}-description` : `${templateNameId}-error`}
-                placeholder="例如：双对话审查"
+                placeholder={t('area.eGTwoConversationReview')}
                 onFocus={(event) => { event.currentTarget.select() }}
                 onChange={(event) => {
                   setTemplateName(event.currentTarget.value)
@@ -3780,9 +3784,9 @@ export function WorkbenchFrame(props: WorkbenchFrameProps) {
                 </p>
               )}
               <div className={css.templateDialogActions}>
-                <button type="button" onClick={closeTemplateDialog} disabled={templateSaving}>取消</button>
+                <button type="button" onClick={closeTemplateDialog} disabled={templateSaving}>{t('action.cancel')}</button>
                 <button type="submit" disabled={templateSaving}>
-                  {templateSaving ? '正在保存…' : '保存布局'}
+                  {templateSaving ? t('shell.saving') : t('layout.saveLayout')}
                 </button>
               </div>
             </form>
@@ -4353,13 +4357,6 @@ function siblingArea(document: WorkbenchLayoutDocument, groupId: string): Siblin
   return { split, group: sibling, sourceFirst, direction }
 }
 
-function directionLabel(direction: MergeDirection): string {
-  if (direction === 'left') return '向左合并显示'
-  if (direction === 'right') return '向右合并显示'
-  if (direction === 'up') return '向上合并显示'
-  return '向下合并显示'
-}
-
 function mergeDirectionBetween(source: DOMRect, target: DOMRect): MergeDirection {
   const sourceCenter = { x: source.left + source.width / 2, y: source.top + source.height / 2 }
   const targetCenter = { x: target.left + target.width / 2, y: target.top + target.height / 2 }
@@ -4388,13 +4385,6 @@ export function splitRetainedPreviewStyle(
   return { inset: `0 0 ${percent(ratio)} 0` }
 }
 
-function splitTargetMessage(edge: SplitTargetEdge): string {
-  if (edge === 'left') return '左右分栏 · 新区域在左侧'
-  if (edge === 'right') return '左右分栏 · 新区域在右侧'
-  if (edge === 'top') return '上下分栏 · 新区域在顶部'
-  return '上下分栏 · 新区域在底部'
-}
-
 function splitCursorMode(target: SplitTarget): 'columns' | 'rows' | 'center' | 'invalid' {
   if (target.kind === 'edge') return target.orientation
   return target.kind
@@ -4409,7 +4399,8 @@ function SplitRegionPreview({
   region?: 'retained' | 'new'
 }) {
   const direction = edge === 'left' || edge === 'right' ? 'vertical' : 'horizontal'
-  const message = region === 'retained' ? '原区域' : splitTargetMessage(edge)
+  const { t } = useWorkbenchLocale()
+  const message = region === 'retained' ? t('layout.originalArea') : t(`layout.split.${edge}`)
   return (
     <div
       className={css.splitRegionPreview}
@@ -4434,6 +4425,7 @@ function SplitRegionPreview({
 }
 
 function CenterRegionPreview() {
+  const { t } = useWorkbenchLocale()
   return (
     <div
       className={css.centerRegionPreview}
@@ -4442,7 +4434,7 @@ function CenterRegionPreview() {
     >
       <div className={css.splitPlacementBadge}>
         <span className={css.centerPlacementIcon} aria-hidden="true" />
-        <strong>移动到边缘选择分割方向</strong>
+        <strong>{t('area.moveToAnEdgeToChooseA')}</strong>
       </div>
     </div>
   )
@@ -4454,6 +4446,7 @@ function JoinRegionPreview({
   direction: MergeDirection
   style: CSSProperties
 }) {
+  const { t } = useWorkbenchLocale()
   const arrow = direction === 'left' ? '←'
     : direction === 'right' ? '→'
       : direction === 'up' ? '↑' : '↓'
@@ -4471,7 +4464,7 @@ function JoinRegionPreview({
           data-merge-direction-icon={direction}
           aria-hidden="true"
         >{arrow}</span>
-        <strong>{directionLabel(direction)}</strong>
+        <strong>{t(`layout.merge.${direction}`)}</strong>
       </div>
     </div>
   )
@@ -4485,9 +4478,10 @@ function fixedPreviewStyle(rect: DOMRect): CSSProperties {
 }
 
 function LayoutView(props: LayoutViewProps) {
-  if (props.node.kind === 'group' && !props.node.id) return <section className={css.empty} aria-label="工作台暂无区域"><strong>从一个项目开始</strong><span>项目资料与历史仍然保留。选择已有项目，或新建一个区域。</span>
-    {Object.values(props.directory?.getProjects?.(props.workbenchId) ?? {}).map(project => <button key={project.projectId} disabled={!props.layoutActionsEnabled} onClick={() => { void props.directory?.openProject?.(props.workbenchId, project.projectId).catch(error => props.reportStateFailure(String(error))) }}>{project.name} · 在新区域打开</button>)}
-    <button disabled={!props.layoutActionsEnabled} onClick={() => { const id = nextId('area'); props.commit({ type: 'replace-layout', document: { version: 2, root: { kind: 'group', id, tabs: [] }, activeGroupId: id } }) }}>新建区域</button>
+  const { t } = useWorkbenchLocale()
+  if (props.node.kind === 'group' && !props.node.id) return <section className={css.empty} aria-label={t('area.noAreasInThisWorkbench')}><strong>{t('area.startWithAProject')}</strong><span>{t('area.projectFilesAndHistoryAreKeptChoose')}</span>
+    {Object.values(props.directory?.getProjects?.(props.workbenchId) ?? {}).map(project => <button key={project.projectId} disabled={!props.layoutActionsEnabled} onClick={() => { void props.directory?.openProject?.(props.workbenchId, project.projectId).catch(error => props.reportStateFailure(String(error))) }}>{project.name} {t('area.openInANewArea')}</button>)}
+    <button disabled={!props.layoutActionsEnabled} onClick={() => { const id = nextId('area'); props.commit({ type: 'replace-layout', document: { version: 2, root: { kind: 'group', id, tabs: [] }, activeGroupId: id } }) }}>{t('area.newArea')}</button>
   </section>
 
   return props.node.kind === 'group'
@@ -4523,6 +4517,7 @@ function CollapsedSummarySplit({
   parentAxis: SplitNode['axis']
   collapseEdge: CollapseEdge
 }) {
+  const { t } = useWorkbenchLocale()
   const summaryTracks = summaryGridTracks(split, parentAxis)
   const ratio = normalizedSplitRatio(split.ratio)
   // The parent split already owns the compact/main-axis track. A summary node
@@ -4534,7 +4529,7 @@ function CollapsedSummarySplit({
       data-collapse-summary
       data-workbench-split-id={split.id}
       data-axis={split.axis}
-      aria-label="已收起的容器分支"
+      aria-label={t('area.collapsedAreaGroup')}
       style={{
         width: '100%',
         height: '100%',
@@ -4548,7 +4543,7 @@ function CollapsedSummarySplit({
         className={css.collapsedSummaryDivider}
         role="separator"
         tabIndex={-1}
-        aria-label="已收起分支分隔线"
+        aria-label={t('area.collapsedGroupDivider')}
         aria-orientation={split.axis === 'horizontal' ? 'vertical' : 'horizontal'}
         aria-disabled="true"
         aria-valuemin={0}
@@ -4586,6 +4581,7 @@ function splitCanFit(container: number, minimum: number): boolean {
 }
 
 function SplitView(props: LayoutViewProps & { split: SplitNode }) {
+  const { t } = useWorkbenchLocale()
   const { split, commit, collapsedAreaIds, summarySplitIds } = props
   const root = useRef<HTMLDivElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -4719,7 +4715,7 @@ function SplitView(props: LayoutViewProps & { split: SplitNode }) {
         className={css.divider} role="separator" tabIndex={canResize || (props.layoutLocked && props.layoutActionsEnabled) ? 0 : -1}
         data-resize-disabled={!canResize || undefined}
         data-layout-locked={props.layoutLocked ? 'true' : undefined}
-        aria-label="区域分隔线"
+        aria-label={t('area.areaDivider')}
         aria-orientation={split.axis === 'horizontal' ? 'vertical' : 'horizontal'}
         aria-disabled={canResize ? undefined : true}
         aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(ratio * 100)}
@@ -4783,6 +4779,7 @@ function SeparatorMenu({
   commit: Commit
   close: () => void
 }) {
+  const { t } = useWorkbenchLocale()
   const first = split.first.kind === 'group' ? split.first : undefined
   const second = split.second.kind === 'group' ? split.second : undefined
   const canMerge = first !== undefined && second !== undefined
@@ -4797,38 +4794,38 @@ function SeparatorMenu({
       data-separator-target-group={targetGroupId}
       style={{ left: x, top: y }}
       role="menu"
-      aria-label="共享分隔间隙菜单"
+      aria-label={t('area.sharedDividerMenu')}
     >
-      <span className={css.menuHeading}>共享分隔间隙</span>
+      <span className={css.menuHeading}>{t('area.sharedDivider')}</span>
       <button role="menuitem" disabled={!targetAvailable} data-primary onClick={() => {
         requestPlacement(columnEdge)
         close()
-      }}>左右分栏…</button>
+      }}>{t('area.splitHorizontal')}</button>
       <button role="menuitem" disabled={!targetAvailable} data-primary onClick={() => {
         requestPlacement(rowEdge)
         close()
-      }}>上下分栏…</button>
+      }}>{t('area.splitVertical')}</button>
       <div className={css.menuDivider} />
-      <button role="menuitem" disabled={layoutLocked} title={layoutLocked ? '解锁后可以调整区域比例' : undefined} onClick={() => {
+      <button role="menuitem" disabled={layoutLocked} title={layoutLocked ? t('layout.unlockToResize') : undefined} onClick={() => {
         run({ type: 'set-ratio', splitId: split.id, ratio: 0.5 })
-      }}>平衡两侧区域</button>
+      }}>{t('area.balanceBothAreas')}</button>
       {first === undefined || second === undefined ? (
-        <span className={css.menuHint}>这条间隙包含嵌套区域；鼠标所在的具体区域仍可继续分栏，合并操作仅在直接相邻时提供。</span>
+        <span className={css.menuHint}>{t('area.thisDividerBordersNestedAreasYouCan')}</span>
       ) : (
         <>
           <div className={css.menuDivider} />
-          <button role="menuitem" disabled={!canMerge} title={canMerge ? undefined : '项目文件夹不同或尚未设置，无法合并显示'} onClick={() => {
+          <button role="menuitem" disabled={!canMerge} title={canMerge ? undefined : t('layout.cannotMergeProjects')} onClick={() => {
             run({ type: 'merge-group', sourceGroupId: first.id, targetGroupId: second.id })
-          }}>{split.axis === 'horizontal' ? '向右合并显示' : '向下合并显示'}</button>
-          <button role="menuitem" disabled={!canMerge} title={canMerge ? undefined : '项目文件夹不同或尚未设置，无法合并显示'} onClick={() => {
+          }}>{split.axis === 'horizontal' ? t('layout.merge.right') : t('layout.merge.down')}</button>
+          <button role="menuitem" disabled={!canMerge} title={canMerge ? undefined : t('layout.cannotMergeProjects')} onClick={() => {
             run({ type: 'merge-group', sourceGroupId: second.id, targetGroupId: first.id })
-          }}>{split.axis === 'horizontal' ? '向左合并显示' : '向上合并显示'}</button>
+          }}>{split.axis === 'horizontal' ? t('layout.merge.left') : t('layout.merge.up')}</button>
           <button role="menuitem" onClick={() => {
             run({ type: 'swap-groups', firstGroupId: first.id, secondGroupId: second.id })
-          }}>互换两侧区域</button>
+          }}>{t('area.swapBothAreas')}</button>
         </>
       )}
-      <span className={css.menuHint}>拖动间隙调整大小；右键位置决定操作哪一侧；双击重置为 50 / 50。</span>
+      <span className={css.menuHint}>{t('area.dragTheDividerToResizeRightClick')}</span>
     </div>
   )
 }
@@ -4875,6 +4872,8 @@ export function PendingSessionBindingPicker({
   sessionRows, sessionIds, sessionMarkers, sessionMarkersByWorkspace, workspaces,
   archivedSessionIds, open, setOpen, onSelect, triggerLabel, disabled, emptyMessage,
 }: PendingSessionBindingPickerProps) {
+  const { t, language } = useWorkbenchLocale()
+  const copy = sessionBindingCopy(language)
   const controlRef = useRef<HTMLDivElement>(null)
   const pickerRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
@@ -4913,7 +4912,7 @@ export function PendingSessionBindingPicker({
       ? sessionMarkers[sessionId]
       : sessionMarkersByWorkspace[workspace.id]?.[sessionId])
       ?? allocateSessionMarker(workspace === undefined ? sessionMarkers : (sessionMarkersByWorkspace[workspace.id] ?? {}))
-    return { binding, marker, workspaceTitle: workspace?.title ?? '未分组工作区' }
+    return { binding, marker, workspaceTitle: workspace?.title ?? t('binding.ungrouped') }
   }).sort((left, right) =>
     (sessionRows[right.binding.sessionId]?.updatedAt ?? 0) - (sessionRows[left.binding.sessionId]?.updatedAt ?? 0),
   )
@@ -4926,11 +4925,11 @@ export function PendingSessionBindingPicker({
   }, new Map<string, { key: string; title: string; candidates: typeof candidates }>()).values()]
   const renderCandidate = (candidate: (typeof candidates)[number]) => {
     const row = sessionRows[candidate.binding.sessionId]
-    const title = sessionDisplayTitle(row, candidate.binding.sessionId, '新对话')
-    const updatedAt = row?.updatedAt === undefined ? '最近更新未知' : `最近更新 ${new Date(row.updatedAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`
+    const title = sessionDisplayTitle(row, candidate.binding.sessionId, copy.newSession)
+    const updatedAt = row?.updatedAt === undefined ? copy.updatedUnknown : copy.updatedAt(new Date(row.updatedAt))
     return <button key={sessionTargetKey(candidate.binding)} type="button" role="option" aria-label={`${title} · ${candidate.workspaceTitle} · ${candidate.binding.sessionId}`} onClick={() => { onSelect(candidate.binding); setOpen(false); triggerRef.current?.focus() }}>
       <span className={css.markerLabel} data-accent={candidate.marker.accentToken}>{candidate.marker.label}</span>
-      <span className={css.pickerIdentity}><strong>{title}</strong><small>{row?.running ? '进行中' : '空闲'} · {updatedAt} · {candidate.binding.sessionId.slice(-8)}</small></span>
+      <span className={css.pickerIdentity}><strong>{title}</strong><small>{row?.running ? copy.running : copy.idle} · {updatedAt} · {candidate.binding.sessionId.slice(-8)}</small></span>
     </button>
   }
   useEffect(() => {
@@ -4950,16 +4949,16 @@ export function PendingSessionBindingPicker({
     }
   }, [open, setOpen])
   return <div ref={controlRef} className={css.bindingControl} data-workbench-pending-binding-picker>
-    <button ref={triggerRef} type="button" disabled={disabled} className={css.bindingChip} aria-label="选择此内页的对话" aria-haspopup="listbox" aria-expanded={open} aria-controls={open ? pickerId : undefined} onClick={(event) => { event.stopPropagation(); setOpen(!open) }}>
+    <button ref={triggerRef} type="button" disabled={disabled} className={css.bindingChip} aria-label={copy.chooseConversation} aria-haspopup="listbox" aria-expanded={open} aria-controls={open ? pickerId : undefined} onClick={(event) => { event.stopPropagation(); setOpen(!open) }}>
       <span className={css.markerLabel} aria-hidden="true">＋</span>
-      <span className={css.bindingTitle}>{triggerLabel ?? '待绑定对话'}</span>
+      <span className={css.bindingTitle}>{triggerLabel ?? t('binding.pending')}</span>
     </button>
-    {open ? <WorkbenchFloatingMenu kind="binding" ownerId={pickerId} anchorRef={triggerRef} surfaceRef={pickerRef} side="bottom" className={css.bindingPicker} label="选择此内页的对话">
-      <div className={css.bindingPickerHeading}><span><strong>选择此内页的对话</strong><small>不会创建新的对话</small></span><kbd>Esc</kbd></div>
-      <div className={css.bindingSearch} role="search"><IconSearchOutlineMedium className={css.searchIcon} size={15} /><label className={css.visuallyHidden} htmlFor={`${pickerId}-search`}>搜索对话</label><input id={`${pickerId}-search`} autoFocus type="search" role="searchbox" placeholder="搜索对话、标记或 Session ID" value={query} onChange={event => setQuery(event.currentTarget.value)} /></div>
-      <div id={pickerId} role="listbox" aria-label="可选择的对话">
-        {candidates.length === 0 ? <span className={css.bindingPickerEmpty}>{query.trim() ? '没有匹配的对话，请尝试其他关键词。' : emptyMessage ?? '没有可选择的非空对话。请先在 DSH 原版中创建对话，或继续保持待绑定。'}</span> : <section className={css.bindingPickerSection} data-binding-section="recent">
-          <span className={css.bindingPickerSectionLabel}>最近对话</span>
+    {open ? <WorkbenchFloatingMenu kind="binding" ownerId={pickerId} anchorRef={triggerRef} surfaceRef={pickerRef} side="bottom" className={css.bindingPicker} label={copy.chooseConversation}>
+      <div className={css.bindingPickerHeading}><span><strong>{copy.chooseConversation}</strong><small>{t('binding.existingOnly')}</small></span><kbd>Esc</kbd></div>
+      <div className={css.bindingSearch} role="search"><IconSearchOutlineMedium className={css.searchIcon} size={15} /><label className={css.visuallyHidden} htmlFor={`${pickerId}-search`}>{copy.search}</label><input id={`${pickerId}-search`} autoFocus type="search" role="searchbox" placeholder={copy.searchPlaceholder} value={query} onChange={event => setQuery(event.currentTarget.value)} /></div>
+      <div id={pickerId} role="listbox" aria-label={t('binding.available')}>
+        {candidates.length === 0 ? <span className={css.bindingPickerEmpty}>{query.trim() ? t('binding.noMatches') : emptyMessage ?? t('binding.empty')}</span> : <section className={css.bindingPickerSection} data-binding-section="recent">
+          <span className={css.bindingPickerSectionLabel}>{t('binding.recent')}</span>
           <WorkspacePickerGroups
             groups={groupedCandidates.map(group => ({ key: group.key, title: group.title, items: group.candidates }))}
             idPrefix={`${pickerId}-workspace`}
@@ -5051,18 +5050,13 @@ function SessionBindingChip({
   const [draftAccent, setDraftAccent] = useState(marker.accentToken)
   const [markerError, setMarkerError] = useState<string>()
   const [bindingAnnouncement, setBindingAnnouncement] = useState('')
-  const copy = sessionBindingCopy()
-  const pickerCopy = copy.locale === 'en-US'
-    ? {
-      current: 'Current binding',
-      recent: 'Recent conversations',
-      noRecent: 'No recent conversations',
-    }
-    : {
-      current: '当前绑定',
-      recent: '最近对话',
-      noRecent: '没有最近对话',
-    }
+  const { t, language } = useWorkbenchLocale()
+  const copy = sessionBindingCopy(language)
+  const pickerCopy = {
+    current: t('conversation.currentBinding'),
+    recent: t('conversation.recent'),
+    noRecent: t('conversation.noRecent'),
+  }
   const archived = new Set(archivedSessionIds)
   const allSessionIds = [...new Set([...sessionIds, binding.sessionId])]
   const projectedMarkers = ensureSessionMarkers(allSessionIds, sessionMarkers).markers
@@ -5432,6 +5426,7 @@ function SessionBindingChip({
 }
 
 function AreaView(props: LayoutViewProps & { group: GroupNode }) {
+  const { t } = useWorkbenchLocale()
   const {
     workbenchId, collaborationClient, group, document, commit, renderSlot, editors, currentSession, account, workspaces, reportStateFailure,
     projectNeutral,
@@ -5451,6 +5446,7 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
   const interactionPolicy = normalizeWorkbenchConversationInteractionPolicy(conversationResourcePolicy)
   const tabFontSize = workbenchTabFontSizePx(interactionPolicy.tabFontSize)
   const active = activeTab(group)
+  const projectOverviewLabel = t(active === undefined ? 'project.overview' : projectOverviewOpen ? 'project.hideOverview' : 'project.showOverview')
   const isUnboundConversationTab = (tab: TabDocument): boolean => tab.editorId === 'workbench.conversation'
     && tab.editorScope === 'session'
     && tab.binding === undefined
@@ -5538,12 +5534,12 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
   const areaCollapsed = collapsedAreaIds.has(group.id)
   const canCollapse = areaCollapsed || expandedAreaCount > 1
   const collapseLabel = collapseEdge === undefined
-    ? '当前没有可填充的相邻容器'
+    ? t('layout.noAdjacentArea')
     : !canCollapse
-      ? '至少保留一个展开容器'
+      ? t('layout.keepExpanded')
     : areaCollapsed
-      ? `从${collapseEdge === 'left' ? '左侧' : collapseEdge === 'right' ? '右侧' : collapseEdge === 'up' ? '顶部' : '底部'}展开${active?.lastKnownTitle ?? '当前'}容器`
-      : `向${collapseEdge === 'left' ? '左' : collapseEdge === 'right' ? '右' : collapseEdge === 'up' ? '上' : '下'}收起${active?.lastKnownTitle ?? '当前'}容器`
+      ? t('area.expandFrom', { side: t(`area.from.${collapseEdge}`), page: active ? workbenchPageTitle(t, active.editorId, active.lastKnownTitle) : t('settings.current2') })
+      : t('area.collapseTowards', { side: t(`area.towards.${collapseEdge}`), page: active ? workbenchPageTitle(t, active.editorId, active.lastKnownTitle) : t('settings.current2') })
   const areaProject = areaProjects?.[group.id]
   const areaWorkspaceId = areaProject?.workspaceId ?? group.project?.workspaceId
   const areaWorkspace = areaWorkspaceId === undefined
@@ -5587,22 +5583,23 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
     areaBinding: activeBinding,
     pausedTabId: disposeWhenCollapsed ? active?.id : undefined,
     conversations: conversationStates,
-    sessionAvailability: binding => conversationTabUnavailable(binding, { workspaces, sessions: sessionRows, archivedSessionIds }),
-    information: { sessions: sessionRows, workspaces, markersByWorkspace: sessionMarkersByWorkspace, location: `区域 ${String(areaOrdinal).padStart(2, '0')}` },
-  }), [active?.id, activeBinding, disposeWhenCollapsed, group.tabs, props.editorIndex, conversationStates, workspaces, sessionRows, archivedSessionIds, sessionMarkersByWorkspace, areaOrdinal])
+    sessionAvailability: binding => conversationTabUnavailable(binding, { workspaces, sessions: sessionRows, archivedSessionIds }, t),
+    information: { sessions: sessionRows, workspaces, markersByWorkspace: sessionMarkersByWorkspace, location: t('page.area', { index: String(areaOrdinal).padStart(2, '0') }) },
+    t,
+  }), [active?.id, activeBinding, disposeWhenCollapsed, group.tabs, props.editorIndex, conversationStates, workspaces, sessionRows, archivedSessionIds, sessionMarkersByWorkspace, areaOrdinal, t])
   const tabSummaries = tabRows.summaries
   const filteredTabSummaries = useMemo(() => {
     const query = tabOverviewQuery.trim().toLocaleLowerCase('zh-CN')
     if (query === '') return tabSummaries
-    return tabSummaries.filter(tab => (tab.information?.searchText ?? `${tab.title} ${tab.statusLabel}`.toLocaleLowerCase('zh-CN')).includes(query))
+    return tabSummaries.filter(tab => tab.title.toLocaleLowerCase('zh-CN').includes(query) || (tab.information?.searchText ?? tab.statusLabel.toLocaleLowerCase('zh-CN')).includes(query))
   }, [tabOverviewQuery, tabSummaries])
-  const collapsePreviewTitle = `区域 ${String(areaOrdinal).padStart(2, '0')} · ${activeEditor?.label ?? active?.lastKnownTitle ?? '未选择'}`
+  const collapsePreviewTitle = `${t('page.area', { index: String(areaOrdinal).padStart(2, '0') })} · ${active ? workbenchPageTitle(t, active.editorId, active.lastKnownTitle) : t('layout.noneSelected')}`
   const collapsePreviewDetail = [
-    activeEditor?.category ?? (active?.editorScope === 'session' ? '会话内页' : '工作区内页'),
+    activeEditor?.category ?? (active?.editorScope === 'session' ? t('layout.conversationPage') : t('layout.workspacePage')),
     activeEditor?.pluginId,
   ].filter((value): value is string => value !== undefined && value.length > 0).join(' · ')
   const collapsePreviewSummary = group.tabs.length > 1
-    ? `${collapsePreviewDetail} · ${String(group.tabs.length)} 个内页${group.tabs.length > 6 ? ` · 另有 ${String(group.tabs.length - 6)} 个` : ''}`
+    ? `${collapsePreviewDetail} · ${t('area.pageCount', { count: group.tabs.length })}${group.tabs.length > 6 ? ' · ' + t('area.extraPages', { count: group.tabs.length - 6 }) : ''}`
     : collapsePreviewDetail
   const floatingMenuSide: FloatingMenuSide = collapseEdge === 'left' ? 'right'
     : collapseEdge === 'right' ? 'left'
@@ -5851,17 +5848,17 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
       // Sidebar definition.
     } else if (definition?.projection !== 'ready') {
       reportStateFailure(definition === undefined
-        ? 'DSH 原生内页未在 Workbench 适配目录中登记。'
-        : `DSH 原生内页“${definition.label}”需要资源适配，当前不能作为 Workbench 独立内页打开。`)
+        ? t('page.notCataloged')
+        : t('page.adapterRequired', { name: definition.label }))
       return false
     }
     if (editorId === undefined) {
-      reportStateFailure(`DSH 原生内页 ${kind} 未在 Workbench 目录中注册。`)
+      reportStateFailure(t('page.notRegistered', { kind }))
       return false
     }
     const editor = editors.find(row => row.id === editorId && row.scope === 'session')
     if (editor === undefined) {
-      reportStateFailure(`Workbench 暂时无法打开 DSH ${kind} 内页`)
+      reportStateFailure(t('page.openFailed', { kind }))
       return false
     }
     if (floating && options?.floating === true) {
@@ -6013,8 +6010,8 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
       edge === 'left' || edge === 'right' ? EXPANDED_AREA_MIN_WIDTH : EXPANDED_AREA_MIN_HEIGHT,
     )) {
       reportStateFailure(edge === 'left' || edge === 'right'
-        ? '当前区域太窄，无法继续左右分割。请先扩大区域或合并相邻区域。'
-        : '当前区域太矮，无法继续上下分割。请先扩大区域或合并相邻区域。')
+        ? t('layout.tooNarrow')
+        : t('layout.tooShort'))
       return
     }
     commit({
@@ -6119,12 +6116,12 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
         const relation = siblingArea(document, group.id)
         if (relation?.group.id !== targetGroupId) {
           preview = {
-            kind: 'invalid', message: '只能合并共享同一条分隔线的相邻区域。',
+            kind: 'invalid', message: t('layout.onlyAdjacent'),
             style: fixedPreviewStyle(target.getBoundingClientRect()),
           }
         } else if (!canMergeGroups(document, group.id, targetGroupId)) {
           preview = {
-            kind: 'invalid', message: '项目文件夹不同或尚未设置，无法合并显示。请保留独立区域，或交换区域位置。',
+            kind: 'invalid', message: t('layout.cannotMergeDetails'),
             style: fixedPreviewStyle(target.getBoundingClientRect()),
           }
         } else {
@@ -6139,7 +6136,7 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
             && moveEvent.clientY >= rect.top && moveEvent.clientY <= rect.bottom)
         if (!inside) {
           clearSplitCursor()
-          preview = { kind: 'invalid', message: '请把指针移到当前区域或相邻区域。', style: { inset: 0 } }
+          preview = { kind: 'invalid', message: t('layout.movePointer'), style: { inset: 0 } }
         } else {
           // The handle is only a drag affordance.  The final pointer position
           // determines the nearest edge of the Area, so the starting corner
@@ -6173,8 +6170,8 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
             preview = {
               kind: 'invalid',
               message: axis === 'horizontal'
-                ? '当前区域太窄，无法继续左右分割。'
-                : '当前区域太矮，无法继续上下分割。',
+                ? t('area.splitTooNarrow')
+                : t('area.splitTooShort'),
               style: { inset: 0 },
             }
             setGesture(preview)
@@ -6274,7 +6271,7 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
       if (target === undefined || targetGroupId === undefined) {
         preview = {
           kind: 'invalid',
-          message: '拖到另一个容器后松开，即可把当前容器的内页合并显示到目标容器。',
+          message: t('layout.mergeDrop'),
           style: fixedPreviewStyle(sourceRect),
         }
       } else {
@@ -6288,7 +6285,7 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
             }
           : {
               kind: 'invalid',
-              message: '项目文件夹不同或尚未设置，无法合并显示。请保留独立区域，或交换区域位置。',
+              message: t('layout.cannotMergeDetails'),
               style: fixedPreviewStyle(targetRect),
             }
       }
@@ -6364,13 +6361,13 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
           <button
             type="button"
             className={css.areaTabScroll}
-            aria-label="向左查看内页标签"
-            title="向左查看内页标签"
+            aria-label={t('page.scrollLeft')}
+            title={t('page.scrollLeft')}
             disabled={!tabStripOverflow.left}
             data-direction="left"
             onClick={(event) => { event.stopPropagation(); scrollTabs(-1) }}
           ><IconChevronLeftOutlineMedium size={15} /></button>
-          <div ref={areaTabsRef} className={css.areaTabs} role="tablist" aria-orientation={tabStripVertical ? 'vertical' : 'horizontal'} aria-label="区域内页" data-workbench-area-tabs>
+          <div ref={areaTabsRef} className={css.areaTabs} role="tablist" aria-orientation={tabStripVertical ? 'vertical' : 'horizontal'} aria-label={t('page.tabs')} data-workbench-area-tabs>
           {tabRows.rows.map(({ tab, summary, presentation: tabPresentation }) => {
             const selected = summary.selected
             return <div className={css.areaTab} data-workbench-area-tab={tab.id} data-active={selected || undefined} key={tab.id}>
@@ -6379,7 +6376,7 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
                 aria-controls={`workbench-area-body-${group.id}`} tabIndex={selected ? 0 : -1}
                 className={css.areaTabSelect} data-workbench-active-tab={selected || undefined}
                 aria-haspopup={selected ? 'menu' : undefined} aria-expanded={selected ? menu === 'editor' : undefined}
-                aria-label={selected ? `当前内页：${tab.lastKnownTitle}，点击打开内页操作` : `切换到${tab.lastKnownTitle}`}
+                aria-label={t(selected ? 'page.activeTab' : 'page.switchTab', { name: summary.title })}
                 aria-description={[summary.information?.detail, summary.statusLabel].filter(Boolean).join(' · ')}
                 onClick={(event) => {
                   event.stopPropagation()
@@ -6402,21 +6399,21 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
                 }}>
                 <span className={css.editorGlyph} data-editor-icon={tabPresentation.icon}><EditorIcon name={tabPresentation.icon} iconSvg={tabPresentation.iconSvg} /></span>
                 <WorkbenchTabStatus summary={summary} />
-                <WorkbenchAreaTabLabel tab={tab} fallback={tab.lastKnownTitle} fontSize={tabFontSize} />
+                <WorkbenchAreaTabLabel tab={tab} fallback={summary.title} fontSize={tabFontSize} />
               </button>
               </WorkbenchTabTooltip>
-              <button type="button" className={css.areaTabDetach} aria-label={`拆出 ${tab.lastKnownTitle}`} title="拆出到新区域" onClick={(event) => { event.stopPropagation(); commit({ type: 'move-tab', tabId: tab.id, targetGroupId: group.id, edge: 'right', ids: { groupId: nextId('group'), splitId: nextId('split') } }) }}><IconCompareSplitOutlineMedium size={14} /></button>
-              {interactionPolicy.showTabCloseButtons !== false ? <button type="button" className={css.areaTabClose} aria-label={`关闭 ${tab.lastKnownTitle}`} title={`关闭 ${tab.lastKnownTitle}`} onClick={(event) => { event.stopPropagation(); commit({ type: 'close-tab', tabId: tab.id }) }}><IconCloseOutlineMedium size={14} /></button> : null}
+              <button type="button" className={css.areaTabDetach} aria-label={t('page.detachTab', { name: summary.title })} title={t('page.detachArea')} onClick={(event) => { event.stopPropagation(); commit({ type: 'move-tab', tabId: tab.id, targetGroupId: group.id, edge: 'right', ids: { groupId: nextId('group'), splitId: nextId('split') } }) }}><IconCompareSplitOutlineMedium size={14} /></button>
+              {interactionPolicy.showTabCloseButtons !== false ? <button type="button" className={css.areaTabClose} aria-label={t('page.closeTab', { name: summary.title })} title={t('page.closeTab', { name: summary.title })} onClick={(event) => { event.stopPropagation(); commit({ type: 'close-tab', tabId: tab.id }) }}><IconCloseOutlineMedium size={14} /></button> : null}
             </div>
           })}
           </div>
-          {group.tabs.length === 0 ? <span className={css.areaTabsEmpty}>{'区域 ' + areaOrdinal}</span> : null}
+          {group.tabs.length === 0 ? <span className={css.areaTabsEmpty}>{t('page.area', { index: areaOrdinal })}</span> : null}
           <button
             type="button"
             className={css.areaTabAdd}
             data-workbench-editor-add-trigger="true"
-            aria-label="添加内页标签"
-            title="添加内页标签"
+            aria-label={t('page.addTab')}
+            title={t('page.addTab')}
             aria-haspopup="menu"
             aria-expanded={menu === 'editor'}
             onClick={(event) => {
@@ -6430,21 +6427,21 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
           <button
             type="button"
             className={css.areaTabScroll}
-            aria-label="向右查看内页标签"
-            title="向右查看内页标签"
+            aria-label={t('page.scrollRight')}
+            title={t('page.scrollRight')}
             disabled={!tabStripOverflow.right}
             data-direction="right"
             onClick={(event) => { event.stopPropagation(); scrollTabs(1) }}
           ><IconChevronRightOutlineMedium size={15} /></button>
         </div>
         {tabOverviewOpen ? (
-          <WorkbenchFloatingMenu kind="editor" ownerId={`${group.id}:tab-overview`} anchorRef={tabOverviewAnchorRef} surfaceRef={tabOverviewSurfaceRef} side={floatingMenuSide} align="end" className={css.tabOverviewMenu} label="全部内页">
+          <WorkbenchFloatingMenu kind="editor" ownerId={`${group.id}:tab-overview`} anchorRef={tabOverviewAnchorRef} surfaceRef={tabOverviewSurfaceRef} side={floatingMenuSide} align="end" className={css.tabOverviewMenu} label={t('page.all')}>
             <label className={css.tabOverviewSearch}>
-              <span className={css.visuallyHidden}>搜索内页</span>
-              <input autoFocus value={tabOverviewQuery} onChange={(event) => setTabOverviewQuery(event.target.value)} placeholder="搜索名称、模式、项目或路径" />
+              <span className={css.visuallyHidden}>{t('page.search')}</span>
+              <input autoFocus value={tabOverviewQuery} onChange={(event) => setTabOverviewQuery(event.target.value)} placeholder={t('page.searchDetails')} />
             </label>
-            <div className={css.tabOverviewList} role="listbox" aria-label="全部内页">
-              {filteredTabSummaries.length === 0 ? <span className={css.tabOverviewEmpty}>没有匹配的内页</span> : filteredTabSummaries.map(summary => <WorkbenchTabTooltip key={summary.id} summary={summary}><button
+            <div className={css.tabOverviewList} role="listbox" aria-label={t('page.all')}>
+              {filteredTabSummaries.length === 0 ? <span className={css.tabOverviewEmpty}>{t('page.noMatches')}</span> : filteredTabSummaries.map(summary => <WorkbenchTabTooltip key={summary.id} summary={summary}><button
                 type="button"
                 role="option"
                 aria-selected={summary.selected}
@@ -6469,7 +6466,7 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
               onSelect={editor => editorMenuMode === 'replace' ? replaceEditor(editor) : addEditor(editor)} />
           </WorkbenchFloatingMenu>
         ) : null}
-        {project ? <button className={css.areaTabOverviewTrigger} type="button" title={active === undefined ? '项目概览' : projectOverviewOpen ? '隐藏项目概览' : '显示项目概览'} aria-label={active === undefined ? '项目概览' : projectOverviewOpen ? '隐藏项目概览' : '显示项目概览'} aria-pressed={active === undefined || projectOverviewOpen} data-active={active === undefined || projectOverviewOpen || undefined} onClick={() => setProjectOverviewOpen(value => !value)}><IconFolderOpenOutlineMedium size={14} /><span className={css.areaTabOverviewLabel}>项目概览</span></button> : null}
+        {project ? <button className={css.areaTabOverviewTrigger} type="button" title={projectOverviewLabel} aria-label={projectOverviewLabel} aria-pressed={active === undefined || projectOverviewOpen} data-active={active === undefined || projectOverviewOpen || undefined} onClick={() => setProjectOverviewOpen(value => !value)}><IconFolderOpenOutlineMedium size={14} /><span className={css.areaTabOverviewLabel}>{t('project.overview')}</span></button> : null}
         {areaProjects !== undefined ? <AreaProjectButton relativePath={areaProjects[group.id]?.relativePath} onClick={() => editAreaProject?.(group.id)} /> : null}
         {activePendingSession ? (
           <PendingSessionBindingPicker
@@ -6482,8 +6479,8 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
             archivedSessionIds={archivedSessionIds}
             open={bindingOpen}
             {...(areaProjects === undefined ? {} : { emptyMessage: areaProjects[group.id]
-              ? '此项目暂无可选择的非空对话。可以通过“新建对话”添加。'
-              : '请先设置此区域的项目文件夹，再选择已有对话。' })}
+              ? t('binding.emptyProject')
+              : t('binding.setProjectFirst') })}
             setOpen={(open) => { setBindingOpen(open); if (open) setMenu(undefined) }}
             onSelect={(binding) => {
               if (active) commit({ type: 'retarget-session', tabId: active.id, binding })
@@ -6523,8 +6520,8 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
             type="button"
             className={css.areaTabOverviewTrigger}
             data-workbench-tab-overview-trigger="true"
-            aria-label={`查看全部内页，共 ${String(group.tabs.length)} 个`}
-            title="查看全部内页"
+            aria-label={t('layout.listAllPages', { count: group.tabs.length })}
+            title={t('page.showAll')}
             aria-haspopup="menu"
             aria-expanded={tabOverviewOpen}
             onClick={(event) => {
@@ -6589,8 +6586,8 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
             ref={areaMenuTriggerRef}
             type="button"
             className={css.iconButton}
-            aria-label="区域操作"
-            title="点击打开区域菜单；按住拖到另一个容器可合并显示"
+            aria-label={t('area.actions')}
+            title={t('area.actionsHint')}
             aria-haspopup="menu"
             aria-expanded={menu === 'area' || menu === 'editor' && editorMenuAnchorRef.current === areaMenuTriggerRef.current || tabOverviewOpen && tabOverviewAnchorRef.current === areaMenuTriggerRef.current}
             data-area-merge-drag-handle="true"
@@ -6642,7 +6639,7 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
               {...(openOfficialSession === undefined || activeBinding === undefined ? {} : {
                 openOfficial: () => {
                   void openOfficialSession(group.id, activeBinding.sessionId, areaClaim)
-                    .catch(error => reportStateFailure(error instanceof Error ? error.message : '无法在原版 DSH 中打开此对话'))
+                    .catch(error => reportStateFailure(error instanceof Error ? error.message : t('layout.openOriginalFailed')))
                 },
               })}
               {...(activeBinding === undefined ? {} : { openRelated })}
@@ -6660,8 +6657,8 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
             onBrowse={anchor => { editorMenuAnchorRef.current = anchor; setEditorMenuMode('add'); setMenu(value => value === 'editor' ? undefined : 'editor') }} />
         ) : disposeWhenCollapsed ? (
           <div className={css.empty} data-workbench-editor-suspended="collapsed" role="status">
-            <strong>{active?.lastKnownTitle ?? '当前内页'}已暂停</strong>
-            <span>展开此区域后恢复内页状态。</span>
+            <strong>{active ? workbenchPageTitle(t, active.editorId, active.lastKnownTitle) : t('layout.currentPage')}{t('tab.paused')}</strong>
+            <span>{t('area.expandThisAreaToResumeItsPage')}</span>
           </div>
         ) : (
           <AreaEditorTarget id={active.id}><MemoizedEditor
@@ -6691,8 +6688,8 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
           type="button"
           aria-hidden="true"
           tabIndex={-1}
-          aria-label="从右上角拖动以分割或合并显示"
-          title="拖动以分割或合并显示"
+          aria-label={t('area.dragTheTopRightCornerToSplit')}
+          title={t('area.dragToSplitOrMerge')}
           onPointerDown={startCornerGesture}
         />
         <button
@@ -6701,8 +6698,8 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
           type="button"
           aria-hidden="true"
           tabIndex={-1}
-          aria-label="从左下角拖动以分割或合并显示"
-          title="拖动以分割或合并显示"
+          aria-label={t('area.dragTheBottomLeftCornerToSplit')}
+          title={t('area.dragToSplitOrMerge')}
           onPointerDown={startCornerGesture}
         />
         {areaCollapsed || gesture === undefined ? null : <GesturePreview gesture={gesture} />}
@@ -6714,7 +6711,7 @@ function AreaView(props: LayoutViewProps & { group: GroupNode }) {
             role={splitPlacement.targetGroupId === group.id ? 'application' : undefined}
             aria-label={splitPlacement.targetGroupId === group.id
               ? splitPlacement.edge === 'left' || splitPlacement.edge === 'right'
-                ? '选择左右分栏位置' : '选择上下分栏位置'
+                ? t('layout.chooseColumnPosition') : t('layout.chooseRowPosition')
               : undefined}
             onPointerMove={(event) => {
               updateSplitPlacement({
@@ -6815,6 +6812,7 @@ function AreaMenu({
     placement: 'current' | 'right',
   ) => void
 }) {
+  const { t } = useWorkbenchLocale()
   const run = (command: LayoutCommand) => { commit(command); close() }
   const canMerge = sibling === undefined ? false : canMergeGroups(document, group.id, sibling.group.id)
   return (
@@ -6827,64 +6825,65 @@ function AreaMenu({
       align={align}
       className={css.areaMenu}
     >
-      <button role="menuitem" onClick={addPage}>添加内页</button>
-      <button role="menuitem" disabled={group.tabs.length === 0} onClick={showPages}>查看全部内页</button>
-      {editProject === undefined ? null : <button role="menuitem" onClick={() => { editProject(); close() }}>设置项目文件夹</button>}
+      <button role="menuitem" onClick={addPage}>{t('page.add')}</button>
+      <button role="menuitem" disabled={group.tabs.length === 0} onClick={showPages}>{t('page.showAll')}</button>
+      {editProject === undefined ? null : <button role="menuitem" onClick={() => { editProject(); close() }}>{t('project.setFolder')}</button>}
       {toggleCollapse === undefined ? null : <button role="menuitem" disabled={!canCollapse} onClick={() => { toggleCollapse(); close() }}>{collapseLabel}</button>}
       <div className={css.menuDivider} />
       <button role="menuitem" disabled={active === undefined} onClick={() => {
         if (active !== undefined) run({ type: 'move-tab', tabId: active.id, targetGroupId: group.id, edge: 'right', ids: { groupId: nextId('group'), splitId: nextId('split') } })
-      }}>拆出当前内页</button>
-      {openOfficial === undefined ? null : <button role="menuitem" onClick={() => { openOfficial(); close() }}>在原版 DSH 中打开</button>}
+      }}>{t('area.detachCurrent')}</button>
+      {openOfficial === undefined ? null : <button role="menuitem" onClick={() => { openOfficial(); close() }}>{t('area.openOfficial')}</button>}
       {openRelated === undefined ? null : (
         <>
           <button role="menuitem" onClick={() => { openRelated('workbench.conversation', 'current'); close() }}>
-            在当前区域打开此对话
+            {t('area.openConversationHere')}
           </button>
           <button role="menuitem" onClick={() => { openRelated('workbench.conversation', 'right'); close() }}>
-            在右侧打开此对话的 Conversation
+            {t('area.openConversationRight')}
           </button>
           <button role="menuitem" onClick={() => { openRelated('workbench.agent-trajectory', 'right'); close() }}>
-            在右侧打开此对话的 Agent 轨迹
+            {t('area.openTraceRight')}
           </button>
           <div className={css.menuDivider} />
         </>
       )}
       <button role="menuitem" disabled={active === undefined} onClick={() => { requestSplit('horizontal') }}>
-        左右分栏…
+        {t('area.splitHorizontal')}
       </button>
       <button role="menuitem" disabled={active === undefined} onClick={() => { requestSplit('vertical') }}>
-        上下分栏…
+        {t('area.splitVertical')}
       </button>
       <button role="menuitem" disabled={active === undefined} onClick={() => {
         splitActive('right')
         close()
-      }}>复制视图到右侧区域</button>
+      }}>{t('area.copyRight')}</button>
       {sibling === undefined ? null : (
         <>
           <div className={css.menuDivider} />
-          <button role="menuitem" disabled={!canMerge} title={canMerge ? undefined : '项目文件夹不同或尚未设置，无法合并显示'} onClick={() => {
+          <button role="menuitem" disabled={!canMerge} title={canMerge ? undefined : t('area.mergeBlocked')} onClick={() => {
             run({ type: 'merge-group', sourceGroupId: group.id, targetGroupId: sibling.group.id })
-          }}>{directionLabel(sibling.direction)}</button>
+          }}>{t(`area.merge.${sibling.direction}`)}</button>
           <button role="menuitem" onClick={() => {
             run({ type: 'swap-groups', firstGroupId: group.id, secondGroupId: sibling.group.id })
-          }}>与相邻区域交换位置</button>
+          }}>{t('area.swap')}</button>
         </>
       )}
       <div className={css.menuDivider} />
-      <button role="menuitem" disabled={!canCloseArea || activeTask} title={activeTask ? '请先停止或等待此区域的 Bay Agent 任务结束' : !canCloseArea ? '当前不能关闭区域' : undefined} onClick={() => run({ type: 'close-area', areaId: group.id })}>
-        关闭当前区域
+      <button role="menuitem" disabled={!canCloseArea || activeTask} title={activeTask ? t('area.closeTask') : !canCloseArea ? t('area.closeBlocked') : undefined} onClick={() => run({ type: 'close-area', areaId: group.id })}>
+        {t('area.close')}
       </button>
       <button role="menuitem" disabled={active === undefined} onClick={() => {
         /* v8 ignore next -- the button is disabled when no active editor exists. */
         if (active !== undefined) run({ type: 'close-tab', tabId: active.id })
-      }}>关闭当前视图</button>
-      <span className={css.menuHint}>关闭区域会保留项目、对话和背景；需要恢复时可使用顶栏撤回。关闭内页只移除当前视图。</span>
+      }}>{t('area.closeView')}</button>
+      <span className={css.menuHint}>{t('area.closeHint')}</span>
     </WorkbenchFloatingMenu>
   )
 }
 
 function GesturePreview({ gesture }: { gesture: AreaGesture }) {
+  const { t } = useWorkbenchLocale()
   if (gesture.kind === 'split') {
     return <SplitRegionPreview source="gesture" edge={gesture.edge} style={gesture.style} />
   }
@@ -6898,7 +6897,7 @@ function GesturePreview({ gesture }: { gesture: AreaGesture }) {
       style={gesture.style}
       data-workbench-gesture-preview="invalid"
     >
-      <strong>无法执行</strong>
+      <strong>{t('area.actionUnavailable')}</strong>
       <span>{gesture.message}</span>
     </div>
   )
@@ -6946,6 +6945,7 @@ function Editor({
   workbenchId, collaborationClient, projection, commands, tab: suppliedTab, renderSlot, editorAvailable, editors, extensionAccess, editor, sessionUnavailable,
   areaClaim, lifecycle, runtimeMetrics,
 }: EditorPropsV1) {
+  const { t } = useWorkbenchLocale()
   const floating = useFloatingWorkspace()
   useSyncExternalStore(floating?.subscribe ?? (() => () => {}), floating?.getSnapshot ?? (() => 0), () => 0)
   const managed = floating?.find(suppliedTab.id, workbenchId)
@@ -6983,13 +6983,13 @@ function Editor({
     state: persistedStateFailure === undefined ? tab.state : {},
     lifecycle: effectiveLifecycle,
     ...(editor?.declaration === undefined ? {} : { declaration: editor.declaration }),
-    renderLoading: (options?: { label?: string; compact?: boolean }) => <WorkbenchPageLoading label={options?.label ?? editor?.label ?? tab.lastKnownTitle} icon={editor?.icon ?? 'extension'} compact={options?.compact ?? false} />,
+    renderLoading: (options?: { label?: string; compact?: boolean }) => <WorkbenchPageLoading label={workbenchPageTitle(t, tab.editorId, options?.label ?? editor?.label ?? tab.lastKnownTitle)} icon={editor?.icon ?? 'extension'} compact={options?.compact ?? false} />,
     ...(commands.placeConversation === undefined ? {} : { placeConversation: (input: Parameters<NonNullable<typeof commands.placeConversation>>[0]) => {
-      if (!actionable()) return Promise.reject(new Error('来源工作台或绑定已失效，请重新打开内页。'))
+      if (!actionable()) return Promise.reject(new Error(t('layout.sourceNoLongerAvailable')))
       return commands.placeConversation!(input)
     } }),
     ...(commands.completePreparedConversation === undefined ? {} : { completePreparedConversation: (input: Parameters<NonNullable<typeof commands.completePreparedConversation>>[0]) => actionable(true) && commands.completePreparedConversation!(input) }),
-    ...(commands.openSession === undefined ? {} : { openSession: (id: string) => actionable() ? commands.openSession!(id) : Promise.reject(new Error('来源工作台已失效')) }),
+    ...(commands.openSession === undefined ? {} : { openSession: (id: string) => actionable() ? commands.openSession!(id) : Promise.reject(new Error(t('layout.sourceWorkbenchGone'))) }),
     openNativeTab: (kind: string, options?: Record<string, unknown>) => {
       if (!actionable(options?.trigger === 'automatic')) return false
       const request = { floating: true, ...options, sourceEpoch, sourceGeneration: tab.bindingGeneration ?? 0, sourceLocationGeneration: placementGeneration }
@@ -7003,7 +7003,7 @@ function Editor({
         ...(tab.binding ? { binding: tab.binding } : {}), sourceId: tab.id,
       }) ?? false, args[0], floating.policy?.(), args[1], tab.sessionId, args[2], editors.flatMap(row => row.declaration?.conversationResources ?? []))
       const result = commands.openConversationResource(...args)
-      if (result === 'rejected') commands.reportStateFailure('无法打开此资源：来源绑定已失效，或对应内页未获授权。')
+      if (result === 'rejected') commands.reportStateFailure(t('layout.sourcePageDenied'))
       return result
     },
     setState: (state: JsonValue) => {
@@ -7032,46 +7032,46 @@ function Editor({
   const unavailable = (
     <div className={css.unavailable} data-session-unavailable={sessionUnavailable} data-extension-availability={extensionUnavailable?.availability}>
       <strong>{extensionCopy?.title ?? (sessionUnavailable === 'archived'
-        ? '此对话已归档'
+        ? t('area.thisConversationIsArchived')
         : sessionUnavailable === 'missing'
-          ? '此对话暂时不可用'
+          ? t('area.thisConversationIsTemporarilyUnavailable')
           : sessionUnavailable === 'moved'
-            ? 'Session 已移出此工作区'
-            : '编辑器不可用')}</strong>
+            ? t('area.thisConversationMovedOutOfTheWorkspace')
+            : t('area.editorUnavailable'))}</strong>
       <span>{tab.editorId}</span>
       <span>{extensionCopy?.detail ?? (sessionUnavailable === 'archived'
-        ? '此视图仍保留原对话和局部状态。请从顶部绑定标记选择一个新的对话。'
+        ? t('area.thisViewRetainsTheConversationAndIts')
         : sessionUnavailable === 'missing'
-          ? '此视图仍保留原对话身份。对话恢复后可继续使用，或选择其他对话。'
+          ? t('area.thisViewStillReferencesTheOriginalConversation')
           : sessionUnavailable === 'moved'
-            ? '此视图不会自动迁移；切换到该 Session 所在工作区后可重新打开。'
-            : '编辑器实例、Session 绑定、标题和状态都会保留，直到相同编辑器 ID 再次注册。')}</span>
+            ? t('area.thisViewDoesNotMoveAutomaticallyReopen')
+            : t('area.theEditorConversationBindingTitleAndState'))}</span>
       {sessionUnavailable !== undefined ? (
-        <button type="button" onClick={commands.openBindingPicker}>选择其他对话</button>
+        <button type="button" onClick={commands.openBindingPicker}>{t('area.chooseAnotherConversation')}</button>
       ) : null}
       {unavailableReason === 'editor' && editors
         .filter(editor => editor.scope === tab.editorScope && editor.id !== tab.editorId)
         .map(editor => (
           <button key={`${editor.scope}:${editor.id}`} onClick={() => { commands.commit({
             type: 'replace-editor', tabId: tab.id, editorId: editor.id, lastKnownTitle: editor.label,
-          }) }}>替换为 {editor.label}</button>
+          }) }}>{t('area.replaceWith')} {editor.label}</button>
         ))}
-      <button onClick={() => { props.focus() }}>重试</button>
-      <button onClick={() => { props.close() }}>关闭视图</button>
+      <button onClick={() => { props.focus() }}>{t('action.retry')}</button>
+      <button onClick={() => { props.close() }}>{t('settings.closeView')}</button>
     </div>
   )
   if (!editorAvailable || sessionUnavailable !== undefined || floating?.canUseEditor?.(workbenchId, tab.editorId) === false) return unavailable
   if (persistedStateFailure !== undefined) return <div className={css.unavailable} role="alert" data-workbench-extension-state="rejected">
-    <strong>此内页的已保存状态超出当前扩展限制</strong>
+    <strong>{t('area.savedPageStateExceedsTheExtensionS')}</strong>
     <span>{tab.editorId}</span>
-    <span>{persistedStateFailure}布局引用和原始状态仍保留；确认清空状态后可继续打开。</span>
+    <span>{persistedStateFailure}{t('area.thePageReferenceAndOriginalStateAre')}</span>
     <button type="button" onClick={() => commands.commit({
       type: 'update-tab-state', tabId: tab.id, state: {},
       bindingGeneration: tab.bindingGeneration ?? 0,
-    })}>清空内页状态并继续</button>
-    <button type="button" onClick={() => props.close()}>关闭内页</button>
+    })}>{t('area.clearPageStateAndContinue')}</button>
+    <button type="button" onClick={() => props.close()}>{t('area.closePage')}</button>
   </div>
-  if (tab.pendingDistribution !== undefined) return <div className={css.body} role="status" data-workbench-pending-distribution><strong>{tab.lastKnownTitle}等待扩展和配置恢复</strong><p>原配置安全保存在本机导入记录中。请安装并授权完全匹配的扩展，然后从“工作台导入与分发 → 导入记录”恢复配置。</p></div>
+  if (tab.pendingDistribution !== undefined) return <div className={css.body} role="status" data-workbench-pending-distribution><strong>{tab.lastKnownTitle}{t('area.waitingForExtensionAndSettingsRecovery')}</strong><p>{t('area.originalSettingsAreSavedInLocalImport')}</p></div>
   const isUnboundConversation = tab.editorId === 'workbench.conversation'
     && tab.editorScope === 'session'
     && tab.binding === undefined
@@ -7083,34 +7083,32 @@ function Editor({
       unbound: 'pending',
       sharing: 'independent',
     }
-    const requirement = policy.requirement === 'workspace' ? '工作区' : '对话'
-    const sharedTarget = '所选' + requirement
     return <div className={css.body + ' ' + css.pendingBindingBody} data-workbench-pending-binding>
-      <section className={css.pendingBindingPanel} role="region" aria-label="待绑定对话内页">
+      <section className={css.pendingBindingPanel} role="region" aria-label={t('area.unboundConversationPage')}>
         <div className={css.pendingBindingMain}>
-          <div className={css.pendingBindingEyebrow}><span className={css.pendingBindingDot} /> <span>对话内页</span><span className={css.pendingBindingBadge}>待绑定</span></div>
-          <h2 className={css.pendingBindingTitle}>连接一个已有对话</h2>
-          <p className={css.pendingBindingDescription}>这个内页还没有来源对话。选择后会在这里继续原有消息，并使用对应的工具和运行状态。</p>
-          <div className={css.pendingBindingSteps} role="list" aria-label="绑定步骤">
-            <div role="listitem"><span>1</span><span><strong>选择对话</strong><small>为这个内页选择要继续的已有对话</small></span></div>
-            <div role="listitem"><span>2</span><span><strong>继续当前工作</strong><small>内页会沿用 {sharedTarget} 的上下文</small></span></div>
+          <div className={css.pendingBindingEyebrow}><span className={css.pendingBindingDot} /> <span>{t('area.conversationPage')}</span><span className={css.pendingBindingBadge}>{t('tab.unbound')}</span></div>
+          <h2 className={css.pendingBindingTitle}>{t('area.connectAnExistingConversation')}</h2>
+          <p className={css.pendingBindingDescription}>{t('area.chooseAConversationToContinueItsMessages')}</p>
+          <div className={css.pendingBindingSteps} role="list" aria-label={t('area.connectionSteps')}>
+            <div role="listitem"><span>1</span><span><strong>{t('area.chooseAConversation')}</strong><small>{t('area.chooseWhichConversationToContinueOnThis')}</small></span></div>
+            <div role="listitem"><span>2</span><span><strong>{t('area.continueYourWork')}</strong><small>{t('area.useSelectedContext', { context: policy.requirement === 'workspace' ? t('area.workspaceContext') : t('area.conversationContext') })}</small></span></div>
           </div>
-          <button type="button" className={css.pendingBindingPrimary} data-workbench-bind-conversation onClick={commands.openBindingPicker}><IconLinkOutlineMedium size={16} />选择已有对话</button>
-          <p className={css.pendingBindingNote}><IconLinkOutlineMedium size={13} />不会自动创建新对话，也不会改变当前工作台布局。</p>
+          <button type="button" className={css.pendingBindingPrimary} data-workbench-bind-conversation onClick={commands.openBindingPicker}><IconLinkOutlineMedium size={16} />{t('area.chooseExistingConversation')}</button>
+          <p className={css.pendingBindingNote}><IconLinkOutlineMedium size={13} />{t('area.thisDoesNotCreateAConversationOr')}</p>
         </div>
-        <aside className={css.pendingBindingPreview} aria-label="绑定后对话预览">
+        <aside className={css.pendingBindingPreview} aria-label={t('area.connectedConversationPreview')}>
           <div className={css.pendingBindingPreviewHeader}>
             <span className={css.pendingBindingPreviewIcon} aria-hidden="true"><IconLinkOutlineMedium size={15} /></span>
-            <span><strong>绑定后会显示</strong><small>所选对话的工作内容</small></span>
-            <span className={css.pendingBindingPreviewStatus}>待连接</span>
+            <span><strong>{t('area.availableAfterConnecting')}</strong><small>{t('area.workFromTheSelectedConversation')}</small></span>
+            <span className={css.pendingBindingPreviewStatus}>{t('area.notConnected')}</span>
           </div>
           <div className={css.pendingBindingPreviewBody} aria-hidden="true">
             <div className={css.pendingBindingMessage}><i /><span /><span /></div>
             <div className={css.pendingBindingMessage + ' ' + css.pendingBindingMessageUser}><span /><span /></div>
-            <div className={css.pendingBindingActivity}><span /><span>消息与上下文</span><b /></div>
-            <div className={css.pendingBindingActivity}><span /><span>工具调用与运行状态</span><b /></div>
+            <div className={css.pendingBindingActivity}><span /><span>{t('area.messagesAndContext')}</span><b /></div>
+            <div className={css.pendingBindingActivity}><span /><span>{t('area.toolCallsAndRuntimeStatus')}</span><b /></div>
           </div>
-          <div className={css.pendingBindingPreviewComposer}><span>消息输入区</span><span aria-hidden="true">↑</span></div>
+          <div className={css.pendingBindingPreviewComposer}><span>{t('area.messageComposer')}</span><span aria-hidden="true">↑</span></div>
         </aside>
       </section>
     </div>
@@ -7119,7 +7117,7 @@ function Editor({
   // task. A registered close guard keeps an unsaved view mounted instead.
   if (effectiveLifecycle.visibility !== 'visible' && effectiveLifecycle[effectiveLifecycle.visibility] === 'dispose'
     && !floating?.hasGuard(tab.id, workbenchId)) return null
-  return <MountedEditorOutlet metrics={runtimeMetrics}><Suspense fallback={<WorkbenchPageLoading label={editor?.label ?? tab.lastKnownTitle} icon={editor?.icon ?? 'extension'} />}>{tab.editorScope === 'session' && tab.sessionId !== undefined
+  return <MountedEditorOutlet metrics={runtimeMetrics}><Suspense fallback={<WorkbenchPageLoading label={workbenchPageTitle(t, tab.editorId, editor?.label ?? tab.lastKnownTitle)} icon={editor?.icon ?? 'extension'} />}>{tab.editorScope === 'session' && tab.sessionId !== undefined
     ? renderSlot('workbench.editor.session', props, {
       only: tab.editorId, fallback: unavailable,
     })
@@ -7254,31 +7252,32 @@ function modelLabelForPage(page: WorkbenchPreviewPage): string | undefined {
 }
 
 function WorkbenchPreviewInspectorArea({ area }: { area: PreviewArea }) {
+  const { t } = useWorkbenchLocale()
   const page = area.active
-  const status = page === undefined ? { label: '空容器', tone: 'neutral' as const } : previewInspectorStatus(page)
+  const status = page === undefined ? { label: t('share.emptyArea'), tone: 'neutral' as const } : previewInspectorStatus(page)
   const model = page === undefined ? undefined : modelLabelForPage(page)
   const signals = page === undefined ? [] : previewInspectorSignals(page.preview.root)
   return (
     <article className={css.settingsInspectorArea} data-active={area.focused || undefined} data-empty={page === undefined || undefined}>
       <header className={css.settingsInspectorAreaHeader}>
         <span className={css.settingsInspectorAreaOrdinal}>Area {String(area.ordinal).padStart(2, '0')}</span>
-        <strong>{page?.title ?? '空容器'}</strong>
+        <strong>{page?.title ?? t('share.emptyArea')}</strong>
         <span className={css.settingsPreviewInspectorStatus} data-tone={status.tone}>{status.label}</span>
       </header>
-      {page === undefined ? <p className={css.settingsInspectorAreaEmpty}>当前没有可显示的内页。</p> : (
+      {page === undefined ? <p className={css.settingsInspectorAreaEmpty}>{t('layout.noPagesToShow')}</p> : (
         <>
           <div className={css.settingsInspectorIdentity}>
-            <span><small>当前内页</small><strong>{page.title}</strong></span>
+            <span><small>{t('layout.currentPage')}</small><strong>{page.title}</strong></span>
             <code title={page.editorId}>{page.editorId}</code>
           </div>
           <div className={css.settingsInspectorRuntime}>
-            <span><small>绑定状态</small><strong>{page.bindingState === 'bound' ? 'Session 已绑定' : page.bindingState === 'unbound' ? '尚未绑定' : page.bindingState === 'missing' ? '内页缺失' : '状态未知'}</strong></span>
-            <span><small>Agent 模式</small><strong>{page.agentPresetLabel ?? '未提供'}</strong></span>
-            <span><small>模型</small><strong title={model}>{page.bindingState === 'bound' ? model ?? '模型状态未知' : '未绑定'}</strong></span>
+            <span><small>{t('layout.bindingStatus')}</small><strong>{page.bindingState === 'bound' ? 'Session 已绑定' : page.bindingState === 'unbound' ? '尚未绑定' : page.bindingState === 'missing' ? '内页缺失' : '状态未知'}</strong></span>
+            <span><small>{t('workspace.agentMode')}</small><strong>{page.agentPresetLabel ?? '未提供'}</strong></span>
+            <span><small>{t('settings.model')}</small><strong title={model}>{page.bindingState === 'bound' ? model ?? '模型状态未知' : '未绑定'}</strong></span>
           </div>
           <div className={css.settingsInspectorSignals}>
-            <span className={css.settingsInspectorSignalsLabel}>语义预览</span>
-            {signals.length === 0 ? <span className={css.settingsInspectorMuted}>未声明可展示状态</span> : signals.map((signal, index) => <span key={`${signal.label}-${index}`} data-tone={signal.tone}><i />{signal.label}{signal.detail === undefined ? null : <small>{signal.detail}</small>}</span>)}
+            <span className={css.settingsInspectorSignalsLabel}>{t('layout.semanticPreview')}</span>
+            {signals.length === 0 ? <span className={css.settingsInspectorMuted}>{t('layout.noDisplayableStateDeclared')}</span> : signals.map((signal, index) => <span key={`${signal.label}-${index}`} data-tone={signal.tone}><i />{signal.label}{signal.detail === undefined ? null : <small>{signal.detail}</small>}</span>)}
           </div>
         </>
       )}
@@ -7357,6 +7356,7 @@ function previewSvgStatusTone(page: WorkbenchPreviewPage | undefined): 'accent' 
 }
 
 function WorkbenchLayoutPreviewSvg({ model, ariaLabel }: { model: WorkbenchPreviewModel; ariaLabel: string }): React.ReactNode {
+  const { t } = useWorkbenchLocale()
   const svgInstanceId = useId().replaceAll(':', '')
   const renderNode = (node: WorkbenchPreviewNode, frame: PreviewSvgFrame, keyPrefix: string): React.ReactNode => {
     if (node.kind === 'area') {
@@ -7371,7 +7371,7 @@ function WorkbenchLayoutPreviewSvg({ model, ariaLabel }: { model: WorkbenchPrevi
       // geometry genuinely cannot fit a readable single line.
       const tiny = frame.width < 16 || frame.height < 9
       const availableTitleWidth = Math.max(8, frame.width - 8)
-      const rawTitle = page?.title ?? '空容器'
+      const rawTitle = page?.title ?? t('share.emptyArea')
       const title = previewSvgText(rawTitle, Math.max(4, Math.floor(availableTitleWidth / 2.5)))
       const titleIsClipped = title !== rawTitle
       const clipId = `workbench-preview-${svgInstanceId}-${keyPrefix}`
@@ -7618,6 +7618,7 @@ export function WorkbenchSettingsSection({
   workspaceList, workbenchDirectory: injectedDirectory,
   workbenchPackage, removeWorkbench: propsRemoveWorkbench,
 }: WorkbenchSettingsSectionProps) {
+  const { t } = useWorkbenchLocale()
   const legacySettingsView = injectedDirectory === undefined
   const workbenchDirectory = injectedDirectory ?? EMPTY_WORKBENCH_DIRECTORY
   const snapshot = useWorkbenchSettings(value => value)
@@ -7966,7 +7967,7 @@ export function WorkbenchSettingsSection({
       return
     }
     setPackageBusy(true)
-    setExportDialogMessage(`正在生成${distributionMode === 'offline-embedded' ? '离线嵌入' : '在线引用'}工作台包…`)
+    setExportDialogMessage(`正在生成${distributionMode === 'offline-embedded' ? t('layout.embeddedOfflineArtifacts') : t('layout.onlineReferences')}工作台包…`)
     void (async () => {
       try {
         // Export must observe the same latest layout that the user sees. The
@@ -7998,7 +7999,7 @@ export function WorkbenchSettingsSection({
         }
         setExportDialogMessage(result.manifest.completeness === 'layout-only'
           ? '已导出布局级分享包；依赖未达到完整开箱即用条件。'
-          : `已导出${distributionMode === 'offline-embedded' ? '离线嵌入' : '在线引用'}完整工作台包；依赖锁定和可迁移状态已写入分享包。`)
+          : `已导出${distributionMode === 'offline-embedded' ? t('layout.embeddedOfflineArtifacts') : t('layout.onlineReferences')}完整工作台包；依赖锁定和可迁移状态已写入分享包。`)
       } catch (error) {
         setExportDialogMessage(error instanceof Error ? error.message : '工作台包导出失败，当前 Workbench 未改变。')
       } finally {
@@ -8266,7 +8267,7 @@ export function WorkbenchSettingsSection({
       return workbenchPackage.importArchive(packageDialog.archive, legacyImportOptions)
     })().then((result: WorkbenchPackageImportResultV1) => {
       if (result.status === 'committed') {
-        const importedName = packageDialog.report.manifest?.name ?? '工作台'
+        const importedName = packageDialog.report.manifest?.name ?? t('shell.workbench')
         setPackageDialog(undefined)
         setPackageSessionTargets({})
         setPackagePermissionApprovals({})
@@ -8357,14 +8358,14 @@ export function WorkbenchSettingsSection({
         className={css.settingsPackageFileInput}
         type="file"
         accept=".dsh-workbench-package,.zip,application/zip"
-        aria-label="选择工作台包"
+        aria-label={t('layout.chooseWorkbenchPackage')}
         onChange={handlePackageFile}
       />
       {!showingDetail ? <>
         <header className={css.settingsWorkbenchIntro}>
           <div className={css.settingsWorkbenchIntroCopy}>
-            <h2>工作台布局</h2>
-            <p>工作台保存区域排列、已添加的容器内页和模块组合。布局可以单独切换、归档，也可以通过离线分享发送给其他人。</p>
+            <h2>{t('share.workbenchLayout')}</h2>
+            <p>{t('layout.workbenchesStoreAreasPagesAndModuleCombinations')}</p>
           </div>
         </header>
         <div className={css.settingsWorkbenchToolbar}>
@@ -8373,22 +8374,22 @@ export function WorkbenchSettingsSection({
             <input
               type="search"
               value={searchQuery}
-              aria-label="搜索工作台"
-              placeholder="搜索工作台名称、简介或标签"
+              aria-label={t('home.searchWorkbenches')}
+              placeholder={t('layout.searchNamesDescriptionsOrTags')}
               onChange={event => setSearchQuery(event.target.value)}
             />
-            {searchQuery === '' ? null : <button type="button" aria-label="清除工作台搜索" onClick={() => setSearchQuery('')}>×</button>}
+            {searchQuery === '' ? null : <button type="button" aria-label={t('layout.clearWorkbenchSearch')} onClick={() => setSearchQuery('')}>×</button>}
           </label>
           {workbenchPackage === undefined ? null : <div className={css.settingsWorkbenchImportAction}>
             {packageRuntimeStatus === undefined ? null : <span data-state={packageRuntimeStatus.available ? 'ready' : 'limited'}>
               {packageRuntimeStatus.available ? packageRuntimeStatus.label : '仅布局导入'}
             </span>}
             <button type="button" data-action="primary" disabled={packageBusy} onClick={openPackagePicker}>
-              {packageBusy ? '处理中…' : '导入工作台包'}
+              {packageBusy ? '处理中…' : t('home.importWorkbenchPackage')}
             </button>
           </div>}
         </div>
-        <div className={css.settingsWorkbenchTabs} role="tablist" aria-label="工作台分类">
+        <div className={css.settingsWorkbenchTabs} role="tablist" aria-label={t('layout.workbenchCategory')}>
           {([['open', `使用中 ${workbenchIds.filter(id => openWorkbenchIds.includes(id)).length}`], ['inactive', `未使用 ${workbenchIds.filter(id => !openWorkbenchIds.includes(id) && metadataFor(id)?.archivedAt === undefined).length}`], ['archived', `已归档 ${workbenchIds.filter(id => metadataFor(id)?.archivedAt !== undefined).length}`]] as const).map(([id, label], index, tabs) => (
             <button key={id} type="button" role="tab" id={`workbench-tab-${id}`} aria-controls={`workbench-panel-${id}`} aria-selected={category === id} tabIndex={category === id ? 0 : -1}
               onClick={() => { setCategory(id); setSelectedWorkbenchId(undefined) }}
@@ -8400,32 +8401,32 @@ export function WorkbenchSettingsSection({
           ))}
         </div>
       </> : null}
-      <div role="tabpanel" id={`workbench-panel-${category}`} aria-labelledby={showingDetail ? undefined : `workbench-tab-${category}`} aria-label={showingDetail ? `${selectedMetadata?.name ?? '工作台'}详情` : undefined} tabIndex={0}>
+      <div role="tabpanel" id={`workbench-panel-${category}`} aria-labelledby={showingDetail ? undefined : `workbench-tab-${category}`} aria-label={showingDetail ? `${selectedMetadata?.name ?? t('shell.workbench')}详情` : undefined} tabIndex={0}>
       {!legacySettingsView && selectedWorkbenchId === undefined ? (
         <div className={css.settingsWorkbenchCards}>
-          {visibleWorkbenchIds.length === 0 ? <p className={css.settingsEmptyState}>此分类暂无工作台。</p> : visibleWorkbenchIds.map(workbenchId => {
+          {visibleWorkbenchIds.length === 0 ? <p className={css.settingsEmptyState}>{t('layout.noWorkbenchesInThisCategory')}</p> : visibleWorkbenchIds.map(workbenchId => {
             const record = workbenches[workbenchId]
             const inventory = inventories.get(workbenchId)
             const previewModel: WorkbenchPreviewModel | undefined = record && inventory
               ? deriveWorkbenchPreviewModel(record.document, inventory, editors, previewSessions)
               : undefined
             return <article key={workbenchId} ref={element => { if (element === null) workbenchCardRefs.current.delete(workbenchId); else workbenchCardRefs.current.set(workbenchId, element) }} className={css.settingsWorkbenchCard} tabIndex={0} onClick={() => openWorkbenchDetail(workbenchId)} onKeyDown={event => { if (event.key === 'Enter') openWorkbenchDetail(workbenchId) }}>
-              <div className={css.settingsCardPreview}>{previewModel === undefined ? <span>布局暂不可用</span> : <WorkbenchLayoutPreviewSvg model={previewModel} ariaLabel={`${record?.name ?? workbenchId}布局预览`} />}</div>
-              <div className={css.settingsCardBody}><div className={css.settingsWorkbenchNameLine}><strong>{record?.name ?? invalid[workbenchId]?.name ?? workbenchId}</strong>{workbenchId === activeWorkbenchId ? <span className={css.settingsCurrentBadge}>当前</span> : null}</div><p>{record?.description || invalid[workbenchId]?.description || '暂无简介'}</p>{tagsFor(workbenchId).length === 0 ? null : <div className={css.settingsWorkbenchTags} aria-label="工作台标签">{tagsFor(workbenchId).map(tag => <span key={tag}>{tag}</span>)}</div>}<small>{record && inventory ? `插件 ${inventory.plugins.length}` : '插件：未知'} · 最后修改：{workbenchTimestamp(record?.updatedAt ?? invalid[workbenchId]?.updatedAt ?? 0) ?? '未知'} · 作者：我</small><div className={css.settingsCardActions}><button type="button" aria-pressed={record?.pinnedAt !== undefined || invalid[workbenchId]?.pinnedAt !== undefined} onClick={event => { event.stopPropagation(); void workbenchDirectory.setPinned(workbenchId, !(record?.pinnedAt !== undefined || invalid[workbenchId]?.pinnedAt !== undefined)).then(result => { if (result.status !== 'committed') setMessage('置顶状态保存失败，请刷新后重试。') }) }}>{record?.pinnedAt !== undefined || invalid[workbenchId]?.pinnedAt !== undefined ? '取消置顶' : '置顶'}</button>{category === 'archived' ? <button type="button" aria-label={`恢复工作台“${record?.name ?? invalid[workbenchId]?.name ?? workbenchId}”`} onClick={event => { event.stopPropagation(); void workbenchDirectory.restore(workbenchId).then(result => { if (result.status !== 'committed') setMessage('恢复工作台失败，请刷新后重试。') }) }}>恢复</button> : <button type="button" aria-label={`归档工作台“${record?.name ?? invalid[workbenchId]?.name ?? workbenchId}”`} onClick={event => { event.stopPropagation(); void workbenchDirectory.archive(workbenchId).then(result => { if (result.status !== 'committed') setMessage('归档工作台失败，请刷新后重试。') }) }}>归档</button>}</div></div>
+              <div className={css.settingsCardPreview}>{previewModel === undefined ? <span>{t('layout.layoutUnavailable')}</span> : <WorkbenchLayoutPreviewSvg model={previewModel} ariaLabel={`${record?.name ?? workbenchId}布局预览`} />}</div>
+              <div className={css.settingsCardBody}><div className={css.settingsWorkbenchNameLine}><strong>{record?.name ?? invalid[workbenchId]?.name ?? workbenchId}</strong>{workbenchId === activeWorkbenchId ? <span className={css.settingsCurrentBadge}>{t('settings.current2')}</span> : null}</div><p>{record?.description || invalid[workbenchId]?.description || '暂无简介'}</p>{tagsFor(workbenchId).length === 0 ? null : <div className={css.settingsWorkbenchTags} aria-label={t('layout.workbenchTags')}>{tagsFor(workbenchId).map(tag => <span key={tag}>{tag}</span>)}</div>}<small>{record && inventory ? `插件 ${inventory.plugins.length}` : '插件：未知'} {t('layout.lastModified')}{workbenchTimestamp(record?.updatedAt ?? invalid[workbenchId]?.updatedAt ?? 0) ?? '未知'} {t('layout.authorMe')}</small><div className={css.settingsCardActions}><button type="button" aria-pressed={record?.pinnedAt !== undefined || invalid[workbenchId]?.pinnedAt !== undefined} onClick={event => { event.stopPropagation(); void workbenchDirectory.setPinned(workbenchId, !(record?.pinnedAt !== undefined || invalid[workbenchId]?.pinnedAt !== undefined)).then(result => { if (result.status !== 'committed') setMessage('置顶状态保存失败，请刷新后重试。') }) }}>{record?.pinnedAt !== undefined || invalid[workbenchId]?.pinnedAt !== undefined ? '取消置顶' : '置顶'}</button>{category === 'archived' ? <button type="button" aria-label={`恢复工作台“${record?.name ?? invalid[workbenchId]?.name ?? workbenchId}”`} onClick={event => { event.stopPropagation(); void workbenchDirectory.restore(workbenchId).then(result => { if (result.status !== 'committed') setMessage('恢复工作台失败，请刷新后重试。') }) }}>{t('home.restore')}</button> : <button type="button" aria-label={`归档工作台“${record?.name ?? invalid[workbenchId]?.name ?? workbenchId}”`} onClick={event => { event.stopPropagation(); void workbenchDirectory.archive(workbenchId).then(result => { if (result.status !== 'committed') setMessage('归档工作台失败，请刷新后重试。') }) }}>{t('layout.archive')}</button>}</div></div>
             </article>
           })}
         </div>
       ) : workbenchIds.length === 0
-        ? <p className={css.settingsEmptyState}>没有已保存的工作台。</p>
+        ? <p className={css.settingsEmptyState}>{t('layout.noSavedWorkbenches')}</p>
         : (
           <div className={css.settingsWorkbenchGrid} data-details={!legacySettingsView && selectedWorkbenchId !== undefined || undefined}>
             {legacySettingsView || selectedWorkbenchId === undefined ? <div className={css.settingsWorkbenchRoster}>
-              <h3>已保存的工作台</h3>
-              <ul aria-label="已保存的工作台">
+              <h3>{t('layout.savedWorkbenches')}</h3>
+              <ul aria-label={t('layout.savedWorkbenches')}>
                 {workbenchIds.map(workbenchId => {
                   const record = workbenches[workbenchId]
                   const inventory = inventories.get(workbenchId)
-                  const name = record?.name ?? '无法读取的工作台'
+                  const name = record?.name ?? t('layout.unreadableWorkbench')
                   return (
                     <li key={workbenchId} data-selected={workbenchId === selectedWorkbenchId || undefined}>
                       <button
@@ -8437,21 +8438,21 @@ export function WorkbenchSettingsSection({
                         <span className={css.settingsWorkbenchNameLine}>
                           <strong>{name}</strong>
                           {workbenchId === activeWorkbenchId
-                            ? <span className={css.settingsCurrentBadge}>当前</span> : null}
+                            ? <span className={css.settingsCurrentBadge}>{t('settings.current2')}</span> : null}
                         </span>
                         <code>{workbenchId}</code>
                         {record === undefined
-                          ? <small data-state="missing">版本不受支持</small>
-                          : <small>{inventory?.areas.length ?? 0} 容器 · {inventory?.pageCount ?? 0} 内页 · {inventory?.plugins.length ?? 0} 插件</small>}
+                          ? <small data-state="missing">{t('layout.unsupportedVersion')}</small>
+                          : <small>{inventory?.areas.length ?? 0} {t('layout.areas')} {inventory?.pageCount ?? 0} {t('layout.pages')} {inventory?.plugins.length ?? 0} {t('layout.plugins')}</small>}
                       </button>
                       <div className={css.settingsWorkbenchRowActions}>
-                        <button type="button" onClick={() => { exportWorkbench(workbenchId) }}>导出配置</button>
+                        <button type="button" onClick={() => { exportWorkbench(workbenchId) }}>{t('layout.exportConfiguration')}</button>
                         <button
                           type="button"
                           disabled={workbenchId === activeWorkbenchId}
                           title={workbenchId === activeWorkbenchId ? '请先切换到其他工作台' : undefined}
                           onClick={() => { remove(workbenchId) }}
-                        >删除</button>
+                        >{t('editor.delete')}</button>
                       </div>
                     </li>
                   )
@@ -8462,56 +8463,56 @@ export function WorkbenchSettingsSection({
               {!legacySettingsView && selectedWorkbenchId !== undefined ? (
                 <header id="workbench-detail-top" className={css.settingsDetailToolbar}>
                   <div className={css.settingsDetailToolbarTop}>
-                    <button className={css.settingsDetailBack} type="button" onClick={closeWorkbenchDetail}><span aria-hidden="true">‹</span> 返回工作台列表</button>
+                    <button className={css.settingsDetailBack} type="button" onClick={closeWorkbenchDetail}><span aria-hidden="true">‹</span> {t('layout.backToWorkbenches')}</button>
                     <span className={css.settingsDetailState}>{selectedArchived ? '已归档' : selectedLoaded && selectedWorkbenchId === activeWorkbenchId ? '当前使用中' : selectedLoaded ? '已加载' : selectedRecord?.packageOrigin !== undefined ? '待加载' : '未加载'}</span>
                   </div>
                   {editingMetadata ? (
                     <div className={css.settingsEditForm}>
-                      <label>名称<input aria-label="工作台名称" value={metadataNameDraft} onChange={event => setMetadataNameDraft(event.target.value)} /></label>
-                      <label>简介<textarea aria-label="工作台简介" rows={3} value={metadataDescriptionDraft} onChange={event => setMetadataDescriptionDraft(event.target.value)} /></label>
-                      <label>标签<input aria-label="工作台标签" value={metadataTagsDraft} placeholder="例如：开发、双栏、Agent（用逗号分隔）" onChange={event => setMetadataTagsDraft(event.target.value)} /></label>
-                      <div><button type="button" onClick={saveMetadata}>保存资料</button><button type="button" onClick={() => setEditingMetadata(false)}>取消</button></div>
+                      <label>{t('home.name')}<input aria-label={t('shell.workbenchName')} value={metadataNameDraft} onChange={event => setMetadataNameDraft(event.target.value)} /></label>
+                      <label>{t('settings.description')}<textarea aria-label={t('layout.workbenchDescription')} rows={3} value={metadataDescriptionDraft} onChange={event => setMetadataDescriptionDraft(event.target.value)} /></label>
+                      <label>{t('settings.tags')}<input aria-label={t('layout.workbenchTags')} value={metadataTagsDraft} placeholder={t('layout.eGDevelopmentTwoColumnsAgent')} onChange={event => setMetadataTagsDraft(event.target.value)} /></label>
+                      <div><button type="button" onClick={saveMetadata}>{t('settings.saveDetails')}</button><button type="button" onClick={() => setEditingMetadata(false)}>{t('action.cancel')}</button></div>
                     </div>
                   ) : (
                     <div className={css.settingsDetailHero}>
                       <div className={css.settingsDetailTitle}>
-                        <span>工作台详情</span><h3>{selectedMetadata?.name ?? '无法读取的工作台'}</h3><p>{selectedMetadata?.description || '暂无简介'}</p>{selectedWorkbenchId === undefined || tagsFor(selectedWorkbenchId).length === 0 ? null : <div className={css.settingsWorkbenchTags} aria-label="工作台标签">{tagsFor(selectedWorkbenchId).map(tag => <span key={tag}>{tag}</span>)}</div>}{selectedRecord?.packageOrigin === undefined ? null : <small>基于 {selectedRecord.packageOrigin.packageId} · 可继续修改并再次分发</small>}
+                        <span>{t('settings.workbenchDetails')}</span><h3>{selectedMetadata?.name ?? t('layout.unreadableWorkbench')}</h3><p>{selectedMetadata?.description || '暂无简介'}</p>{selectedWorkbenchId === undefined || tagsFor(selectedWorkbenchId).length === 0 ? null : <div className={css.settingsWorkbenchTags} aria-label={t('layout.workbenchTags')}>{tagsFor(selectedWorkbenchId).map(tag => <span key={tag}>{tag}</span>)}</div>}{selectedRecord?.packageOrigin === undefined ? null : <small>{t('layout.basedOn')} {selectedRecord.packageOrigin.packageId} {t('layout.editableAndShareable')}</small>}
                       </div>
                       <div className={css.settingsDetailActions}>
-                        <button type="button" data-action="secondary" onClick={beginMetadataEdit} disabled={selectedRecord === undefined}>编辑资料</button>
+                        <button type="button" data-action="secondary" onClick={beginMetadataEdit} disabled={selectedRecord === undefined}>{t('layout.editDetails')}</button>
                         {selectedRecord?.packageOrigin !== undefined && workbenchPackage?.bind !== undefined && packageRuntimeReadiness?.status === 'needs-input'
                           ? <button type="button" data-action="secondary" disabled={packageBusy} onClick={() => {
                               if (selectedWorkbenchId === undefined) return
                               setExternalBindingValues({})
                               setExternalBindingDialog({ workbenchId: selectedWorkbenchId, inputs: packageRuntimeReadiness.requiredInputs })
-                            }}>绑定本机资源</button>
+                            }}>{t('layout.connectLocalResources')}</button>
                           : null}
-                        {selectedInvalid !== undefined && selectedArchived ? <button type="button" onClick={runPrimaryAction}>恢复</button>
-                          : selectedArchived ? <button type="button" onClick={runPrimaryAction}>恢复</button>
+                        {selectedInvalid !== undefined && selectedArchived ? <button type="button" onClick={runPrimaryAction}>{t('home.restore')}</button>
+                          : selectedArchived ? <button type="button" onClick={runPrimaryAction}>{t('home.restore')}</button>
                             : selectedLoaded && selectedWorkbenchId === activeWorkbenchId ? null
                               : <button type="button" data-action="primary" disabled={packageBusy} onClick={runPrimaryAction}>{selectedLoaded ? '切换到此工作台' : selectedRecord?.packageOrigin !== undefined ? '验证并加载' : '加载并切换'}</button>}
                         <button type="button" data-action="secondary" aria-pressed={selectedMetadata?.pinnedAt !== undefined} onClick={() => { if (selectedWorkbenchId !== undefined) void workbenchDirectory.setPinned(selectedWorkbenchId, selectedMetadata?.pinnedAt === undefined).then(result => { if (result.status !== 'committed') setMessage('置顶状态保存失败，请刷新后重试。') }) }}>{selectedMetadata?.pinnedAt === undefined ? '置顶' : '取消置顶'}</button>
-                        {!selectedArchived ? <button type="button" data-action="danger" onClick={() => { if (selectedWorkbenchId !== undefined) void workbenchDirectory.archive(selectedWorkbenchId).then(result => { if (result.status !== 'committed') setMessage('归档工作台失败，请刷新后重试。') }) }}>归档</button> : null}
+                        {!selectedArchived ? <button type="button" data-action="danger" onClick={() => { if (selectedWorkbenchId !== undefined) void workbenchDirectory.archive(selectedWorkbenchId).then(result => { if (result.status !== 'committed') setMessage('归档工作台失败，请刷新后重试。') }) }}>{t('layout.archive')}</button> : null}
                       </div>
                     </div>
                   )}
               </header>
               ) : null}
-              {!legacySettingsView && selectedWorkbenchId !== undefined && !editingMetadata && selectedRecord !== undefined ? <nav className={css.settingsDetailSectionNav} aria-label="工作台详情分区">
-                <a href="#workbench-detail-top">概览</a>
-                <a href="#workbench-detail-layout">布局</a>
-                <a href="#workbench-detail-pages">容器内页</a>
-                <a href="#workbench-detail-plugins">插件依赖</a>
-                <a href="#workbench-detail-export">导出与危险操作</a>
+              {!legacySettingsView && selectedWorkbenchId !== undefined && !editingMetadata && selectedRecord !== undefined ? <nav className={css.settingsDetailSectionNav} aria-label={t('layout.workbenchDetailsSections')}>
+                <a href="#workbench-detail-top">{t('layout.overview')}</a>
+                <a href="#workbench-detail-layout">{t('layout.layout')}</a>
+                <a href="#workbench-detail-pages">{t('layout.pages2')}</a>
+                <a href="#workbench-detail-plugins">{t('layout.pluginDependencies')}</a>
+                <a href="#workbench-detail-export">{t('layout.exportAndDangerZone')}</a>
               </nav> : null}
               {selectedRecord === undefined || selectedInventory === undefined ? (
                 <div className={css.settingsUnsupportedWorkbench}>
                   <span>Unsupported document</span>
-                  <h3>无法读取的工作台</h3>
-                  <p>当前版本无法解析这份工作台配置。原始数据仍被保留，可导出后在兼容版本中检查。</p>
+                  <h3>{t('layout.unreadableWorkbench')}</h3>
+                  <p>{t('layout.thisVersionCannotReadTheConfigurationExport')}</p>
                   {selectedWorkbenchId === undefined ? null : (
                     <button type="button" onClick={() => { exportWorkbench(selectedWorkbenchId) }}>
-                      导出原始配置
+                      {t('layout.exportOriginalConfiguration')}
                     </button>
                   )}
                   {selectedInvalid === undefined ? null : <code>{selectedWorkbenchId}</code>}
@@ -8520,23 +8521,23 @@ export function WorkbenchSettingsSection({
                 <>
                   <header className={css.settingsDetailHeader}>
                     <div>
-                      <span>布局摘要</span>
+                      <span>{t('layout.layoutSummary')}</span>
                       {legacySettingsView ? <h3>{selectedRecord.name}</h3> : null}
-                      <p>真实分割比例、容器顺序和当前内页状态</p>
+                      <p>{t('layout.splitRatiosAreaOrderAndActivePage')}</p>
                     </div>
-                    <div className={css.settingsDetailStats} aria-label="工作台组成统计">
-                      <span><strong>{selectedInventory.areas.length}</strong>容器</span>
-                      <span><strong>{selectedInventory.pageCount}</strong>内页</span>
-                      <span><strong>{selectedInventory.plugins.length}</strong>插件</span>
-                      <span><strong>{selectedDependencySnapshot?.dynamicPackages.length ?? 0}</strong>动态</span>
+                    <div className={css.settingsDetailStats} aria-label={t('layout.workbenchCounts')}>
+                      <span><strong>{selectedInventory.areas.length}</strong>{t('layout.areas2')}</span>
+                      <span><strong>{selectedInventory.pageCount}</strong>{t('home.pages')}</span>
+                      <span><strong>{selectedInventory.plugins.length}</strong>{t('layout.plugins')}</span>
+                      <span><strong>{selectedDependencySnapshot?.dynamicPackages.length ?? 0}</strong>{t('layout.dynamic')}</span>
                       <span><strong>{selectedDependencySnapshot?.agentPresetPackages?.length ?? 0}</strong>Agent</span>
                     </div>
                   </header>
                   <section id="workbench-detail-layout" className={css.settingsLayoutSection}>
                     <div className={css.settingsSectionHeading}>
-                      <div><span>结构</span><h4>布局预览</h4></div>
+                      <div><span>{t('layout.structure')}</span><h4>{t('settings.layoutPreview')}</h4></div>
                       {workbenchTimestamp(selectedRecord.updatedAt) === undefined ? null : (
-                        <small>更新于 {workbenchTimestamp(selectedRecord.updatedAt)}</small>
+                        <small>{t('layout.updated')} {workbenchTimestamp(selectedRecord.updatedAt)}</small>
                       )}
                     </div>
                     <div
@@ -8549,13 +8550,13 @@ export function WorkbenchSettingsSection({
                       />
                     </div>
                     <div className={css.settingsLayoutLegend}>
-                       <span><i data-tone="active" />布局图显示真实分割、当前内页和状态</span>
-                       <span><i data-tone="history" />每个容器只保留当前内页；会话历史由 DSH 持久化</span>
+                       <span><i data-tone="active" />{t('layout.theDiagramShowsSplitsActivePagesAnd')}</span>
+                       <span><i data-tone="history" />{t('layout.eachAreaKeepsItsActivePageDsh')}</span>
                     </div>
                   </section>
                   <section id="workbench-detail-pages" className={css.settingsCompositionSection}>
                     <div className={css.settingsSectionHeading}>
-                      <div><span>内容</span><h4>容器与内页</h4></div>
+                      <div><span>{t('layout.content')}</span><h4>{t('layout.areasAndPages')}</h4></div>
                       <small>{selectedInventory.missingPageCount === 0
                         ? '所有内页均可用'
                         : `${String(selectedInventory.missingPageCount)} 个内页当前不可用`}</small>
@@ -8564,15 +8565,15 @@ export function WorkbenchSettingsSection({
                        {selectedInventory.areas.map(area => {
                          return <article key={area.areaId} className={css.settingsAreaCard}>
                            <header>
-                             <span>容器 {String(area.ordinal).padStart(2, '0')}</span>
+                             <span>{t('layout.areas2')} {String(area.ordinal).padStart(2, '0')}</span>
                              <code>{area.areaId}</code>
-                             <small>{area.pages.length === 0 ? '无当前内页' : '当前内页'}</small>
+                             <small>{area.pages.length === 0 ? '无当前内页' : t('layout.currentPage')}</small>
                            </header>
-                           {area.pages.length === 0 ? <p>空容器</p> : (
+                           {area.pages.length === 0 ? <p>{t('share.emptyArea')}</p> : (
                              <ul>
                                {area.pages.map(page => (
                                  <li key={page.moduleInstanceId} data-active={page.active || undefined}>
-                                   <span className={css.settingsPageState}>当前内页</span>
+                                   <span className={css.settingsPageState}>{t('layout.currentPage')}</span>
                                   <div>
                                     <strong>{page.name}</strong>
                                     <code>{page.editorId}</code>
@@ -8594,7 +8595,7 @@ export function WorkbenchSettingsSection({
                   <section id="workbench-detail-plugins" className={css.settingsCompositionSection}>
                     <details className={css.settingsPluginDetails}>
                       <summary>
-                        <div><span>依赖</span><h4>所需插件</h4></div>
+                        <div><span>{t('layout.dependencies')}</span><h4>{t('layout.requiredPlugins')}</h4></div>
                         <small>{selectedDependencySnapshot === undefined
                           ? `${selectedInventory.plugins.length} 个插件 · 点击展开`
                           : `${selectedDependencySnapshot.dependencies.length} 个依赖 · ${selectedDependencyScan?.npmDependencies.length ?? 0} 个 npm · ${selectedDependencySnapshot.completeness}`}</small>
@@ -8602,13 +8603,13 @@ export function WorkbenchSettingsSection({
                       <div className={css.settingsPluginList}>
                         {selectedDependencySnapshot !== undefined ? (
                           <>
-                            <p>依赖闭包只包含当前 Area 的 active 内页，不包含内页切换历史。</p>
+                            <p>{t('layout.onlyActivePagesContributeDependenciesPreviousPages')}</p>
                             {packageRuntimeStatus === undefined ? null : <div className={css.settingsRuntimeCapability} data-state={packageRuntimeStatus.available ? 'ready' : 'limited'}>
                               <div><strong>{packageRuntimeStatus.label}</strong><span>{packageRuntimeStatus.available ? '持久安装链路已就绪' : '当前只能安全导入布局包'}</span></div>
                               {packageRuntimeStatus.blockers.length === 0 ? null : <small>{packageRuntimeStatus.blockers.join(' · ')}</small>}
                             </div>}
                             {packageRuntimeReadiness === undefined || packageRuntimeReadiness.requiredInputs.every(input => input.status === 'satisfied') ? null : <div className={css.settingsRuntimeCapability} data-state="limited">
-                              <div><strong>导入后需要绑定</strong><span>{packageRuntimeReadiness.requiredInputs.filter(input => input.status !== 'satisfied').map(input => input.label).join('、')}</span></div>
+                              <div><strong>{t('layout.reconnectAfterImport')}</strong><span>{packageRuntimeReadiness.requiredInputs.filter(input => input.status !== 'satisfied').map(input => input.label).join('、')}</span></div>
                             </div>}
                             {packageRuntimeReadiness === undefined || packageRuntimeReadiness.status === 'ready' ? null : <div className={css.settingsRuntimeCapability} data-state="limited">
                               <div><strong>{packageRuntimeReadiness.status === 'needs-input' ? 'Runtime 等待绑定' : packageRuntimeReadiness.status === 'blocked' ? 'Runtime 依赖被阻塞' : 'Runtime 就绪状态未知'}</strong><span>{packageRuntimeReadiness.blockers.map(blocker => blocker.message).join('；') || packageRuntimeReadiness.warnings.map(warning => warning.message).join('；')}</span></div>
@@ -8616,7 +8617,7 @@ export function WorkbenchSettingsSection({
                             {selectedDependencySnapshot.blockers.length > 0 ? <ul className={css.settingsPackageDialogIssues}>{selectedDependencySnapshot.blockers.map((issue: WorkbenchDependencyIssueV1, index: number) => {
                               const canRescan = issue.code === 'provider-unresolved' || issue.code === 'editor-missing' || issue.code === 'artifact-missing' || issue.code === 'dependency-missing'
                               const actionLabel = issue.code === 'agent-preset-unprepared' ? '准备分发' : canRescan ? '重新扫描' : undefined
-                              return <li key={`${issue.code}-${index}`} data-severity="error"><strong>阻止</strong><span>{issue.message}</span>{actionLabel === undefined ? null : <button type="button" disabled={packageBusy} onClick={() => {
+                              return <li key={`${issue.code}-${index}`} data-severity="error"><strong>{t('layout.blocked')}</strong><span>{issue.message}</span>{actionLabel === undefined ? null : <button type="button" disabled={packageBusy} onClick={() => {
                                 if (canRescan) setDependencyRefreshTick(value => value + 1)
                                 setMessage(issue.code === 'agent-preset-unprepared' ? '请在 Creator 中对该 Agent 执行“准备分发”，再重新扫描当前工作台。' : '已重新扫描当前 Workbench 的 active 内页依赖。')
                               }}>{actionLabel}</button>}</li>
@@ -8628,14 +8629,14 @@ export function WorkbenchSettingsSection({
                               return <article key={dependency.portableId} data-state={presentation.state}><div><strong>{dependency.portableId}</strong><span>{dependency.version} · {dependency.digest === '' ? 'digest 未解析' : dependency.digest}</span></div><small>{dependency.kind} · {dependency.exportPolicy}{dependency.packageName === undefined ? '' : ` · npm ${dependency.packageName}`}</small><span className={css.settingsPluginStatus} data-state={presentation.state}>{presentation.label}</span></article>
                             })}
                           </>
-                        ) : selectedInventory.plugins.length === 0 ? <p>这个工作台没有内页插件依赖。</p> : (
+                        ) : selectedInventory.plugins.length === 0 ? <p>{t('layout.thisWorkbenchHasNoPagePluginDependencies')}</p> : (
                           selectedInventory.plugins.map(plugin => (
                             <article key={plugin.key} data-state={plugin.status}>
                               <div>
                                 <strong>{plugin.pluginId ?? '插件来源待确认'}</strong>
                                 <span>{plugin.editorIds.join(' · ')}</span>
                               </div>
-                              <small>{plugin.pageCount} 个内页</small>
+                              <small>{plugin.pageCount} {t('transfer.pages')}</small>
                               <span className={css.settingsPluginStatus} data-state={plugin.status}>
                                 {pluginStatusLabel(plugin.status)}
                               </span>
@@ -8646,29 +8647,29 @@ export function WorkbenchSettingsSection({
                     </details>
                   </section>
                   <footer id="workbench-detail-export" className={css.settingsExportBoundary}>
-                    <div className={css.settingsTransferHeading}><div><span>工作台文件</span><strong>保存与分发</strong></div><small>布局、内页状态和兼容性信息独立于当前 Session。</small></div>
+                    <div className={css.settingsTransferHeading}><div><span>{t('layout.workbenchFiles')}</span><strong>{t('layout.saveAndDistribute')}</strong></div><small>{t('layout.layoutPageStateAndCompatibilityAreIndependent')}</small></div>
                     <div className={css.settingsTransferGrid}>
                       {workbenchPackage === undefined ? null : <article className={css.settingsTransferCard}>
                         <div className={css.settingsTransferIcon} aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3v11m0 0-4-4m4 4 4-4M5 15v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3" /></svg></div>
-                        <div><strong>分享工作台</strong><span>导出脱离当前 Session 的分享包。</span>{packageRuntimeStatus === undefined ? null : <small>{packageRuntimeStatus.available ? `${packageRuntimeStatus.label} 已连接` : '当前 Runtime 只保证布局包'}</small>}</div>
+                        <div><strong>{t('shell.shareWorkbench')}</strong><span>{t('layout.exportAPackageWithoutIncludingTheCurrent')}</span>{packageRuntimeStatus === undefined ? null : <small>{packageRuntimeStatus.available ? `${packageRuntimeStatus.label} 已连接` : '当前 Runtime 只保证布局包'}</small>}</div>
                         <button type="button" data-action="primary" disabled={packageBusy} onClick={() => {
                           if (selectedWorkbenchId !== undefined) openExportPackageDialog(selectedWorkbenchId)
                         }}>{packageBusy ? '处理中…' : selectedRecord?.packageOrigin === undefined ? '导出工作台包' : '再次分发工作台'}</button>
                       </article>}
                       <article className={css.settingsTransferCard}>
                         <div className={css.settingsTransferIcon} aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 4v11m0 0-4-4m4 4 4-4M6 19h12" /></svg></div>
-                        <div><strong>原始配置</strong><span>保留内部字段，用于诊断和恢复。</span></div>
-                        <button type="button" onClick={() => { if (selectedWorkbenchId !== undefined) exportWorkbench(selectedWorkbenchId) }}>导出原始配置</button>
+                        <div><strong>{t('layout.originalConfiguration')}</strong><span>{t('layout.keepInternalFieldsForTroubleshootingAndRecovery')}</span></div>
+                        <button type="button" onClick={() => { if (selectedWorkbenchId !== undefined) exportWorkbench(selectedWorkbenchId) }}>{t('layout.exportOriginalConfiguration')}</button>
                       </article>
                       {workbenchPackage === undefined ? null : <article className={css.settingsTransferCard}>
                         <div className={css.settingsTransferIcon} aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 20V9m0 0-4 4m4-4 4 4M5 6V4a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v2" /></svg></div>
-                        <div><strong>导入另一个工作台</strong><span>导入后放入“未使用”，不打断当前布局。</span></div>
-                        <button type="button" disabled={packageBusy} onClick={openPackagePicker}>{packageBusy ? '处理中…' : '选择工作台包'}</button>
+                        <div><strong>{t('transfer.importAnotherWorkbench')}</strong><span>{t('layout.theImportAppearsAsInactiveWithoutInterrupting')}</span></div>
+                        <button type="button" disabled={packageBusy} onClick={openPackagePicker}>{packageBusy ? '处理中…' : t('layout.chooseWorkbenchPackage')}</button>
                       </article>}
                     </div>
                     <div className={css.settingsDangerZone}>
-                      <strong>危险操作</strong>
-                      <span>永久删除不可恢复。已加载的工作台需要先从标签栏卸载或归档。</span>
+                      <strong>{t('settings.dangerZone')}</strong>
+                      <span>{t('layout.permanentDeletionCannotBeUndoneUnloadOr')}</span>
                       <button type="button" disabled={selectedWorkbenchId === undefined || selectedLoaded}
                         onClick={() => {
                           if (selectedWorkbenchId === undefined) return
@@ -8678,7 +8679,7 @@ export function WorkbenchSettingsSection({
                             if (result.status === 'committed') { setSelectedWorkbenchId(undefined); setMessage(`已永久删除工作台“${name}”。`) }
                             else setMessage(`无法删除工作台“${name}”。请先卸载并确认仍有其他可运行工作台。`)
                           })
-                        }}>永久删除</button>
+                        }}>{t('layout.permanentlyDelete')}</button>
                     </div>
                   </footer>
                 </>
@@ -8693,24 +8694,24 @@ export function WorkbenchSettingsSection({
             <header>
               <div>
                 <span>SHARE PACKAGE</span>
-                <h3 id="workbench-package-dialog-title">导入工作台包</h3>
+                <h3 id="workbench-package-dialog-title">{t('home.importWorkbenchPackage')}</h3>
               </div>
-              <button type="button" aria-label="关闭导入工作台包" disabled={packageBusy} onClick={cancelPackageImport}>×</button>
+              <button type="button" aria-label={t('layout.closeWorkbenchImport')} disabled={packageBusy} onClick={cancelPackageImport}>×</button>
             </header>
             <p className={css.settingsPackageDialogFile}>{packageDialog.fileName}</p>
             {packageDialog.report.manifest === undefined ? (
-              <div className={css.settingsPackageDialogInvalid}>无法读取包清单，当前设置不会被修改。</div>
+              <div className={css.settingsPackageDialogInvalid}>{t('layout.thePackageManifestCouldNotBeRead')}</div>
             ) : (
               <>
                 <div className={css.settingsPackageDialogSummary}>
-                  <div><small>工作台</small><strong>{packageDialog.report.manifest.name}</strong></div>
-                  <div><small>版本</small><strong>{packageDialog.report.manifest.version}</strong></div>
-                  <div><small>依赖闭包</small><strong>{packageDialog.report.dependencyLock?.length ?? packageDialog.report.plugins.length} 个</strong></div>
-                  <div><small>动态 / Agent</small><strong>{(packageDialog.report.dependencyLock?.filter(dependency => dependency.kind === 'dynamic').length ?? 0)} / {(packageDialog.report.agentPresets?.length ?? 0)}</strong></div>
-                  <div><small>权限</small><strong>{packageDialog.report.permissions.length === 0 ? '无' : `${packageDialog.report.permissions.length} 项`}</strong></div>
+                  <div><small>{t('shell.workbench')}</small><strong>{packageDialog.report.manifest.name}</strong></div>
+                  <div><small>{t('layout.version')}</small><strong>{packageDialog.report.manifest.version}</strong></div>
+                  <div><small>{t('layout.dependencyClosure')}</small><strong>{packageDialog.report.dependencyLock?.length ?? packageDialog.report.plugins.length} 个</strong></div>
+                  <div><small>{t('layout.dynamicAgent')}</small><strong>{(packageDialog.report.dependencyLock?.filter(dependency => dependency.kind === 'dynamic').length ?? 0)} / {(packageDialog.report.agentPresets?.length ?? 0)}</strong></div>
+                  <div><small>{t('modules.permissions')}</small><strong>{packageDialog.report.permissions.length === 0 ? '无' : `${packageDialog.report.permissions.length} 项`}</strong></div>
                 </div>
                 <div className={css.settingsPackageDialogProjection}>
-                  <span>导入内容</span>
+                  <span>{t('layout.importContents')}</span>
                   <strong>{packageDialog.report.projection?.description || '布局与内页状态投影'}</strong>
                   <small>{packageImportConfirmed ? '已确认安装缺失制品，正在按依赖锁定信息校验并导入。' : '先检查本机依赖，再由你确认安装缺失制品；完成后进入“未使用”，不会自动切换当前工作台。'}</small>
                 </div>
@@ -8718,12 +8719,12 @@ export function WorkbenchSettingsSection({
                   <div className={css.settingsPackageDependencyCheckHeading}>
                     <div>
                       <span>LOCAL DEPENDENCIES</span>
-                      <strong id="workbench-package-dependency-check-title">本机依赖检查</strong>
+                      <strong id="workbench-package-dependency-check-title">{t('layout.localDependencyCheck')}</strong>
                     </div>
                     <small>{packageDependenciesChecking ? '正在检查本机依赖…' : packageDependencyCheckError !== undefined ? '检查失败' : importDependencySummary(packageDialog.dependencies)}</small>
                   </div>
-                  {packageDependenciesChecking ? <p className={css.settingsPackageDependencyEmpty} role="status">正在检查本机已安装的插件与制品，请稍候…</p> : packageDependencyCheckError !== undefined ? <p className={css.settingsPackageDependencyWarning} role="alert">本机依赖检查失败：{packageDependencyCheckError}。请关闭后重新选择分享包。</p> : packageDialog.dependencies.length === 0 ? <p className={css.settingsPackageDependencyEmpty}>这个包没有声明可安装的依赖，仍会校验布局和可迁移状态。</p> : (
-                    <ul className={css.settingsPackageDependencyList} aria-label="本机依赖检查结果">
+                  {packageDependenciesChecking ? <p className={css.settingsPackageDependencyEmpty} role="status">{t('layout.checkingInstalledPluginsAndArtifacts')}</p> : packageDependencyCheckError !== undefined ? <p className={css.settingsPackageDependencyWarning} role="alert">{t('layout.localDependencyCheckFailed')}{packageDependencyCheckError}{t('layout.closeThisDialogAndChooseThePackage')}</p> : packageDialog.dependencies.length === 0 ? <p className={css.settingsPackageDependencyEmpty}>{t('layout.thisPackageDeclaresNoInstallableDependenciesThe')}</p> : (
+                    <ul className={css.settingsPackageDependencyList} aria-label={t('layout.localDependencyCheckResult')}>
                       {packageDialog.dependencies.map(dependency => {
                         const tone = importDependencyLocalStatusTone(dependency.localStatus)
                         return <li key={`${dependency.portableId}@${dependency.version}`} data-state={tone}>
@@ -8739,9 +8740,9 @@ export function WorkbenchSettingsSection({
                       })}
                     </ul>
                   )}
-                  {packageDialog.dependencies.some(item => item.localStatus === 'conflict') ? <p className={css.settingsPackageDependencyWarning}>本机已有同名内页，但版本或摘要不一致。继续安装会先按依赖锁定信息验证，失败将自动回滚。</p> : null}
+                  {packageDialog.dependencies.some(item => item.localStatus === 'conflict') ? <p className={css.settingsPackageDependencyWarning}>{t('layout.aLocalPageHasTheSameName')}</p> : null}
                 </section>
-                <ol className={css.settingsPackageImportSteps} aria-label="导入进度">
+                <ol className={css.settingsPackageImportSteps} aria-label={t('layout.importProgress')}>
                   {WORKBENCH_IMPORT_STEPS.map(step => {
                     const state = importStepState(step.id, packageOperationPhase, packageImportConfirmed, packageRestartPrompt !== undefined, packageDependenciesChecked)
                     return <li key={step.id} data-state={state}><span aria-hidden="true">{state === 'complete' ? '✓' : state === 'active' ? '•' : String(WORKBENCH_IMPORT_STEPS.indexOf(step) + 1)}</span><strong>{step.label}</strong></li>
@@ -8755,12 +8756,12 @@ export function WorkbenchSettingsSection({
                 {packageRestartPrompt === undefined ? null : <section className={css.settingsPackageRestartPrompt} aria-live="polite">
                   <div>
                     <span>RUNTIME RESTART</span>
-                    <strong>需要重启后完成验证</strong>
+                    <strong>{t('layout.restartToFinishVerification')}</strong>
                     <small>{packageRestartPrompt.reason}</small>
                   </div>
-                  <p>依赖已经安全暂存，当前工作台没有改变。你可以现在确认重启，也可以稍后关闭此 DSH 实例，再使用相同 Profile 重新启动后继续验证。</p>
+                  <p>{t('layout.dependenciesAreStagedTheCurrentWorkbenchHas')}</p>
                   <div className={css.settingsPackageRestartActions}>
-                    <button type="button" data-action="secondary" disabled={packageBusy} onClick={deferPackageRestart}>稍后重启</button>
+                    <button type="button" data-action="secondary" disabled={packageBusy} onClick={deferPackageRestart}>{t('layout.restartLater')}</button>
                     <button type="button" data-action="primary" disabled={packageBusy} onClick={requestPackageRestart}>{(workbenchPackage?.restartAvailable?.() ?? (workbenchPackage?.requestRestart !== undefined && packageRuntimeStatus?.authority !== 'browser')) ? '一键安全重启' : '查看重启说明'}</button>
                   </div>
                 </section>}
@@ -8772,19 +8773,19 @@ export function WorkbenchSettingsSection({
                   <section className={css.settingsPackageSessionBindings} aria-labelledby={`${packageSessionFieldId}-title`}>
                     <div>
                       <span>SESSION TEMPLATES</span>
-                      <strong id={`${packageSessionFieldId}-title`}>选择本机对话</strong>
-                      <small>每个模板只需选择一次；引用同一模板的多个 Area 会保持同一绑定。也可以导入后再绑定。</small>
+                      <strong id={`${packageSessionFieldId}-title`}>{t('layout.chooseLocalConversations')}</strong>
+                      <small>{t('layout.chooseOncePerTemplateAreasUsingThe')}</small>
                     </div>
                     {packageDialog.report.sessions?.templates.map((template, index) => {
                       const inputId = `${packageSessionFieldId}-${index}`
                       return <label key={template.templateId} htmlFor={inputId}>
-                        <span><strong>{template.displayTitle}</strong><small>{packageDialog.report.sessions?.areaBindings.filter(binding => binding.templateId === template.templateId).length ?? 0} 个 Area</small></span>
+                        <span><strong>{template.displayTitle}</strong><small>{packageDialog.report.sessions?.areaBindings.filter(binding => binding.templateId === template.templateId).length ?? 0} {t('layout.areas3')}</small></span>
                         <select id={inputId} value={packageSessionTargets[template.templateId] ?? ''} disabled={packageBusy} onChange={event => {
                           const value = event.currentTarget.value
                           setPackageSessionTargets(current => ({ ...current, [template.templateId]: value }))
                         }}>
-                          <option value="">稍后手动绑定</option>
-                          {sessions.ids.length === 0 ? null : <optgroup label="使用现有对话">
+                          <option value="">{t('layout.connectManuallyLater')}</option>
+                          {sessions.ids.length === 0 ? null : <optgroup label={t('layout.useExistingConversation')}>
                             {sessions.ids.map(sessionId => {
                               const session = sessions.byId[sessionId]
                               const workspace = workspaceSnapshot.items.find(item => item.sessionIds.includes(sessionId))
@@ -8798,8 +8799,8 @@ export function WorkbenchSettingsSection({
                 )}
                 {Object.keys(packagePermissionApprovals).length === 0 ? null : (
                   <fieldset className={css.settingsPackagePermissions}>
-                    <legend>高风险权限</legend>
-                    <p>这些能力可以访问工作台之外的资源，必须逐项确认后才会进入制品激活。</p>
+                    <legend>{t('layout.sensitivePermissions')}</legend>
+                    <p>{t('layout.theseCapabilitiesCanAccessResourcesOutsideThe')}</p>
                     {Object.keys(packagePermissionApprovals).map(permission => <label key={permission}>
                       <input type="checkbox" checked={packagePermissionApprovals[permission] === true} disabled={packageBusy} onChange={event => {
                         const checked = event.currentTarget.checked
@@ -8810,19 +8811,19 @@ export function WorkbenchSettingsSection({
                   </fieldset>
                 )}
                 {packageDialog.report.plugins.length === 0 ? null : (
-                  <ul className={css.settingsPackageDialogPlugins} aria-label="包内插件声明">
+                  <ul className={css.settingsPackageDialogPlugins} aria-label={t('layout.packagedPluginDeclarations')}>
                     {packageDialog.report.plugins.map(plugin => <li key={`${plugin.manifest.packageId}@${plugin.manifest.version}`}><span>{plugin.manifest.packageId}</span><small>{plugin.manifest.version} · {plugin.manifest.sourcePolicy === 'binary-only' ? '闭源二进制' : plugin.manifest.sourcePolicy === 'source-included' ? '包含源码' : '远程来源'}{plugin.requiresRestart ? ' · 需要重启' : ''}</small></li>)}
                   </ul>
                 )}
               </>
             )}
-            {packageDialog.report.issues.length === 0 ? <p className={css.settingsPackageDialogOk}>预检通过，可以创建一个新的未加载工作台。</p> : (
-              <ul className={css.settingsPackageDialogIssues} aria-label="工作台包预检结果">
-                {packageDialog.report.issues.map((issue, index) => <li key={`${issue.code}-${index}`} data-severity={issue.severity}><strong>{issue.severity === 'error' ? '阻止' : '提示'}</strong><span>{issue.message}</span></li>)}
+            {packageDialog.report.issues.length === 0 ? <p className={css.settingsPackageDialogOk}>{t('layout.preflightPassedYouCanCreateANew')}</p> : (
+              <ul className={css.settingsPackageDialogIssues} aria-label={t('layout.packagePreflightResult')}>
+                {packageDialog.report.issues.map((issue, index) => <li key={`${issue.code}-${index}`} data-severity={issue.severity}><strong>{issue.severity === 'error' ? t('layout.blocked') : '提示'}</strong><span>{issue.message}</span></li>)}
               </ul>
             )}
             <footer>
-              <button type="button" data-action="secondary" disabled={packageBusy} onClick={cancelPackageImport}>取消</button>
+              <button type="button" data-action="secondary" disabled={packageBusy} onClick={cancelPackageImport}>{t('action.cancel')}</button>
               <button type="button" data-action="primary" disabled={packageBusy || packageDependenciesChecking || packageDependencyCheckError !== undefined || !packageDependenciesChecked || packageRestartPrompt !== undefined || !packageDialog.report.valid || unapprovedHighRiskPermissions.length > 0 || packageRuntimeBlocked} onClick={confirmPackageImport}>{packageBusy ? '处理中…' : packageDependenciesChecking ? '检查本机依赖…' : packageDependencyCheckError !== undefined ? '无法确认依赖' : packageRestartPrompt !== undefined ? '等待重启验证' : packageRuntimeBlocked ? '缺少安装 Runtime' : unapprovedHighRiskPermissions.length > 0 ? `确认 ${unapprovedHighRiskPermissions.length} 项权限` : packageResumeTransactionId === undefined ? packageDialog.dependencies.some(item => item.localStatus === 'missing') ? '确认安装缺失依赖' : packageDialog.dependencies.some(item => item.localStatus === 'available') ? '确认激活并导入' : packageDialog.dependencies.some(item => item.localStatus === 'conflict') ? '确认按包版本验证' : '确认并导入' : '继续验证'}</button>
             </footer>
           </section>
@@ -8834,14 +8835,14 @@ export function WorkbenchSettingsSection({
             <header>
               <div>
                 <span>RECIPIENT BINDINGS</span>
-                <h3 id="workbench-binding-dialog-title">绑定本机资源</h3>
+                <h3 id="workbench-binding-dialog-title">{t('layout.connectLocalResources')}</h3>
               </div>
-              <button type="button" aria-label="关闭本机资源绑定" disabled={packageBusy} onClick={closeExternalBindingDialog}>×</button>
+              <button type="button" aria-label={t('layout.closeLocalResourceBinding')} disabled={packageBusy} onClick={closeExternalBindingDialog}>×</button>
             </header>
             <div className={css.settingsPackageDialogProjection}>
-              <span>只保存接收端引用</span>
-              <strong>不会写入凭据、Session transcript 或作者机器路径</strong>
-              <small>请使用本机 Runtime 提供的 opaque reference；如果暂时没有资源，可以先关闭，稍后再绑定。</small>
+              <span>{t('layout.onlyRecipientReferencesAreSaved')}</span>
+              <strong>{t('layout.credentialsTranscriptsAndTheAuthorSMachine')}</strong>
+              <small>{t('layout.useAnOpaqueReferenceFromTheLocal')}</small>
             </div>
             <div className={css.settingsExternalBindings}>
               {externalBindingDialog.inputs.map((input, index) => {
@@ -8849,7 +8850,7 @@ export function WorkbenchSettingsSection({
                 const value = externalBindingValues[input.id] ?? ''
                 return <label key={input.id} htmlFor={inputId}>
                   <span><strong>{input.label}</strong><small>{input.kind} · {input.required ? '必需' : '可选'} · {input.status === 'invalid' ? 'Runtime 当前判定无效' : input.status === 'satisfied' ? '已满足' : '待绑定'}</small></span>
-                  <input id={inputId} type="text" autoComplete="off" value={value} disabled={packageBusy} placeholder="输入本机 opaque reference" onChange={event => {
+                  <input id={inputId} type="text" autoComplete="off" value={value} disabled={packageBusy} placeholder={t('layout.enterLocalOpaqueReference')} onChange={event => {
                     const next = event.currentTarget.value
                     setExternalBindingValues(current => ({ ...current, [input.id]: next }))
                   }} />
@@ -8857,7 +8858,7 @@ export function WorkbenchSettingsSection({
               })}
             </div>
             <footer>
-              <button type="button" data-action="secondary" disabled={packageBusy} onClick={closeExternalBindingDialog}>稍后绑定</button>
+              <button type="button" data-action="secondary" disabled={packageBusy} onClick={closeExternalBindingDialog}>{t('layout.connectLater')}</button>
               <button type="button" data-action="primary" disabled={packageBusy} onClick={submitExternalBindings}>{packageOperationPhase === 'binding' ? '保存中…' : '保存绑定'}</button>
             </footer>
           </section>
@@ -8868,26 +8869,26 @@ export function WorkbenchSettingsSection({
           <section className={`${css.settingsPackageDialog} ${css.settingsExportDialog}`} role="dialog" aria-modal="true" aria-labelledby="workbench-export-mode-title">
             <header>
               <div><span>{exportDialogStep === 'review' ? 'FINAL REVIEW' : 'PACKAGE MODE'}</span><h3 id="workbench-export-mode-title">{exportDialogStep === 'review' ? '确认导出内容' : '选择分享包类型'}</h3></div>
-              <button type="button" aria-label="关闭导出工作台包" disabled={packageBusy} onClick={() => { setExportModeDialog(undefined); setExportDialogStep('readiness'); setExportTargetMode(undefined); setExportPermissionApprovals({}); setExportDialogMessage(undefined) }}>×</button>
+              <button type="button" aria-label={t('layout.closeWorkbenchExport')} disabled={packageBusy} onClick={() => { setExportModeDialog(undefined); setExportDialogStep('readiness'); setExportTargetMode(undefined); setExportPermissionApprovals({}); setExportDialogMessage(undefined) }}>×</button>
             </header>
             <div className={css.settingsExportDialogBody}>
             {exportDialogMessage === undefined ? null : <p className={css.settingsExportDialogStatus} role="status" aria-live="polite" data-state={packageBusy ? 'busy' : 'info'}>{exportDialogMessage}</p>}
             {exportDialogStep === 'review' && exportTargetMode !== undefined ? <>
               <div className={css.settingsExportReviewHero} data-state={exportTargetMode === 'layout-only' ? 'warning' : 'ready'}>
-                <span>即将导出</span>
+                <span>{t('layout.readyToExport')}</span>
                 <strong>{exportTargetLabel(exportTargetMode)}</strong>
                 <small>{exportTargetDescription(exportTargetMode)}</small>
               </div>
               <div className={css.settingsExportReviewGrid}>
-                <div><small>包含</small><span>当前 active 内页、依赖锁、布局预览、Session 模板</span></div>
-                <div><small>不包含</small><span>Session ID、transcript、凭据、绝对路径、作者 Workspace ID</span></div>
-                <div><small>接收端仍需</small><span>{exportTargetReadiness?.requiredInputs.length === 0 ? '按需选择目标项目或对话' : exportTargetReadiness?.requiredInputs.map(input => input.label).join('、')}</span></div>
-                <div><small>本机影响</small><span>{exportTargetReadiness?.estimatedArtifactBytes === undefined ? '磁盘占用无法在当前 Runtime 中确认' : `预计新增 ${(exportTargetReadiness.estimatedArtifactBytes / 1024 / 1024).toFixed(1)} MB；不会改变当前 Workbench`}</span></div>
+                <div><small>{t('layout.included')}</small><span>{t('layout.activePagesLockedDependenciesLayoutPreviewAnd')}</span></div>
+                <div><small>{t('layout.excluded')}</small><span>{t('layout.conversationIdsTranscriptsCredentialsAbsolutePathsAnd')}</span></div>
+                <div><small>{t('layout.recipientRequirements')}</small><span>{exportTargetReadiness?.requiredInputs.length === 0 ? '按需选择目标项目或对话' : exportTargetReadiness?.requiredInputs.map(input => input.label).join('、')}</span></div>
+                <div><small>{t('layout.localChanges')}</small><span>{exportTargetReadiness?.estimatedArtifactBytes === undefined ? '磁盘占用无法在当前 Runtime 中确认' : `预计新增 ${(exportTargetReadiness.estimatedArtifactBytes / 1024 / 1024).toFixed(1)} MB；不会改变当前 Workbench`}</span></div>
               </div>
-              {exportTargetMode === 'layout-only' ? <p className={css.settingsPackageLayoutOnlyHint}>这是明确的布局分享包；接收端需要另行准备缺失依赖，不能宣传为开箱即用。</p> : null}
+              {exportTargetMode === 'layout-only' ? <p className={css.settingsPackageLayoutOnlyHint}>{t('layout.thisIsALayoutOnlyPackageRecipients')}</p> : null}
             </> : <>
-            <p className={css.settingsExportDialogIntro}>依赖会按当前 Area 的 active 内页计算；历史内页和真实 Session 不会进入分享包。</p>
-            <div className={css.settingsPackageModeOptions} role="group" aria-label="分享包分发模式">
+            <p className={css.settingsExportDialogIntro}>{t('layout.onlyActivePagesContributeDependenciesPageHistory')}</p>
+            <div className={css.settingsPackageModeOptions} role="group" aria-label={t('layout.packageDistributionMode')}>
               <button
                 type="button"
                 className={exportModeDialog.mode === 'online-reference' ? css.settingsPackageModeOptionSelected : undefined}
@@ -8895,8 +8896,8 @@ export function WorkbenchSettingsSection({
                 disabled={packageBusy}
                 onClick={() => selectExportMode('online-reference')}
               >
-                <strong>在线引用</strong>
-                <small>接收端从受信任 Registry 获取精确版本制品</small>
+                <strong>{t('layout.onlineReferences')}</strong>
+                <small>{t('layout.recipientsRetrieveExactArtifactsFromATrusted')}</small>
               </button>
               <button
                 type="button"
@@ -8905,8 +8906,8 @@ export function WorkbenchSettingsSection({
                 disabled={packageBusy}
                 onClick={() => selectExportMode('offline-embedded')}
               >
-                <strong>离线嵌入</strong>
-                <small>把已验证制品嵌入包内，接收端可断网安装</small>
+                <strong>{t('layout.embeddedOfflineArtifacts')}</strong>
+                <small>{t('layout.includeVerifiedArtifactsForOfflineInstallation')}</small>
               </button>
             </div>
             <div className={css.settingsExportQuickActions}>
@@ -8920,19 +8921,19 @@ export function WorkbenchSettingsSection({
                 >{!exportPreparationAvailable ? '需要 Runtime 才能准备依赖' : `一键准备 ${exportReadiness?.repairable.filter(item => isAutomaticExportRepair(item.repair)).length ?? 0} 个依赖`}</button>}
             </div>
             <div className={css.settingsPackageDialogSummary}>
-              <div><small>当前完整性</small><strong>{exportReadinessLabel(exportReadiness?.completeness ?? exportDependencySnapshot?.completeness)}</strong></div>
-              <div><small>在线引用</small><strong>{exportOnlineReadiness?.completeness === 'complete-online' || exportOnlineReadiness?.completeness === 'needs-input' ? '精确版本 + digest' : exportReadinessLabel(exportOnlineReadiness?.completeness)}</strong></div>
-              <div><small>离线嵌入</small><strong>{exportOfflineReadiness?.completeness === 'complete-offline' || exportOfflineReadiness?.completeness === 'needs-input' ? '断网可安装制品' : exportReadinessLabel(exportOfflineReadiness?.completeness)}</strong></div>
+              <div><small>{t('layout.currentIntegrity')}</small><strong>{exportReadinessLabel(exportReadiness?.completeness ?? exportDependencySnapshot?.completeness)}</strong></div>
+              <div><small>{t('layout.onlineReferences')}</small><strong>{exportOnlineReadiness?.completeness === 'complete-online' || exportOnlineReadiness?.completeness === 'needs-input' ? '精确版本 + digest' : exportReadinessLabel(exportOnlineReadiness?.completeness)}</strong></div>
+              <div><small>{t('layout.embeddedOfflineArtifacts')}</small><strong>{exportOfflineReadiness?.completeness === 'complete-offline' || exportOfflineReadiness?.completeness === 'needs-input' ? '断网可安装制品' : exportReadinessLabel(exportOfflineReadiness?.completeness)}</strong></div>
             </div>
             {exportReadiness === undefined ? null : <div className={css.settingsExportReadiness}>
               <div className={css.settingsExportReadinessCounts}>
-                <span>当前使用内页 <strong>{exportReadiness.activeEditorCount}</strong></span>
-                <span>Agent 模式 <strong>{exportReadiness.agentPresetCount}</strong></span>
-                <span>动态插件 <strong>{exportReadiness.dynamicPackageCount}</strong></span>
-                <span>共享依赖 <strong>{exportReadiness.sharedDependencyCount}</strong></span>
+                <span>{t('layout.activePages')} <strong>{exportReadiness.activeEditorCount}</strong></span>
+                <span>{t('workspace.agentMode')} <strong>{exportReadiness.agentPresetCount}</strong></span>
+                <span>{t('layout.dynamicPlugins')} <strong>{exportReadiness.dynamicPackageCount}</strong></span>
+                <span>{t('layout.sharedDependencies')} <strong>{exportReadiness.sharedDependencyCount}</strong></span>
               </div>
               {exportReadiness.ready.length === 0 ? null : <div className={css.settingsExportReadinessReady}>
-                <strong>已就绪 {exportReadiness.ready.length} 个依赖</strong>
+                <strong>{t('settings.ready')} {exportReadiness.ready.length} {t('layout.dependencies2')}</strong>
                 <span>{exportReadiness.ready.map(item => item.packageName ?? item.portableId).join('、')}</span>
               </div>}
               {exportReadiness.repairable.length === 0 && exportReadiness.blockers.length === 0 ? null : <div className={css.settingsExportReadinessIssues}>
@@ -8944,28 +8945,28 @@ export function WorkbenchSettingsSection({
                     <span>{exportReadinessRepairLabel(item.repair)}</span>
                     <p>{item.consequence}</p>
                     <details>
-                      <summary>查看来源与校验详情</summary>
+                      <summary>{t('layout.reviewSourcesAndValidation')}</summary>
                       <dl>
                         <dt>portableId</dt><dd><code>{item.portableId}</code></dd>
                         <dt>artifact digest</dt><dd><code>{item.digest ?? locked?.digest ?? '未解析'}</code></dd>
-                        <dt>来源策略</dt><dd>{locked?.sourcePolicy ?? '未声明'} · {locked?.exportPolicy ?? '未声明'}</dd>
-                        {locked?.installSource === undefined ? null : <><dt>安装来源</dt><dd>{locked.installSource}{locked.registryUrl === undefined ? '' : ` · ${locked.registryUrl}`}</dd></>}
+                        <dt>{t('layout.sourcePolicy')}</dt><dd>{locked?.sourcePolicy ?? '未声明'} · {locked?.exportPolicy ?? '未声明'}</dd>
+                        {locked?.installSource === undefined ? null : <><dt>{t('layout.installationSource')}</dt><dd>{locked.installSource}{locked.registryUrl === undefined ? '' : ` · ${locked.registryUrl}`}</dd></>}
                         {editorScopes.length === 0 ? null : <><dt>editor / scope</dt><dd>{editorScopes.join('、')}</dd></>}
-                        {item.requiredPermissions.length === 0 ? null : <><dt>权限</dt><dd>{item.requiredPermissions.join('、')}</dd></>}
+                        {item.requiredPermissions.length === 0 ? null : <><dt>{t('modules.permissions')}</dt><dd>{item.requiredPermissions.join('、')}</dd></>}
                       </dl>
                     </details>
                   </div>
                 })}
                 {exportReadiness.blockers.filter(issue => issue.repair === 'none').map(issue => <div key={issue.issueId} className={`${css.settingsExportReadinessIssue} ${css.settingsExportReadinessIssueBlocked}`}>
                   <div><strong>{issue.portableId ?? '工作台依赖'}</strong><small>{issue.code}</small></div>
-                  <span>阻塞</span>
+                  <span>{t('layout.blocked2')}</span>
                   <p>{issue.message}</p>
                 </div>)}
               </div>}
-              {exportReadiness.requiredInputs.length === 0 ? null : <p className={css.settingsExportReadinessInputs}>接收端待绑定事项：{exportReadiness.requiredInputs.map(input => input.label).join('、')}</p>}
+              {exportReadiness.requiredInputs.length === 0 ? null : <p className={css.settingsExportReadinessInputs}>{t('layout.resourcesForTheRecipientToConnect')}{exportReadiness.requiredInputs.map(input => input.label).join('、')}</p>}
               {exportHighRiskPermissions.length === 0 ? null : <fieldset className={css.settingsPackagePermissions}>
-                <legend>准备依赖需要明确批准的权限</legend>
-                <p>准备阶段不会默认访问网络、文件系统或启动动态代码；只有勾选后才会把对应权限交给 Runtime 协调器。</p>
+                <legend>{t('layout.permissionsRequiredToPrepareDependencies')}</legend>
+                <p>{t('layout.preparationDoesNotAccessTheNetworkFilesystem')}</p>
                 {exportHighRiskPermissions.map(permission => <label key={permission}>
                   <input
                     type="checkbox"
@@ -8981,7 +8982,7 @@ export function WorkbenchSettingsSection({
             </div>
             <footer className={css.settingsExportDialogFooter}>
               {exportDialogStep === 'review' && exportTargetMode !== undefined ? <>
-                <button type="button" data-action="secondary" disabled={packageBusy} onClick={() => { setExportDialogStep('readiness'); setExportTargetMode(undefined); setExportDialogMessage(undefined) }}>返回检查</button>
+                <button type="button" data-action="secondary" disabled={packageBusy} onClick={() => { setExportDialogStep('readiness'); setExportTargetMode(undefined); setExportDialogMessage(undefined) }}>{t('layout.backToChecks')}</button>
                 <button type="button" data-action="primary" disabled={packageBusy || !exportReviewAllowed} title={!exportReviewAllowed ? '依赖状态已变化，请返回检查并重新扫描。' : undefined} onClick={() => exportWorkbenchPackage(exportModeDialog.workbenchId, exportTargetMode === 'offline-embedded' ? 'offline-embedded' : 'online-reference')}>
                   {packageBusy ? '导出中…' : `确认并导出${exportTargetLabel(exportTargetMode)}`}
                 </button>
@@ -9002,7 +9003,7 @@ export function WorkbenchSettingsSection({
                     'online-reference',
                   ) ? '在线模式需要精确版本、digest 和受信任 Registry；否则只能导出布局包。' : undefined}
                   onClick={() => openExportReview('online-reference')}
-                >在线引用包</button>
+                >{t('layout.onlineReferencePackage')}</button>
                 <button
                   type="button"
                   data-action={exportModeDialog.mode === 'offline-embedded' ? 'primary' : 'secondary'}
@@ -9019,15 +9020,15 @@ export function WorkbenchSettingsSection({
                     'offline-embedded',
                   ) ? '离线模式需要所有必需制品已嵌入并通过 digest 验证。' : undefined}
                   onClick={() => openExportReview('offline-embedded')}
-                >离线嵌入包</button>
+                >{t('layout.offlinePackage')}</button>
                 {canExportLayoutFromReadiness(exportLayoutReadiness) ? <button
                   type="button"
                   data-action="secondary"
                   className={css.settingsPackageLayoutOnlyAction}
                   disabled={packageBusy}
-                  title="只导出布局和安全可迁移状态；接收端需要另行准备依赖。"
+                  title={t('layout.exportLayoutAndPortableStateOnlyRecipients')}
                   onClick={() => openExportReview('layout-only')}
-                >导出布局包（依赖需另行准备）</button> : null}
+                >{t('layout.exportLayoutPackageDependenciesSeparate')}</button> : null}
               </>}
             </footer>
           </section>

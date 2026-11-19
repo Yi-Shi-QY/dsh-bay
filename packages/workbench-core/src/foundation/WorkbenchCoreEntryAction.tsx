@@ -1,10 +1,12 @@
 import { useState, useSyncExternalStore, type ReactNode } from 'react'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { WorkbenchModeControllerV1 } from '../mode-controller.ts'
+import { useWorkbenchLocale, workbenchErrorNotice, workbenchNoticeText, type WorkbenchNotice, type WorkbenchLocaleSource } from './workbench-locale.ts'
 import css from './WorkbenchSidebarActions.module.css'
 
 export type WorkbenchCoreEntryActionProps = PropsRuntime<'sidebar.footer.action'> & {
   modeController: WorkbenchModeControllerV1
+  locale?: WorkbenchLocaleSource | undefined
 }
 
 /** Workbench glyph preserved from the single-plugin entry action. */
@@ -25,12 +27,14 @@ function IconWorkbench16({ size }: { size: number }): ReactNode {
  * Keeping entry and exit in this slot gives the two host modes the same
  * spatial affordance and avoids adding a second desktop-only exit control.
  */
-export function WorkbenchCoreEntryAction({ wide, modeController }: WorkbenchCoreEntryActionProps): ReactNode {
-  const [error, setError] = useState<string>()
+export function WorkbenchCoreEntryAction({ wide, modeController, locale }: WorkbenchCoreEntryActionProps): ReactNode {
+  const { t } = useWorkbenchLocale(locale)
+  const [notice, setError] = useState<WorkbenchNotice>()
+  const error = workbenchNoticeText(t, notice)
   const mode = useSyncExternalStore(modeController.subscribe, modeController.getSnapshot)
   if (mode.mode !== 'official' && mode.mode !== 'workbench') return null
   const inWorkbench = mode.mode === 'workbench'
-  const label = inWorkbench ? '退出工作台模式' : '进入工作台模式'
+  const label = inWorkbench ? t('home.exitWorkbenchMode') : t('home.enterWorkbenchMode')
   return <>
     <button
       type="button"
@@ -44,7 +48,7 @@ export function WorkbenchCoreEntryAction({ wide, modeController }: WorkbenchCore
           ? modeController.exit()
           : modeController.enter({ intent: 'resume-recent' })
         void transition.catch(reason => {
-          setError(reason instanceof Error ? reason.message : `无法${inWorkbench ? '退出' : '进入'}工作台模式`)
+          setError(workbenchErrorNotice(reason, inWorkbench ? 'shell.exitFailed' : 'shell.enterFailed'))
         })
       }}
     >

@@ -1,3 +1,4 @@
+import { useWorkbenchLocale } from './workbench-locale.ts'
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { HostObservable } from '@deepseek-ai/dsh-client-ui-slots'
 import type { SettingsScopeSnapshot } from '../client/workbench-settings-contracts.ts'
@@ -27,6 +28,7 @@ export type WorkbenchHomeCenterProps = WorkbenchCoreSettingsPage & Pick<Workbenc
 
 /** Desktop root: management and distribution live here, outside Settings. */
 export function WorkbenchHomeCenter(props: WorkbenchHomeCenterProps) {
+  const { t } = useWorkbenchLocale()
   const [destination, setDestination] = useState<WorkbenchSettingsOpenOptionsV1 | undefined>(props.openOptions)
   const root = useRef<HTMLDivElement>(null)
   useEffect(() => { if (root.current) root.current.scrollTop = 0 }, [destination])
@@ -78,7 +80,7 @@ export function WorkbenchHomeCenter(props: WorkbenchHomeCenterProps) {
     {section === 'workbenches' || section === 'sharing' ? <main className={css.home} data-workbench-home>
       <WorkbenchHomeNavigation section={section} navigate={navigate} />
       <div className={css.centerContent + ' ' + pageCss.settingsRoot} style={{ height: 'auto' }}>
-        {snapshot.status !== 'ready' ? <p role="alert">工作台连接暂不可用，当前资料已保留。请恢复连接后重试。</p> : null}
+        {snapshot.status !== 'ready' ? <p role="alert">{t('home.theWorkbenchIsDisconnectedYourDataIs')}</p> : null}
         {section === 'workbenches' ? <WorkbenchManagementPage key={destination?.workbenchId ?? 'list'} {...pageProps} />
           : <WorkbenchSharingPage key={destination?.shareMode + ':' + destination?.shareType + ':' + destination?.workbenchId} {...pageProps} />}
       </div>

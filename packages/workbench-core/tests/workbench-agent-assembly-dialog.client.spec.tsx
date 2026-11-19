@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
 import React from 'react'
-import { cleanup, fireEvent, render, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { WorkbenchAgentAssemblyDialog, type AgentAssemblyClientV1, type AgentAssemblyDraftV1, type AgentAssemblyRowV1 } from '../src/foundation/WorkbenchAgentAssemblyDialog.tsx'
 import type { ToolCatalogEntryV1, WorkbenchToolGatewayV1 } from '../src/tool-gateway.ts'
 import type { WorkbenchAgentDefinitionV1 } from '../src/agent-assembly-model.ts'
+import { WorkbenchLocaleContext } from '../src/foundation/workbench-locale.ts'
+import { createTestWorkbenchLocale } from './workbench-locale-fixture.ts'
 
 afterEach(() => cleanup())
 
@@ -34,6 +36,30 @@ function harness(catalog: ToolCatalogEntryV1[], agents: AgentAssemblyRowV1[] = [
 }
 
 describe('Workbench Agent assembly drawer', () => {
+  it('translates the active step and validation without reloading or losing the draft', async () => {
+    const locale = createTestWorkbenchLocale()
+    const state = harness([])
+    const view = render(<WorkbenchLocaleContext.Provider value={locale}>
+      <WorkbenchAgentAssemblyDialog gateway={state.gateway} workbenchId="main" workbenchName="我的工作台" client={state.client} onClose={() => {}} />
+    </WorkbenchLocaleContext.Provider>)
+    await waitFor(() => expect(state.client.list).toHaveBeenCalledOnce())
+    fireEvent.click(view.getByRole('button', { name: '组装新 Agent' }))
+    fireEvent.click(view.getByRole('button', { name: '4. 身份与发布' }))
+    fireEvent.change(view.getByRole('textbox', { name: /标识/ }), { target: { value: 'my-agent' } })
+    expect(view.getByRole('alert').textContent).toBe('名称需要 1 到 80 个字符。')
+
+    act(() => locale.setLocale('en'))
+    expect(view.getByRole('button', { name: '4. Identity and publishing' }).getAttribute('aria-current')).toBe('step')
+    expect((view.getByRole('textbox', { name: /Identifier/ }) as HTMLInputElement).value).toBe('my-agent')
+    expect(view.getByRole('alert').textContent).toBe('The name must be 1 to 80 characters.')
+    expect(view.getByText(/我的工作台/)).toBeTruthy()
+    expect(state.client.list).toHaveBeenCalledOnce()
+
+    act(() => locale.setLocale('zh'))
+    expect((view.getByRole('textbox', { name: /标识/ }) as HTMLInputElement).value).toBe('my-agent')
+    expect(view.getByRole('alert').textContent).toBe('名称需要 1 到 80 个字符。')
+  })
+
   it('lists assembled agents and opens the tool catalog as a tab', async () => {
     const state = harness([entry()], [rowOf(saved({ agentId: 'quote-assistant', name: '报价助手', description: '处理报价单', basePreset: 'standard', blocks: ['tool-fs'], tools: ['workbench.quote.lookup'], skills: [], guestAccess: 'none' }))])
     const view = render(<WorkbenchAgentAssemblyDialog gateway={state.gateway} workbenchId="main" workbenchName="主工作台" client={state.client} onClose={() => {}} />)

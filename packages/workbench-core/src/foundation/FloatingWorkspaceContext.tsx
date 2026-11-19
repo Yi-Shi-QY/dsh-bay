@@ -1,3 +1,4 @@
+import { useWorkbenchLocale } from './workbench-locale.ts'
 import { createContext, useContext, useLayoutEffect, useRef, useSyncExternalStore, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import type { FloatingWorkspaceRuntime } from '../client/floating-workspace-runtime.ts'
@@ -8,11 +9,12 @@ export const useFloatingWorkspace = () => useContext(FloatingWorkspaceContext)
 
 /** A background event remains discoverable from Home and closed-workbench cards. */
 export function FloatingWorkspaceUnread({ workbenchId }: { workbenchId: string }) {
+  const { t } = useWorkbenchLocale()
   const runtime = useFloatingWorkspace()
   useSyncExternalStore(runtime?.subscribe ?? (() => () => {}), runtime?.getSnapshot ?? (() => 0), () => 0)
   const count = [...(runtime?.instances.values() ?? [])].filter(row => row.workbenchId === workbenchId && row.unread).length
   if (!count) return null
-  return <span role="status" aria-label="有后台更新" title={count + ' 个内页有后台更新'}
+  return <span role="status" aria-label={t('floating.backgroundUpdates')} title={t('floating.updatedPages', { count })}
     style={{ display: 'inline-block', flexShrink: 0, width: 6, height: 6, marginInlineStart: 6, borderRadius: '50%', background: 'var(--dsw-alias-label-link, #4d6bfe)' }} />
 }
 

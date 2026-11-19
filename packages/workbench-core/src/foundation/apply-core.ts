@@ -44,6 +44,7 @@ import type { SidebarCompatibilityProbe } from './WorkbenchFrame.tsx'
 import { WorkbenchCoreSettingsSection } from './WorkbenchCoreSettingsSection.tsx'
 import { CREATOR_REPAIR_AGENT_PRESET, type CreatorRepairTargetV1, type CreatorRepairProjectV1 } from '../workbench-directory-contract.ts'
 import { WorkbenchCoreInnerPage, type WorkbenchCoreInnerPageInjection } from './WorkbenchCoreInnerPage.tsx'
+import { WORKBENCH_LOCALE_NAMESPACE, workbenchMessages } from './workbench-messages.ts'
 import { WorkbenchCoreEntryAction } from './WorkbenchCoreEntryAction.tsx'
 import { createWorkbenchModeController, type WorkbenchModeControllerV1 } from '../mode-controller.ts'
 import type { WorkbenchModuleManagerV1 } from '../module-manager.ts'
@@ -225,10 +226,7 @@ export function applyWorkbenchCoreFoundation(
     role: collaborationMarker.role === 'owner' ? 'owner' : 'participant',
   })
   const shareController = collaborationPage ? undefined
-    : createWorkbenchShareController({ ...(connectionRpc === undefined ? {} : { rpc: connectionRpc }), chooseGrant: id => {
-      const record = settings.getSnapshot().value?.workbenches[id]
-      return requestWorkbenchShareGrant(undefined, record ? areasOf(record.document.root).map((area, index) => ({ id: area.areaId, label: record.areaMetadata?.[area.areaId]?.label || `区域 ${index + 1}` })) : [])
-    } })
+    : createWorkbenchShareController({ ...(connectionRpc === undefined ? {} : { rpc: connectionRpc }), chooseGrant: () => requestWorkbenchShareGrant(undefined, ctx.locale) })
   if (shareController !== undefined) {
     ctx.effect?.(() => {
       const refreshConnection = () => { shareController.setRpc(resolveConnectionRpc()) }
@@ -673,9 +671,11 @@ export function applyWorkbenchCoreFoundation(
     ctx.effect(() => ctx.slots.register({
       name: 'root', priority: -100,
       children: { 'workbench.window.surface': { kind: 'list', scope: 'root' } },
+      inject: () => ({ locale: ctx.locale }),
     }, WorkbenchWindowRoot), 'workbench: companion document composition')
   }
   const surfaceSlot = windowView === undefined ? 'shell.overlay' : 'workbench.window.surface'
+  ctx.effect(() => ctx.locale?.register(WORKBENCH_LOCALE_NAMESPACE, workbenchMessages), 'workbench: dictionaries')
   ctx.slots.inject(surfaceSlot, () => ctx.slots.register({
     name: surfaceSlot,
     id: 'dsh-workbench-inner-page',
@@ -686,6 +686,7 @@ export function applyWorkbenchCoreFoundation(
     },
     inject: (): WorkbenchCoreInnerPageInjection => ({
       modeController,
+      locale: ctx.locale,
       bayAgent,
       conversationStatus,
       generateContextDraft: aiDraftGenerator.generateContextDraft,
@@ -743,7 +744,7 @@ export function applyWorkbenchCoreFoundation(
     name: 'sidebar.footer.action',
     id: 'dsh-workbench-enter-mode',
     order: 20,
-    inject: () => ({ modeController }),
+    inject: () => ({ modeController, locale: ctx.locale }),
   }, WorkbenchCoreEntryAction))
 
   if (windowView === undefined) ctx.effect(() => installWorkbenchSidebarShortcuts(ctx, directory, async id => {
@@ -757,10 +758,11 @@ export function applyWorkbenchCoreFoundation(
     name: 'settings.section',
     id: 'workbench',
     order: 30,
-    label: '工作台',
+    label: () => ctx.locale?.bind(WORKBENCH_LOCALE_NAMESPACE)('shell.workbench') ?? '工作台',
     inject: () => ({
       hooks: { workbenchSettings: settingsView },
       ...settingsPage,
+      locale: ctx.locale,
     }),
   }, WorkbenchCoreSettingsSection))
   return {
