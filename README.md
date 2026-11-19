@@ -51,7 +51,7 @@ DSH 提供了强大的插件、工具和 Agent 能力，但开发工具、运行
 
 ## 当前边界
 
-本次产品版本为 `v0.1.2`，Core 试用包为 `dsh-bay@0.1.2-0.1.1.1`，声明兼容 DSH `>=0.2.2-rc.3 <0.2.3`，本次在 `0.2.2-rc.3` 上验证。湾运行在 DSH 提供的 Host、Agent、工具和插件管理能力之上，不替代 DSH 本身。
+Core 包 `dsh-bay@0.1.2` 声明兼容 DSH `>=0.2.2-rc.3 <0.2.3`，本次在 `0.2.2-rc.3` 上验证。湾运行在 DSH 提供的 Host、Agent、工具和插件管理能力之上，不替代 DSH 本身。
 
 v0.1 不承诺兼容所有 DSH 版本、第三方插件、跨代数据迁移、公开互联网协作或所有模型服务。局域网分享仅用于受控环境。完整包可能包含项目文件、附件和可恢复的对话历史，分享前请检查内容，不要分发凭据或未经授权的数据。
 
@@ -63,7 +63,7 @@ v0.1 不承诺兼容所有 DSH 版本、第三方插件、跨代数据迁移、�
     pnpm verify
     pnpm pack:core
 
-默认生成 `releases/0.1.2-0.1.1.1/dsh-bay-0.1.2-0.1.1.1.tgz`。请在隔离的 DSH 配置中，通过原生插件管理器安装 `.tgz`，再按[用户指南](docs/USER-GUIDE.zh-CN.md)开始试用。这些命令只构建本地试用包，不会发布。
+默认生成 `releases/0.1.2/dsh-bay-0.1.2.tgz`。请在隔离的 DSH 配置中，通过原生插件管理器安装 `.tgz`，再按[用户指南](docs/USER-GUIDE.zh-CN.md)开始试用。这些命令只构建本地包，不会发布。
 
 如果你只想先了解产品，可以从[项目手册](docs/PROJECT-HANDBOOK.zh-CN.md)开始；如果要开发扩展，请阅读 [Creator Skill](packages/workbench-core/presets/workbench-creator/skills/workbench-extension-development/SKILL.md)。
 

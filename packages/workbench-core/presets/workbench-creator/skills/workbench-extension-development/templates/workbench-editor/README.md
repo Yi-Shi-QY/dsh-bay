@@ -2,7 +2,7 @@
 
 ## v0.1 项目身份与实例生命周期
 
-Core 兼容范围为 `>=0.1.1 <0.1.2`。模板扩展自身保留独立的 `0.1.0` 版本，不能把它误当成 Core 版本。
+Core 兼容范围为 `>=0.1.1 <0.1.3`。模板扩展自身保留独立的 `0.1.0` 版本，不能把它误当成 Core 版本。
 
 - 声明 `presentation.floating: false` 可禁止浮窗；缺少完整绑定及生命周期声明的内页不能在浮窗运行。
 - `owner.projectId` 是项目持久身份；`owner.areaId` 只是展示位置。关闭 Area 后 Project 保留，重新打开显示概览，不自动恢复扩展内页。两个 Area 共享项目时背景和记忆共享，内页视图状态独立。全局页或 Main 可无 projectId，不能退回用 areaId 猜测。
@@ -56,7 +56,7 @@ ctx.slots.inject('workbench.editor.session', () => ctx.slots.register({
     moduleId: 'workbench.editor-example',
     apiVersion: 1,
     editorIds: ['workbench.example'],
-    coreCompatibility: '>=0.1.1 <0.1.2',
+    coreCompatibility: '>=0.1.1 <0.1.3',
     dshGeneration: '0.2.2-rc.3',
   } } }),
 }, Editor))

@@ -5,7 +5,7 @@ export const WORKBENCH_LEGACY_PACKAGE_NAME = '@dsh-workbench/core'
 export function isWorkbenchCorePackageName(value: unknown): value is typeof WORKBENCH_PACKAGE_NAME | typeof WORKBENCH_LEGACY_PACKAGE_NAME {
   return value === WORKBENCH_PACKAGE_NAME || value === WORKBENCH_LEGACY_PACKAGE_NAME
 }
-export const WORKBENCH_CORE_VERSION = '0.1.2-0.1.1.1'
+export const WORKBENCH_CORE_VERSION = '0.1.2'
 export const WORKBENCH_SUITE_VERSION = '0.2.0-rc.4'
 export const WORKBENCH_DSH_GENERATION = '0.2.2-rc.3'
 export const WORKBENCH_UPSTREAM_COMMIT = 'ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c'

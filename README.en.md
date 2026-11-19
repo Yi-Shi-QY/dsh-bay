@@ -51,7 +51,7 @@ For example, start with a template for a recurring task, add the missing tools a
 
 ## Scope
 
-For Bay `v0.1.2`, the Core preview package is `dsh-bay@0.1.2-0.1.1.1`. It declares compatibility with DSH `>=0.2.2-rc.3 <0.2.3` and was tested on `0.2.2-rc.3`. Bay runs on DSH-provided Host, Agent, tool and plugin-management services.
+The `dsh-bay@0.1.2` Core package declares compatibility with DSH `>=0.2.2-rc.3 <0.2.3` and was tested on `0.2.2-rc.3`. Bay runs on DSH-provided Host, Agent, tool and plugin-management services.
 
 Bay does not promise compatibility with every DSH version, third-party plugin, cross-generation migration, public internet collaboration or every model provider. LAN sharing is a controlled beta capability. Review a full package before sharing it: it can include project files, attachments and restorable conversation history. Share only data you are allowed to distribute, and never include credentials or grant Host control through a package.
 
@@ -63,7 +63,7 @@ Requirements: Node.js `>=24.9.0`, pnpm `11.28.5` and a compatible DSH Host. From
     pnpm verify
     pnpm pack:core
 
-The Core artifact is written to `releases/0.1.2-0.1.1.1/dsh-bay-0.1.2-0.1.1.1.tgz`. Install the `.tgz` in an isolated DSH Profile through DSH's native Plugin Manager, then follow the [Chinese user guide](docs/USER-GUIDE.zh-CN.md) for the first workbench, template and sharing exercise. This builds a local preview package; it does not publish it.
+The Core artifact is written to `releases/0.1.2/dsh-bay-0.1.2.tgz`. Install the `.tgz` in an isolated DSH Profile through DSH's native Plugin Manager, then follow the [Chinese user guide](docs/USER-GUIDE.zh-CN.md) for the first workbench, template and sharing exercise. This builds a local package; it does not publish it.
 
 If you are evaluating the product first, start with the [project handbook](docs/PROJECT-HANDBOOK.zh-CN.md). If you want to build extensions, read the [Creator Skill](packages/workbench-core/presets/workbench-creator/skills/workbench-extension-development/SKILL.md).
 
